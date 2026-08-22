@@ -2,6 +2,9 @@
 
 > [简体中文](README.zh-CN.md)
 
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
+[![AstrBot Plugin](https://img.shields.io/badge/AstrBot-Plugin-7c3aed.svg)](https://astrbot.app)
+
 Star Feather Tarot is an AI-powered tarot divination plugin for [AstrBot](https://astrbot.app). All 78 cards are built in, with official card art rendering, AI deep interpretation, and a built-in card meaning fallback. No external image resources required.
 
 ---
