@@ -80,6 +80,7 @@ Configure in the AstrBot plugin management UI:
 - Card database fully embedded in `tarot_data.py`; card art in `assets/` (78 official card faces + official card back `Extra/背景.webp`; stored as compressed WebP, loader auto-compatible with .png)
 - `card_render.py` composes the image: official card back cover-filled and dimmed (brightness 0.62) as background, unified white-border card style, reversed cards rotated 180°
 - Title & position labels use dark navy capsules; info bar shows upright/reversed (gold/red) + card name + keyword meanings
+- Fonts are loaded from the bundled Noto Sans SC subset (`fonts/`, SIL OFL 1.1) first, then common system fonts (Windows / macOS / Linux) — rendering looks identical across platforms
 - Cards drawn without replacement from 78, upright/reversed 50/50
 - `/` prefix required in private chats; group @ mention works (`_require_prefix`)
 - AI interpretation via `context.get_using_provider().text_chat()`, auto-falls back to local meanings on error

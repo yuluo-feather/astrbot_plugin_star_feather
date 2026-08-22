@@ -229,7 +229,7 @@ class StarTarot:
                 await asyncio.sleep(SEND_INTERVAL)
 
 
-@register("star_feather", "羽落", "星羽塔罗：78张塔罗牌 AI 占卜与深度解读，官方素材渲染牌面图", "0.4.5")
+@register("star_feather", "羽落", "星羽塔罗：78张塔罗牌 AI 占卜与深度解读，官方素材渲染牌面图", "0.4.6")
 class StarFeatherPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         super().__init__(context)

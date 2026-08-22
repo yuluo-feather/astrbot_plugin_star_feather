@@ -30,6 +30,7 @@ INNER_W = CARD_OUT_W - PAD_X * 2 # 内部牌面图宽
 INFO_H = 104                     # 卡片底部信息区高
 
 _ASSET_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+_FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
 _DIRS = {"wands": "Wands", "cups": "Cups", "swords": "Swords", "pentacles": "Pentacles"}
 _ACE_SEP = {"wands": "_", "cups": "-", "swords": "_", "pentacles": "-"}
 _ACE_EN = {"wands": "WANDS", "cups": "CUPS", "swords": "SWORDS", "pentacles": "COINS"}
@@ -39,14 +40,30 @@ _FONT_CACHE = {}
 
 
 def _load_font(size: int, bold: bool = False):
+    """加载中文字体，优先级：内置字体(fonts/) > 系统字体 > 默认(可能缺中文字形)。
+
+    内置 Noto Sans SC 子集使渲染跨平台一致（Windows / Linux / macOS
+    均不会因系统缺中文字体而显示方块）。
+    """
     key = (size, bold)
     if key in _FONT_CACHE:
         return _FONT_CACHE[key]
     candidates = [
+        os.path.join(_FONT_DIR, "StarFeather-Bold.otf" if bold else "StarFeather-Regular.otf"),
+        # Windows
         r"C:\Windows\Fonts\msyhbd.ttc" if bold else r"C:\Windows\Fonts\msyh.ttc",
         r"C:\Windows\Fonts\msyh.ttc",
         r"C:\Windows\Fonts\simhei.ttf",
         r"C:\Windows\Fonts\simsun.ttc",
+        # macOS
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/STHeiti Light.ttc",
+        "/System/Library/Fonts/Hiragino Sans GB.ttc",
+        # Linux (常见发行版)
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
     ]
     font = None
     for path in candidates:
