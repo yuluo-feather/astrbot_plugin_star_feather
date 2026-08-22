@@ -1,7 +1,6 @@
-<div align="center"><table cellspacing="0" cellpadding="0"><tr>
-  <td valign="middle"><img src="https://raw.githubusercontent.com/yuluo-feather/astrbot_plugin_star_feather/main/logo_small.png" width="120" height="120" alt="Star Feather"/></td>
-  <td valign="middle"><h1 style="margin:0;">Star Feather 🪶</h1></td>
-</tr></table></div>
+<p align="center">
+  <img src="https://raw.githubusercontent.com/yuluo-feather/astrbot_plugin_star_feather/main/logo_small.png" width="110" height="110" align="middle"/> <font size="6"><b>Star Feather 🪶</b></font>
+</p>
 
 <p align="center">
   "The name is mine, and so is the reading. Hmph, not bad, right?" — Little Feather

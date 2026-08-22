@@ -1,7 +1,6 @@
-<div align="center"><table cellspacing="0" cellpadding="0"><tr>
-  <td valign="middle"><img src="https://raw.githubusercontent.com/yuluo-feather/astrbot_plugin_star_feather/main/logo_small.png" width="120" height="120" alt="星羽塔罗"/></td>
-  <td valign="middle"><h1 style="margin:0;">星羽塔罗 Star Feather 🪶</h1></td>
-</tr></table></div>
+<p align="center">
+  <img src="https://raw.githubusercontent.com/yuluo-feather/astrbot_plugin_star_feather/main/logo_small.png" width="110" height="110" align="middle"/> <font size="6"><b>星羽塔罗 Star Feather 🪶</b></font>
+</p>
 
 <p align="center">
   「名字是我起的，牌也是我解的。哼，还不错吧。」—— 小羽毛
