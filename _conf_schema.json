@@ -1,0 +1,20 @@
+{
+    "enable_ai": {
+        "description": "是否启用 AI 深度解读（关闭后仅使用本地牌义兜底）",
+        "type": "bool",
+        "default": true,
+        "hint": "开启后占卜结果会调用 LLM 深度解读；关闭则使用内置牌义。"
+    },
+    "forward_result": {
+        "description": "占卜结果以合并转发消息链发送（含牌面图）",
+        "type": "bool",
+        "default": false,
+        "hint": "开启后牌面图与逐段解读一起打包成一条合并转发消息（点开查看），避免连续多条消息刷屏；需适配器支持转发消息（如 NapCat/Lagrange）。关闭则图片单独发送、解读逐条分段发送。"
+    },
+    "segment_size": {
+        "description": "无结构解读文本的分段大小（字符数）",
+        "type": "int",
+        "default": 300,
+        "hint": "AI 解读按「每张牌一段 + 总结段」输出时按段发送，不受此限制；仅当解读文本没有结构化标记时，按该长度切分兜底。最小 50。"
+    }
+}

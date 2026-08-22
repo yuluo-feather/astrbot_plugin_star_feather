@@ -1,0 +1,11 @@
+name: astrbot_plugin_star_feather
+display_name: 星羽塔罗
+desc: 星羽塔罗：78张塔罗牌 AI 占卜与深度解读，官方素材渲染牌面图
+help: |
+  [/占卜 问题] 智能匹配牌阵并占卜（情感→恋羽十字，事业→羽镜，默认羽时三刻；经典名 单张问询/圣三角/恋人十字/时间之流 也认）
+  [/单抽] 快速抽一张牌看今日牌运（羽签）
+  [/占卜 帮助] 查看使用说明
+  注意：命令需带 / 前缀触发，私聊裸文本不响应（群聊 @ 机器人可触发）
+version: 0.4.6
+author: 羽落
+repo: https://github.com/yuluo-feather/astrbot_plugin_star_feather
