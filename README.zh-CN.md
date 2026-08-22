@@ -73,6 +73,8 @@
 2. 重启 AstrBot，或在插件管理界面中启用该插件
 3. 在聊天中发送 `/占卜 我的问题` 即可开始
 
+**依赖**：牌面渲染需要 [Pillow](https://pypi.org/project/pillow/)（AstrBot 环境通常自带；若缺失可执行 `pip install -r requirements.txt`）。
+
 ---
 
 ## 技术实现

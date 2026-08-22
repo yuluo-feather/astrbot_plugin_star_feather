@@ -71,6 +71,8 @@ Configure in the AstrBot plugin management UI:
 2. Restart AstrBot, or enable the plugin in the plugin management UI
 3. Send `/占卜 我的问题` in chat to begin
 
+**Dependency**: [Pillow](https://pypi.org/project/pillow/) is required for card art rendering (usually bundled with AstrBot; if missing, run `pip install -r requirements.txt`).
+
 ---
 
 ## Technical Details
