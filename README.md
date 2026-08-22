@@ -15,7 +15,7 @@ Star Feather Tarot is an AI-powered tarot divination plugin for [AstrBot](https:
 - 🃏 **Four spreads**: Feather Sign (1 card), Feather Hour Three (past / present / future), Feather Mirror (situation / obstacle / advice), Lovers' Feather Cross (4 cards) — classic names (Single Question / Time Flow / Three-Card Timeline / Three-Card Spread / Lovers' Cross) are also recognized
 - 🧠 **Smart spread selection**: scans the question keywords and picks the best spread automatically
 - 🤖 **AI deep interpretation**: uses your current LLM provider, one paragraph per card plus a summary
-- 🎴 **Official card art**: all 78 card faces + official card back included in `assets/` (compressed WebP, auto-compatible with .png), unified white-border card style, reversed cards rotated 180°
+- 🎴 **Official card art**: all 78 card faces + official card back included in `assets/` (WebP format, auto-compatible with .png), unified white-border card style, reversed cards rotated 180°
 - 🛡️ **Double fallback**: AI failure falls back to built-in meanings; image rendering failure falls back to plain text
 
 ---
@@ -102,7 +102,7 @@ Configure in the AstrBot plugin management UI:
 
 ## Technical Details
 
-- Card database fully embedded in `tarot_data.py`; card art in `assets/` (78 official card faces + official card back `Extra/背景.webp`; stored as compressed WebP, loader auto-compatible with .png)
+- Card database fully embedded in `tarot_data.py`; card art in `assets/` (78 official card faces + official card back `Extra/背景.webp`; stored as WebP, loader auto-compatible with .png)
 - `card_render.py` composes the image: official card back cover-filled and dimmed (brightness 0.62) as background, unified white-border card style, reversed cards rotated 180°
 - Title & position labels use dark navy capsules; info bar shows upright/reversed (gold/red) + card name + keyword meanings
 - Fonts are loaded from the bundled Noto Sans SC subset (`fonts/`, SIL OFL 1.1) first, then common system fonts (Windows / macOS / Linux) — rendering looks identical across platforms
