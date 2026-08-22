@@ -5,7 +5,7 @@
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
 [![AstrBot Plugin](https://img.shields.io/badge/AstrBot-Plugin-7c3aed.svg)](https://astrbot.app)
 
-> 「名字是我起的，牌也是我解的。哼，还不错吧。」—— 小羽毛
+> 「名字是我起的，牌也是我解的。哼，还不错吧。」—— 羽落
 
 基于 AstrBot 框架的塔罗占卜插件。78 张牌全内置，幻星集官方素材渲染牌面，AI 深度解读 + 本地牌义兜底，不依赖任何外部图片资源。
 
