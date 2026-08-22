@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-  <img src="https://img.shields.io/badge/version-v0.4.7-f8a5c2" alt="v0.4.7"/>
+  <img src="https://img.shields.io/badge/version-v0.4.8-f8a5c2" alt="v0.4.8"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -127,7 +127,7 @@ Configure in the AstrBot plugin management UI:
 
 ## 📜 Changelog
 
-See [CHANGELOG.md](https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/CHANGELOG.md) for the full version history. Latest (v0.4.7): bundled Noto Sans SC subset font for consistent cross-platform Chinese rendering, `@register` version fix, ruff lint fixes, logo & short_desc, requirements.txt, AGPL-3.0 license, bilingual READMEs.
+See [CHANGELOG.md](https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/CHANGELOG.md) for the full version history. Latest (v0.4.8): brand-new "Pastel Feather Tarot" icon, fully redesigned README layout (logo + title, pink badges, table of contents, absolute links for consistent rendering across GitHub / AstrBot panel / market).
 
 ---
 

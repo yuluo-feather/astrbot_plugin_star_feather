@@ -1,5 +1,10 @@
 # 更新日志
 
+#### v0.4.8
+
+- 全新插件图标：粉色羽毛 × 太阳塔罗牌 × 金星（Pastel Feather Tarot），市场卡片与本机列表同步更换
+- README 全新排版：Logo + 标题横排居中、粉色徽章（License / AstrBot / 版本）、目录导航、全部资源改为 GitHub 绝对链接（GitHub / AstrBot 面板 / 市场渲染一致）
+
 #### v0.4.7
 
 - 内置 Noto Sans SC 子集字体（OFL 开源许可）：跨平台渲染中文一致，Linux/macOS 不再回退方块字

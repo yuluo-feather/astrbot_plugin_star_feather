@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-  <img src="https://img.shields.io/badge/version-v0.4.7-f8a5c2" alt="v0.4.7"/>
+  <img src="https://img.shields.io/badge/version-v0.4.8-f8a5c2" alt="v0.4.8"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -126,6 +126,11 @@
 - 关键词 → 牌阵匹配采用优先顺序：经典名（单张问询 / 时间之流 / 三张时间线 / 圣三角 / 恋人十字）与新名均纳入关键词，未命中时按问题内容推断，兜底为「羽时三刻」
 
 ## 📜 更新记录
+
+#### v0.4.8
+
+- 全新插件图标：粉色羽毛 × 太阳塔罗牌 × 金星（Pastel Feather Tarot），市场卡片与本机列表同步更换
+- README 全新排版：Logo + 标题横排居中、粉色徽章（License / AstrBot / 版本）、目录导航、全部资源改为 GitHub 绝对链接（GitHub / AstrBot 面板 / 市场渲染一致）
 
 #### v0.4.7
 
