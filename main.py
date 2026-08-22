@@ -235,7 +235,7 @@ class StarFeatherPlugin(Star):
         super().__init__(context)
         self.tarot = StarTarot(context, config)
 
-    @command("占卜")
+    @command("占卜", desc="78张塔罗牌 AI 占卜与深度解读")
     async def divine(self, event: AstrMessageEvent, text: str = ""):
         if not self.tarot._require_prefix(event):
             yield event.plain_result("提示：触发占卜请带 / 前缀，例如「/占卜 我和她感情如何」")
@@ -262,7 +262,7 @@ class StarFeatherPlugin(Star):
             logger.error(f"占卜失败: {e}")
             yield event.plain_result(f"哼，这场占卜断了：{e}。牌灵今天状态不好，换个时候再来问。")
 
-    @command("单抽")
+    @command("单抽", desc="随机抽取一张塔罗牌并解读")
     async def single(self, event: AstrMessageEvent, text: str = ""):
         if not self.tarot._require_prefix(event):
             yield event.plain_result("提示：触发单抽请带 / 前缀，例如「/单抽」")
