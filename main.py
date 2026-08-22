@@ -8,12 +8,12 @@ import sys
 # 插件被动态 __import__ 加载时不在 sys.path 中，需显式加入插件目录
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from card_render import render_cards
+from tarot_data import SUIT_CN, TAROT_CARDS
+
 from astrbot.api.all import *
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.message_components import At, Image, Node, Nodes, Plain
-
-from tarot_data import TAROT_CARDS, SUIT_CN
-from card_render import render_cards
 
 logger = logging.getLogger(__name__)
 
@@ -185,9 +185,11 @@ class StarTarot:
         while len(text) > size:
             cut = text[:size].rfind("\n")
             if cut <= 0:  # 无换行或换行在最前：硬切
-                parts.append(text[:size]); text = text[size:]
+                parts.append(text[:size])
+                text = text[size:]
             else:  # 在换行处断开（含换行符），保证拼接可还原
-                parts.append(text[: cut + 1]); text = text[cut + 1:]
+                parts.append(text[: cut + 1])
+                text = text[cut + 1:]
         return parts + [text]
 
     def _split_sections(self, text: str) -> list[str]:
@@ -236,10 +238,13 @@ class StarFeatherPlugin(Star):
     @command("占卜")
     async def divine(self, event: AstrMessageEvent, text: str = ""):
         if not self.tarot._require_prefix(event):
-            yield event.plain_result("提示：触发占卜请带 / 前缀，例如「/占卜 我和她感情如何」"); event.stop_event(); return
+            yield event.plain_result("提示：触发占卜请带 / 前缀，例如「/占卜 我和她感情如何」")
+            event.stop_event()
+            return
         try:
             if "帮助" in text or "help" in text.lower():
-                yield event.plain_result(self._help()); return
+                yield event.plain_result(self._help())
+                return
             formation = self.tarot._select_formation(text)
             clean = self.tarot._strip_alias(text)  # 阵名剥离后再送 AI，语义更纯净
             positions, picks = self.tarot._draw(formation)
@@ -260,7 +265,9 @@ class StarFeatherPlugin(Star):
     @command("单抽")
     async def single(self, event: AstrMessageEvent, text: str = ""):
         if not self.tarot._require_prefix(event):
-            yield event.plain_result("提示：触发单抽请带 / 前缀，例如「/单抽」"); event.stop_event(); return
+            yield event.plain_result("提示：触发单抽请带 / 前缀，例如「/单抽」")
+            event.stop_event()
+            return
         try:
             positions, picks = self.tarot._draw("羽签")
             img = self.tarot._render_image("羽签", positions, picks)
