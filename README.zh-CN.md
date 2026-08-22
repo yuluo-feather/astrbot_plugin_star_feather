@@ -1,17 +1,40 @@
-# 星羽塔罗 Star Feather
+<table align="center" cellspacing="0" cellpadding="0"><tr>
+  <td valign="middle"><img src="https://raw.githubusercontent.com/yuluo-feather/astrbot_plugin_star_feather/main/logo.png" width="120" height="120" alt="星羽塔罗"/></td>
+  <td valign="middle"><h1 style="margin:0;">星羽塔罗 Star Feather 🪶</h1></td>
+</tr></table>
 
-> [English](README.md)
+<p align="center">
+  「名字是我起的，牌也是我解的。哼，还不错吧。」—— 小羽毛
+</p>
 
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
-[![AstrBot Plugin](https://img.shields.io/badge/AstrBot-Plugin-7c3aed.svg)](https://astrbot.app)
+<p align="center">
+  <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
+  <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
+  <img src="https://img.shields.io/badge/version-v0.4.7-f8a5c2" alt="v0.4.7"/>
+</p>
 
-> 「名字是我起的，牌也是我解的。哼，还不错吧。」—— 小羽毛
+<p align="center">🪶 ✨ 🌸 💫 🃏</p>
 
-基于 AstrBot 框架的塔罗占卜插件。78 张牌全内置，幻星集官方素材渲染牌面，AI 深度解读 + 本地牌义兜底，不依赖任何外部图片资源。
+> [English](https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/README.md) | [简体中文](https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/README.zh-CN.md)
 
 ---
 
-## 功能特点
+## 📖 目录
+
+- 🌸 [功能特点](#功能特点)
+- 🃏 [命令手册](#命令手册)
+- 🪶 [牌阵说明](#牌阵说明)
+- 🎛️ [配置项](#配置项)
+- 📦 [安装方法](#安装方法)
+- 🤍 [技术实现](#技术实现)
+- 📜 [更新记录](#更新记录)
+- 🌙 [注意事项](#注意事项)
+
+---
+
+🎀 一款基于 AstrBot 的塔罗占卜小插件。78 张牌全内置，幻星集官方素材渲染牌面，AI 深度解读 + 本地牌义兜底，不依赖任何外部图片资源。
+
+## 🌸 功能特点
 
 - 🔮 **78 张牌全内置**：22 张大阿卡纳 + 56 张小阿卡纳（权杖 / 圣杯 / 宝剑 / 星币），每张牌都有中英文名与正逆位牌义
 - 🃏 **四种牌阵**：羽签、羽时三刻、羽镜、恋羽十字——经典名（单张问询 / 时间之流 / 圣三角 / 恋人十字）输入同样识别
@@ -20,9 +43,7 @@
 - 🎴 **幻星集官方素材**：78 张牌面 + 官方牌背全部内置（assets/），白边卡牌统一风格，逆位翻转呈现
 - 🛡️ **双重兜底**：AI 解读失败回退内置牌义；图片渲染失败回退纯文本牌面
 
----
-
-## 命令手册
+## 🃏 命令手册
 
 | 功能 | 命令 | 描述 |
 |------|------|------|
@@ -30,7 +51,7 @@
 | 🃏 快速单抽 | `/单抽` | 快速抽一张牌（羽签），看看今日牌运 |
 | ❓ 帮助 | `/占卜 帮助` / `/占卜 help` | 查看使用说明 |
 
-> **触发规则**：私聊中命令必须带 `/` 前缀（如 `/占卜`），否则不响应并提示；群聊中 `@机器人 占卜 …` 可直接触发。裸文本（不带 `/`）不会触发。
+> 💡 **触发规则**：私聊中命令必须带 `/` 前缀（如 `/占卜`），否则不响应并提示；群聊中 `@机器人 占卜 …` 可直接触发。裸文本（不带 `/`）不会触发。
 
 ### 示例
 
@@ -40,9 +61,7 @@
 
 触发流程：智能匹配「恋羽十字」牌阵 → 洗牌提示 → 输出四张牌及正逆位牌义 → AI 深度解读。
 
----
-
-## 牌阵说明
+## 🪶 牌阵说明
 
 | 牌阵 | 张数 | 牌位 | 触发方式 |
 |------|------|------|----------|
@@ -51,11 +70,9 @@
 | 羽镜 | 3 | 现状 / 阻碍 / 建议 | 问题含「事业 / 工作 / 面试 / 学业 / 考试 / 考研 / 升职 / 圣三角」 |
 | 恋羽十字 | 4 | 你 / 对方 / 关系现状 / 未来走向 | 问题含「情感 / 爱情 / 恋爱 / 分手 / 复合 / 恋人十字」等，或含「他 / 她 / 我们 / 喜欢我吗 / 还爱」 |
 
-> 经典名（单张问询 / 时间之流 / 三张时间线 / 圣三角 / 恋人十字）在关键词里依然认得，不用担心叫不惯。
+> 💫 经典名（单张问询 / 时间之流 / 三张时间线 / 圣三角 / 恋人十字）在关键词里依然认得，不用担心叫不惯。
 
----
-
-## 配置项
+## 🎛️ 配置项
 
 在 AstrBot 插件管理界面中配置：
 
@@ -65,18 +82,16 @@
 | `forward_result` | bool | `false` | 占卜结果以**合并转发消息链**发送。开启后牌面图与逐段解读一起打包成一条转发消息（点开查看），不刷屏；需适配器支持转发消息（如 NapCat / Lagrange）。 |
 | `segment_size` | int | `300` | 无结构解读文本的分段大小（字符数）。解读按「每张牌一段 + 总结段」输出时按段发送、不受此限制；仅无结构化标记时按此长度切分兜底。最小 50。 |
 
----
+## 📦 安装方法
 
-## 安装方法
-
-### 方式一：通过 AstrBot 插件市场安装（推荐）
+### 🌷 方式一：通过 AstrBot 插件市场安装（推荐）
 
 1. 打开 AstrBot 管理面板，进入「插件市场 / 安装插件」
 2. 在市场中搜索「星羽塔罗」，点击「安装」
 3. 等待插件下载并自动安装依赖
 4. 安装完成后，在「AstrBot 插件」页面找到「星羽塔罗」，点击「重载插件」
 
-### 方式二：通过 GitHub 仓库地址安装
+### 🌷 方式二：通过 GitHub 仓库地址安装
 
 1. 打开 AstrBot 管理面板，进入「插件市场 / 安装插件」
 2. 选择「从 GitHub 仓库地址安装」，填入：
@@ -86,7 +101,7 @@
 3. 点击安装，等待插件下载并自动安装依赖
 4. 安装完成后，在「AstrBot 插件」页面找到「星羽塔罗」，点击「重载插件」
 
-### 方式三：手动安装
+### 🌷 方式三：手动安装
 
 1. 将本仓库克隆或下载到 AstrBot 的 `data/plugins/` 目录下，目录名保持为 `astrbot_plugin_star_feather`：
 
@@ -100,9 +115,7 @@
 
 **依赖**：牌面渲染需要 [Pillow](https://pypi.org/project/pillow/)（AstrBot 环境通常自带；若缺失可执行 `pip install -r requirements.txt`）。
 
----
-
-## 技术实现
+## 🤍 技术实现
 
 - 牌库完整内置于 `tarot_data.py`，牌面图片素材位于 `assets/`（幻星集官方 78 张牌 + 官方牌背 `Extra/背景.webp`；素材以 WebP 格式存储，代码加载时自动兼容 .png / .webp）
 - `card_render.py` 负责拼图渲染：官方牌背 cover 铺满并压暗（亮度 0.62）作为画布背景，所有牌统一白边卡牌样式（素材底色差异不影响观感），逆位整张旋转 180°
@@ -113,9 +126,7 @@
 - AI 解读通过 `context.get_using_provider().text_chat()` 调用当前配置的 LLM，异常时自动降级为本地牌义
 - 关键词 → 牌阵匹配采用优先顺序：经典名（单张问询 / 时间之流 / 三张时间线 / 圣三角 / 恋人十字）与新名均纳入关键词，未命中时按问题内容推断，兜底为「羽时三刻」
 
----
-
-## 更新记录
+## 📜 更新记录
 
 #### v0.4.7
 
@@ -200,7 +211,7 @@
 
 ---
 
-## 注意事项
+## 🌙 注意事项
 
 - AI 解读依赖当前 AstrBot 配置的 LLM Provider，未配置或调用失败时自动使用本地牌义
-- 占卜结果仅供娱乐参考，请理性看待
+- 占卜结果仅供娱乐参考，请理性看待 🍀
