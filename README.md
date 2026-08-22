@@ -90,7 +90,7 @@ Configure in the AstrBot plugin management UI:
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for the full version history. Latest (v0.4.6): randomized shuffle hint pool; v0.4.5: strip spread names from AI prompt; @all detection compatible with both At(qq="all") and AtAll.
+See [CHANGELOG.md](CHANGELOG.md) for the full version history. Latest (v0.4.7): WebP-compressed assets (229MB → 9.6MB, under the 16MB market limit), bundled Noto Sans SC subset font for consistent cross-platform Chinese rendering, `@register` version fix, ruff lint fixes, logo & short_desc, requirements.txt, AGPL-3.0 license, bilingual READMEs.
 
 ---
 

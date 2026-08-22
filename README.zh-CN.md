@@ -92,6 +92,15 @@
 
 ## 更新记录
 
+#### v0.4.7
+
+- 素材压缩为 WebP（50% 尺寸 · q85），包体积 229MB → 9.6MB，满足市场 16MB 限制
+- 内置 Noto Sans SC 子集字体（OFL 开源许可）：跨平台渲染中文一致，Linux/macOS 不再回退方块字
+- 修复 `@register` 注册版本号与 `VERSION` 不一致的问题（0.4.5 → 0.4.7）
+- 代码通过 ruff 规范检查（import 排序、单行多语句拆分等）
+- 新增 `logo.png` 插件图标、metadata `short_desc` 短描述与 tags 标签
+- 新增 `requirements.txt`（Pillow 依赖声明）、AGPL-3.0 许可证、README 中英双语
+
 #### v0.4.6
 
 - 洗牌提示改为**随机文案池**：从内置多条文案中随机选取，不再固定一句
