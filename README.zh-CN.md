@@ -69,8 +69,33 @@
 
 ## 安装方法
 
-1. 将 `astrbot_plugin_star_feather` 文件夹放入 AstrBot 的 `data/plugins/` 目录
-2. 重启 AstrBot，或在插件管理界面中启用该插件
+### 方式一：通过 AstrBot 插件市场安装（推荐）
+
+1. 打开 AstrBot 管理面板，进入「插件市场 / 安装插件」
+2. 在市场中搜索「星羽塔罗」，点击「安装」
+3. 等待插件下载并自动安装依赖
+4. 安装完成后，在「AstrBot 插件」页面找到「星羽塔罗」，点击「重载插件」
+
+### 方式二：通过 GitHub 仓库地址安装
+
+1. 打开 AstrBot 管理面板，进入「插件市场 / 安装插件」
+2. 选择「从 GitHub 仓库地址安装」，填入：
+
+   `https://github.com/yuluo-feather/astrbot_plugin_star_feather`
+
+3. 点击安装，等待插件下载并自动安装依赖
+4. 安装完成后，在「AstrBot 插件」页面找到「星羽塔罗」，点击「重载插件」
+
+### 方式三：手动安装
+
+1. 将本仓库克隆或下载到 AstrBot 的 `data/plugins/` 目录下，目录名保持为 `astrbot_plugin_star_feather`：
+
+   ```bash
+   cd AstrBot/data/plugins
+   git clone https://github.com/yuluo-feather/astrbot_plugin_star_feather.git
+   ```
+
+2. 重启 AstrBot，插件会自动加载
 3. 在聊天中发送 `/占卜 我的问题` 即可开始
 
 **依赖**：牌面渲染需要 [Pillow](https://pypi.org/project/pillow/)（AstrBot 环境通常自带；若缺失可执行 `pip install -r requirements.txt`）。

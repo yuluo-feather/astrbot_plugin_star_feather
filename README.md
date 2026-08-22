@@ -67,8 +67,33 @@ Configure in the AstrBot plugin management UI:
 
 ## Installation
 
-1. Put the `astrbot_plugin_star_feather` folder into AstrBot's `data/plugins/` directory
-2. Restart AstrBot, or enable the plugin in the plugin management UI
+### Option 1: Install from AstrBot Plugin Market (Recommended)
+
+1. Open the AstrBot dashboard and go to "Plugin Market / Install Plugin"
+2. Search for "Star Feather Tarot" in the market and click "Install"
+3. Wait for the plugin to download and install dependencies automatically
+4. After installation, find "Star Feather Tarot" in the "AstrBot Plugins" page and click "Reload Plugin"
+
+### Option 2: Install from GitHub Repository URL
+
+1. Open the AstrBot dashboard and go to "Plugin Market / Install Plugin"
+2. Select "Install from GitHub repository URL" and enter:
+
+   `https://github.com/yuluo-feather/astrbot_plugin_star_feather`
+
+3. Click install and wait for the plugin to download and install dependencies automatically
+4. After installation, find "Star Feather Tarot" in the "AstrBot Plugins" page and click "Reload Plugin"
+
+### Option 3: Manual Installation
+
+1. Clone or download this repository into AstrBot's `data/plugins/` directory, keeping the directory name as `astrbot_plugin_star_feather`:
+
+   ```bash
+   cd AstrBot/data/plugins
+   git clone https://github.com/yuluo-feather/astrbot_plugin_star_feather.git
+   ```
+
+2. Restart AstrBot, the plugin will load automatically
 3. Send `/占卜 我的问题` in chat to begin
 
 **Dependency**: [Pillow](https://pypi.org/project/pillow/) is required for card art rendering (usually bundled with AstrBot; if missing, run `pip install -r requirements.txt`).
