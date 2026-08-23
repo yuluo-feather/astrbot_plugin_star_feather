@@ -17,7 +17,7 @@ from astrbot.api.message_components import At, Image, Node, Nodes, Plain
 
 logger = logging.getLogger(__name__)
 
-VERSION = "0.4.8"
+VERSION = "0.4.9"
 
 # 常量：集中管理散落的默认值 / 间隔
 DEFAULT_SEGMENT_SIZE = 300   # 无标记文本兜底分段长度
@@ -229,7 +229,7 @@ class StarTarot:
                 await asyncio.sleep(SEND_INTERVAL)
 
 
-@register("star_feather", "羽落", "星羽塔罗：78张塔罗牌 AI 占卜与深度解读，官方素材渲染牌面图", "0.4.8")
+@register("star_feather", "羽落", "星羽塔罗：78张塔罗牌 AI 占卜与深度解读，官方素材渲染牌面图", "0.4.9")
 class StarFeatherPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         super().__init__(context)
@@ -244,6 +244,7 @@ class StarFeatherPlugin(Star):
         try:
             if "帮助" in text or "help" in text.lower():
                 yield event.plain_result(self._help())
+                event.stop_event()
                 return
             formation = self.tarot._select_formation(text)
             clean = self.tarot._strip_alias(text)  # 阵名剥离后再送 AI，语义更纯净

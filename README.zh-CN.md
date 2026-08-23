@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-  <img src="https://img.shields.io/badge/version-v0.4.8-f8a5c2" alt="v0.4.8"/>
+  <img src="https://img.shields.io/badge/version-v0.4.9-f8a5c2" alt="v0.4.9"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -112,20 +112,30 @@
 2. 重启 AstrBot，插件会自动加载
 3. 在聊天中发送 `/占卜 我的问题` 即可开始
 
-**依赖**：牌面渲染需要 [Pillow](https://pypi.org/project/pillow/)（AstrBot 环境通常自带；若缺失可执行 `pip install -r requirements.txt`）。
+**依赖**：牌面渲染需要 [Pillow](https://pypi.org/project/pillow/)（AstrBot 环境通常自带；若缺失可执行 `pip install -r requirements.txt`）。字体缺字回退校验需要 [fonttools](https://pypi.org/project/fonttools/)，已一并列入 `requirements.txt`。
 
 ## 🤍 技术实现
 
 - 牌库完整内置于 `tarot_data.py`，牌面图片素材位于 `assets/`（幻星集官方 78 张牌 + 官方牌背 `Extra/背景.webp`；素材以 WebP 格式存储，代码加载时自动兼容 .png / .webp）
 - `card_render.py` 负责拼图渲染：官方牌背 cover 铺满并压暗（亮度 0.62）作为画布背景，所有牌统一白边卡牌样式（素材底色差异不影响观感），逆位整张旋转 180°
 - 标题与牌位采用深藏青胶囊标签，信息条标注正逆位（金/红）+ 牌名 + 牌义关键词
-- 字体优先加载内置 Noto Sans SC 子集（`fonts/`，SIL OFL 1.1 开源许可），其次回退系统常见字体（Windows / macOS / Linux），跨平台渲染效果一致
+- 字体优先加载内置 Noto Sans SC 子集（`fonts/`，SIL OFL 1.1 开源许可；文件名为品牌化命名 `StarFeather-*.otf`，内容即 Noto Sans SC 子集），其次回退系统常见字体（Windows / macOS / Linux），跨平台渲染效果一致
+- 渲染前对文本做字形覆盖校验：内置子集缺字时自动回退到能覆盖该文本的系统字体（需安装 `fonttools`，已列入 requirements）。当前牌库文案全覆盖子集，此机制是为未来新增生僻字牌义兜底
 - 每次抽牌从 78 张中无放回随机抽取，正逆位各 50% 概率
 - 命令触发带有 `/` 前缀校验：私聊裸文本拦截并提示，群聊 @ 触发放行（`_require_prefix`）
 - AI 解读通过 `context.get_using_provider().text_chat()` 调用当前配置的 LLM，异常时自动降级为本地牌义
 - 关键词 → 牌阵匹配采用优先顺序：经典名（单张问询 / 时间之流 / 三张时间线 / 圣三角 / 恋人十字）与新名均纳入关键词，未命中时按问题内容推断，兜底为「羽时三刻」
+- 纯逻辑单测位于 `tests/`（pytest，27 例）：选阵、别名剥离、分段、抽牌、字体覆盖与渲染冒烟；运行 `python -m pytest tests` 即可验证
 
 ## 📜 更新记录
+
+#### v0.4.9
+
+- 修复：误提交的 `commit_msg.txt` 移出版本库并加入 `.gitignore`；清理 4 个冗余「皇后」素材副本（与「王后」字节完全相同），包体瘦身约 0.47MB
+- 修复：`/占卜 帮助` 分支补齐 `stop_event()`，与其余分支行为一致
+- 字体缺字回退：渲染前用 fonttools 校验文本字形覆盖，内置子集缺字时自动回退到能覆盖的系统字体（新增依赖 `fonttools>=4.0`）
+- 新增 `tests/` 单测（pytest，27 例）：选阵、别名剥离、分段、抽牌、字体覆盖与渲染冒烟
+- 文档补充：字体文件为品牌化命名（`StarFeather-*.otf`，实为 Noto Sans SC 子集）及缺字回退机制说明
 
 #### v0.4.8
 

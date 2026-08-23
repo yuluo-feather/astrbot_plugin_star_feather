@@ -37,18 +37,12 @@ _ACE_EN = {"wands": "WANDS", "cups": "CUPS", "swords": "SWORDS", "pentacles": "C
 
 # ---------- 字体 ----------
 _FONT_CACHE = {}
+_FONT_CMAP = {}  # path -> set(ord) | None（无法解析时放行）
 
 
-def _load_font(size: int, bold: bool = False):
-    """加载中文字体，优先级：内置字体(fonts/) > 系统字体 > 默认(可能缺中文字形)。
-
-    内置 Noto Sans SC 子集使渲染跨平台一致（Windows / Linux / macOS
-    均不会因系统缺中文字体而显示方块）。
-    """
-    key = (size, bold)
-    if key in _FONT_CACHE:
-        return _FONT_CACHE[key]
-    candidates = [
+def _font_candidates(bold: bool) -> list[str]:
+    # 优先级：内置字体(fonts/) > 系统字体 > 默认(可能缺中文字形)
+    return [
         os.path.join(_FONT_DIR, "StarFeather-Bold.otf" if bold else "StarFeather-Regular.otf"),
         # Windows
         r"C:\Windows\Fonts\msyhbd.ttc" if bold else r"C:\Windows\Fonts\msyh.ttc",
@@ -65,16 +59,55 @@ def _load_font(size: int, bold: bool = False):
         "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
         "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
     ]
-    font = None
-    for path in candidates:
-        if os.path.exists(path):
-            try:
-                font = ImageFont.truetype(path, size)
-                break
-            except Exception:
-                continue
-    if font is None:
-        font = ImageFont.load_default()
+
+
+def _font_covers(font, text: str) -> bool:
+    """校验字形覆盖：内置子集命中后仍检查文本中每个字符是否在 cmap 内，
+    缺字时回退链继续找下一个候选（避免未来新增生僻字牌义变豆腐块）。
+    无 fontTools / 无法解析时保守放行。"""
+    path = getattr(font, "path", None)
+    if not path or not text:
+        return True
+    cmap = _FONT_CMAP.get(path)
+    if cmap is None:
+        try:
+            from fontTools.ttLib import TTFont
+            tf = TTFont(path, lazy=True)
+            cmap = set()
+            for table in tf["cmap"].tables:
+                if table.isUnicode():
+                    cmap.update(table.cmap.keys())
+            tf.close()
+        except Exception:
+            cmap = None  # 解析失败/无 fontTools：视为全覆盖，不拦截
+        _FONT_CMAP[path] = cmap
+    if cmap is None:
+        return True
+    return all(ord(c) in cmap for c in text if not c.isspace())
+
+
+def _load_font(size: int, bold: bool = False, text: str = None):
+    """加载中文字体，优先级：内置字体(fonts/) > 系统字体 > 默认(可能缺中文字形)。
+
+    内置 Noto Sans SC 子集使渲染跨平台一致（Windows / Linux / macOS
+    均不会因系统缺中文字体而显示方块）。传入 text 时做字形覆盖校验，
+    内置子集缺字自动回退到能覆盖文本的系统字体。
+    """
+    key = (size, bold)
+    font = _FONT_CACHE.get(key)
+    if font is not None and (text is None or _font_covers(font, text)):
+        return font
+    for path in _font_candidates(bold):
+        if not os.path.exists(path):
+            continue
+        try:
+            font = ImageFont.truetype(path, size)
+        except Exception:
+            continue
+        if text is None or _font_covers(font, text):
+            _FONT_CACHE[key] = font
+            return font
+    font = ImageFont.load_default()
     _FONT_CACHE[key] = font
     return font
 
@@ -222,13 +255,13 @@ def _draw_card(canvas, x, y, card, upright) -> int:
     tag = "正位" if upright else "逆位"
     tag_color = BAR_TITLE if upright else RED
     _text_center(d, x + CARD_OUT_W / 2, info_y + 20, f"{tag} · {cn}",
-                 _load_font(25, bold=True), tag_color)
+                 _load_font(25, bold=True, text=f"{tag} · {cn}"), tag_color)
 
     meaning = up if upright else down
-    lines = _wrap_text(d, meaning, _load_font(22), CARD_OUT_W - 44)
+    lines = _wrap_text(d, meaning, _load_font(22, text=meaning), CARD_OUT_W - 44)
     for i, line in enumerate(lines[:2]):
         _text_center(d, x + CARD_OUT_W / 2, info_y + 54 + i * 25, line,
-                     _load_font(22), BAR_TEXT)
+                     _load_font(22, text=line), BAR_TEXT)
 
     return card_h
 
@@ -256,7 +289,7 @@ def render_cards(positions, picks, formation, save_dir=None) -> str:
     canvas = _build_background(W, H)
     d = ImageDraw.Draw(canvas)
 
-    _draw_capsule(d, W / 2, 52, f"牌阵 · {formation}", _load_font(38, bold=True),
+    _draw_capsule(d, W / 2, 52, f"牌阵 · {formation}", _load_font(38, bold=True, text=f"牌阵 · {formation}"),
                   36, 14, CAPSULE_BG, GOLD_TITLE)
 
     for i, (pos, pick) in enumerate(zip(positions, picks)):
@@ -265,7 +298,7 @@ def render_cards(positions, picks, formation, save_dir=None) -> str:
         x = pad + col * (CARD_OUT_W + gap)
         y = title_h + row * (label_h + unit_h + gap)
         _draw_capsule(d, x + CARD_OUT_W / 2, y + 40, f"【{pos}】",
-                      _load_font(28, bold=True), 20, 10, CAPSULE_BG, TAG_TEXT)
+                      _load_font(28, bold=True, text=f"【{pos}】"), 20, 10, CAPSULE_BG, TAG_TEXT)
         _draw_card(canvas, x, y + label_h, pick["card"], pick["upright"])
 
     if save_dir is None:
