@@ -135,10 +135,7 @@ def _wrap_text(draw, text, font, max_w):
 
 # ---------- 素材映射 ----------
 def _resolve_asset(path: str) -> str:
-    """兼容 .png / .webp 素材：优先已存在的文件，否则尝试另一后缀。
-
-    本机开发环境保留高清 .png 原图，发布版使用压缩 .webp，代码无需区分。
-    """
+    """兼容 .png / .webp 素材：优先已存在的文件，否则尝试另一后缀。"""
     if os.path.exists(path):
         return path
     if path.lower().endswith(".png"):
