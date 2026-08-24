@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-  <img src="https://img.shields.io/badge/version-v0.4.9-f8a5c2" alt="v0.4.9"/>
+  <img src="https://img.shields.io/badge/version-v0.4.10-f8a5c2" alt="v0.4.10"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -125,11 +125,11 @@ Configure in the AstrBot plugin management UI:
 - `/` prefix check: bare private-chat text is blocked with a hint, group @ triggers allowed (`_require_prefix`)
 - AI reading via `context.get_using_provider().text_chat()`, falls back to local meanings on errors
 - Keyword → spread matching by priority: classic names + new names, then content inference, defaulting to "Feather Hour Three"
-- Pure-logic unit tests in `tests/` (pytest, 27 cases): formation selection, alias stripping, text splitting, drawing, font coverage and a render smoke test; run `python -m pytest tests`
+- Pure-logic unit tests in `tests/` (pytest, 27 cases): formation selection, alias stripping, text splitting, drawing, font coverage and a render smoke test; `pip install pytest` first, then run `python -m pytest tests`
 
 ## 📜 Changelog
 
-See [CHANGELOG.md](https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/CHANGELOG.md) for the full version history. Latest (v0.4.9): removed a stray `commit_msg.txt` and 4 duplicated Queen asset copies (~0.47MB), fixed the missing `stop_event()` on the `/占卜 帮助` branch, added glyph-coverage font fallback via fonttools, and shipped 27 pytest cases covering formation selection, alias stripping, splitting, drawing, font coverage and a render smoke test.
+See [CHANGELOG.md](https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/CHANGELOG.md) for the full version history. Latest (v0.4.10): switched the merged-forward node `uin` from adapter `raw_message` to the framework's `event.get_self_id()` (falling back to `'0'` when unavailable), aligning with the @ mention check in `_require_prefix`.
 
 ---
 

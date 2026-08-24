@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-  <img src="https://img.shields.io/badge/version-v0.4.9-f8a5c2" alt="v0.4.9"/>
+  <img src="https://img.shields.io/badge/version-v0.4.10-f8a5c2" alt="v0.4.10"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -125,9 +125,13 @@
 - 命令触发带有 `/` 前缀校验：私聊裸文本拦截并提示，群聊 @ 触发放行（`_require_prefix`）
 - AI 解读通过 `context.get_using_provider().text_chat()` 调用当前配置的 LLM，异常时自动降级为本地牌义
 - 关键词 → 牌阵匹配采用优先顺序：经典名（单张问询 / 时间之流 / 三张时间线 / 圣三角 / 恋人十字）与新名均纳入关键词，未命中时按问题内容推断，兜底为「羽时三刻」
-- 纯逻辑单测位于 `tests/`（pytest，27 例）：选阵、别名剥离、分段、抽牌、字体覆盖与渲染冒烟；运行 `python -m pytest tests` 即可验证
+- 纯逻辑单测位于 `tests/`（pytest，27 例）：选阵、别名剥离、分段、抽牌、字体覆盖与渲染冒烟；先 `pip install pytest`，再运行 `python -m pytest tests` 即可验证
 
 ## 📜 更新记录
+
+#### v0.4.10
+
+- 修复：合并转发节点 uin 不再依赖适配器 `raw_message`（部分平台该字段缺失或结构不同时会退回 `'0'`），改用框架统一接口 `event.get_self_id()`，与 `_require_prefix` 的 @ 判定保持同一套逻辑；取不到或为空时仍兜底 `'0'`
 
 #### v0.4.9
 

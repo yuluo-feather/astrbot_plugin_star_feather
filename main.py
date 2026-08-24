@@ -17,7 +17,7 @@ from astrbot.api.message_components import At, Image, Node, Nodes, Plain
 
 logger = logging.getLogger(__name__)
 
-VERSION = "0.4.9"
+VERSION = "0.4.10"
 
 # 常量：集中管理散落的默认值 / 间隔
 DEFAULT_SEGMENT_SIZE = 300   # 无标记文本兜底分段长度
@@ -214,9 +214,10 @@ class StarTarot:
         parts = [sub for seg in self._split_sections(interp) for sub in self._split_text(seg, self.segment_size)]
         if not parts:
             return
-        # 转发节点 uin：取机器人自身 QQ，取不到时用 '0'
-        raw = getattr(event.message_obj, "raw_message", None)
-        uin = str(raw["self_id"]) if isinstance(raw, dict) and raw.get("self_id") else "0"
+        # 转发节点 uin：优先框架 get_self_id()（与 _require_prefix 判定一致），取不到时兜底 '0'
+        uin = "0"
+        if hasattr(event, "get_self_id"):
+            uin = str(event.get_self_id() or "0")
         if self.forward_result:
             nodes = ([Node(content=[Image(file=img), Plain("\n✨ 星羽塔罗 · 牌面")], name="星羽塔罗", uin=uin)] if img else []) + \
                     [Node(content=[Plain(seg)], name="星羽塔罗", uin=uin) for seg in parts]
@@ -229,7 +230,7 @@ class StarTarot:
                 await asyncio.sleep(SEND_INTERVAL)
 
 
-@register("star_feather", "羽落", "星羽塔罗：78张塔罗牌 AI 占卜与深度解读，官方素材渲染牌面图", "0.4.9")
+@register("star_feather", "羽落", "星羽塔罗：78张塔罗牌 AI 占卜与深度解读，官方素材渲染牌面图", "0.4.10")
 class StarFeatherPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         super().__init__(context)
