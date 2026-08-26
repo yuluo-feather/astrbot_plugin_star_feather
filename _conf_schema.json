@@ -1,20 +1,121 @@
 {
-    "enable_ai": {
-        "description": "是否启用 AI 深度解读（关闭后仅使用本地牌义兜底）",
+  "ai": {
+    "type": "object",
+    "description": "[AI 解读] 模型调用、超时与兜底",
+    "hint": "AI 深度解读如何调用模型、失败如何兜底：当前会话模型失败时按顺序尝试其他可用模型，单个请求超时即切换，全部失败回退内置牌义并进入失败冷却，避免每次占卜都空等。",
+    "items": {
+      "enable_ai": {
+        "description": "是否启用 AI 深度解读",
         "type": "bool",
         "default": true,
-        "hint": "开启后占卜结果会调用 LLM 深度解读；关闭则使用内置牌义。"
-    },
-    "forward_result": {
-        "description": "占卜结果以合并转发消息链发送（含牌面图）",
+        "hint": "开启后占卜结果会调用 LLM 深度解读；关闭则仅使用内置牌义。"
+      },
+      "ai_provider": {
+        "type": "string",
+        "description": "AI 解读使用的模型",
+        "hint": "留空则使用当前会话模型；指定后解读固定优先用该模型（它不可用时仍会尝试其他可用模型，全部失败回退内置牌义）。不影响对话使用的模型。",
+        "_special": "select_provider",
+        "default": ""
+      },
+      "ai_timeout": {
+        "description": "单次 AI 解读超时（秒）",
+        "type": "int",
+        "default": 30,
+        "hint": "单个模型超时后自动尝试下一个可用模型；全部失败则回退本地牌义。默认值：30。最小 5。"
+      },
+      "ai_fail_cooldown": {
+        "description": "AI 解读失败后的冷却时间（秒）",
+        "type": "int",
+        "default": 60,
+        "hint": "冷却期内直接使用本地牌义，不再调用 AI，避免每次占卜都空等超时；设为 0 表示不冷却。默认值：60。"
+      },
+      "question_max_len": {
+        "description": "发送给 AI 解读的问题长度上限（字符）",
+        "type": "int",
+        "default": 200,
+        "hint": "超长问题先「头尾保号」压缩再送 AI（保留开头主体与结尾关键意图，省 token 且缩小提示注入面）；设为 0 表示不压缩。默认值：200。"
+      }
+    }
+  },
+  "tool": {
+    "type": "object",
+    "description": "[自然语言入口] 对话触发与节流",
+    "hint": "用户直接说「帮我算一卦」即可触发占卜，不必记命令；工具描述限定「明确请求」才会调用，抱怨、感叹、闲聊不会误触。",
+    "items": {
+      "llm_tool_enabled": {
+        "description": "启用自然语言占卜入口",
         "type": "bool",
-        "default": false,
-        "hint": "开启后牌面图与逐段解读一起打包成一条合并转发消息（点开查看），避免连续多条消息刷屏；需适配器支持转发消息（如 NapCat/Lagrange）。关闭则图片单独发送、解读逐条分段发送。"
-    },
-    "segment_size": {
+        "default": true,
+        "hint": "开启后对话中说「帮我算一卦」即可触发；关闭后仅 /占卜、/单抽 命令可用。默认值：true。"
+      },
+      "llm_tool_cooldown": {
+        "description": "自然语言占卜节流（秒）",
+        "type": "int",
+        "default": 60,
+        "hint": "同会话冷却期内不重复触发，防止连续调用刷屏；设为 0 表示不节流。默认值：60。"
+      },
+      "cmd_rate_limit": {
+        "description": "/占卜、/单抽 命令的同会话节流（秒）",
+        "type": "int",
+        "default": 10,
+        "hint": "同一会话 10 秒内最多触发一次命令占卜，防止连点刷屏；设为 0 表示不节流。默认值：10。"
+      }
+    }
+  },
+  "limit": {
+    "type": "object",
+    "description": "[限流] 占卜次数控制",
+    "hint": "控制占卜入口的调用频率：命令入口按会话短间隔节流（tool.cmd_rate_limit），所有入口按用户每日计数（daily_count），防止 AI 解读被刷爆。",
+    "items": {
+      "daily_count": {
+        "description": "每用户每日占卜次数上限",
+        "type": "int",
+        "default": 0,
+        "hint": "所有占卜入口（/占卜、/单抽、自然语言）每用户每天最多调用该次数，次日零点自动重置；设为 0 表示不限制。默认值：0（不限制）。"
+      }
+    }
+  },
+  "output": {
+    "type": "object",
+    "description": "[输出与分段] 结果呈现方式",
+    "hint": "占卜结果如何发送：选择呈现模式（图文一条链 / 合并转发 / 纯文字）、无结构文本如何分段、洗牌提示与免责声明；防刷屏请配置「限流」组。",
+    "items": {
+      "send_mode": {
+        "description": "占卜结果的发送方式",
+        "type": "string",
+        "default": "forward",
+        "_special": "select",
+        "options": [
+          "plain",
+          "forward",
+          "text_only"
+        ],
+        "hint": "plain-图文合成一条链消息；forward-图文合成一条合并转发消息（点开查看，含牌面图，需适配器支持转发）；text_only-纯文字：不渲染图片，最省流量。旧配置（forward_result / show_image）自动迁移，无需重新设置。默认值：forward。"
+      },
+      "segment_size": {
         "description": "无结构解读文本的分段大小（字符数）",
         "type": "int",
         "default": 300,
-        "hint": "AI 解读按「每张牌一段 + 总结段」输出时按段发送，不受此限制；仅当解读文本没有结构化标记时，按该长度切分兜底。最小 50。"
+        "hint": "AI 解读按「每张牌一段 + 总结段」输出时按段发送，不受此限制；仅当解读文本没有结构化标记时，按该长度切分兜底。默认值：300。最小 50。"
+      },
+      "daily_fixed": {
+        "description": "今日固定牌运（同一天同一人反复占卜结果固定）",
+        "type": "bool",
+        "default": true,
+        "hint": "开启后 /单抽 与带「运势/运气/牌运」等词的请求同一天始终是同一张牌，零点自动刷新，防止反复问刷出不同结果；关闭则恢复自由随机。默认值：true。"
+      },
+      "shuffle_lines": {
+        "description": "显示洗牌提示语",
+        "type": "bool",
+        "default": true,
+        "hint": "开启后抽牌前随机发一句「洗牌中……」提示；关闭则直接出牌，少一条消息。默认值：true。"
+      },
+      "disclaimer": {
+        "description": "结果末尾的免责声明（留空则不显示）",
+        "type": "string",
+        "default": "✨ 占卜仅供娱乐参考，选择权永远在你手里。",
+        "hint": "每次占卜结果最后追加的一段说明，可自定义文案；设为空字符串即可完全关闭。默认值：『✨ 占卜仅供娱乐参考，选择权永远在你手里。』"
+      }
     }
+  }
 }
