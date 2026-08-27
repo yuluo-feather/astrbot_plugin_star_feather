@@ -11,7 +11,7 @@
 import asyncio
 import logging
 import os
-import random
+import secrets
 import tempfile
 import time
 
@@ -289,6 +289,6 @@ def render_cards(positions, picks, formation, save_dir=None) -> str:
     if save_dir is None:
         save_dir = os.path.join(tempfile.gettempdir(), "star_feather")
     os.makedirs(save_dir, exist_ok=True)
-    path = os.path.join(save_dir, f"tarot_{int(time.time())}_{random.randint(1000, 9999)}.png")
+    path = os.path.join(save_dir, f"tarot_{int(time.time())}_{secrets.token_hex(4)}.png")
     canvas.save(path, "PNG")
     return path

@@ -57,7 +57,7 @@ from astrbot.api.message_components import Plain  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-VERSION = "0.5.1"
+VERSION = "0.5.2"
 
 # 牌阵定义见 spreads.py（FORMATIONS）
 
@@ -121,7 +121,8 @@ class StarFeatherPlugin(Star):
                              epilogue: bool = False):
         """命令入口公共流程（/占卜 与 /单抽 共用）：帮助 → 限流 → 抽牌 → 发送。
 
-        err_tpl 用 {e} 占位（异常提示），其余差异由参数控制。
+        err_tpl 是完整的用户侧友好文案（不含异常细节——异常只进日志，
+        服务器路径/内部结构不给用户看），其余差异由参数控制。
         前缀/触发门槛由框架先行把关（CommandFilter 命中才进得来），
         这里不再有前缀检查与提示分支——别再把「必须带 /」的旧逻辑加回来。
         """
@@ -149,14 +150,15 @@ class StarFeatherPlugin(Star):
                     epilogue=True):
                 yield r
         except Exception as e:
-            logger.error(f"命令占卜失败: {e}")
-            yield event.plain_result(err_tpl.format(e=e))
+            logger.error(f"命令占卜失败: {e}", exc_info=True)
+            # 异常细节只进日志：err_tpl 是纯友好文案，不把路径/内部结构发给用户
+            yield event.plain_result(err_tpl)
 
     @command("占卜", desc="78张塔罗牌 AI 占卜与深度解读")
     async def divine(self, event: AstrMessageEvent, text: str = ""):
         async for r in self._command_entry(
                 event, text,
-                err_tpl="哼，这场占卜断了：{e}。牌灵今天状态不好，换个时候再来问。",
+                err_tpl="哼，这场占卜断了。牌灵今天状态不好，换个时候再来问。",
                 helpable=True,
                 fail_note="📖 解读：\n（AI 今天闹脾气不肯开口，牌义先给你，自己琢磨~）"):
             yield r
@@ -165,7 +167,7 @@ class StarFeatherPlugin(Star):
     async def single(self, event: AstrMessageEvent, text: str = ""):
         async for r in self._command_entry(
                 event, text,
-                err_tpl="单抽断线了：{e}。牌灵今天不太配合，晚点再试。",
+                err_tpl="单抽断线了。牌灵今天不太配合，晚点再试。",
                 force_daily=True, fixed_formation="羽签",
                 empty_fallback="（今日牌运）"):
             yield r

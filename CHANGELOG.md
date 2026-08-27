@@ -2,6 +2,20 @@
 
 > 每个版本条目均为中文在前、英文在后。
 
+#### v0.5.2
+
+##### 🔧 修复
+
+- **命令出错不再泄露内部细节**：占卜/单抽执行异常时，用户只收到固定友好文案（如「这场占卜断了」），异常详情（服务器路径、内部结构）只记录进日志——此前异常原文会被直接格式化进回复
+- **依赖安全底线**：`Pillow` 下限提升到 `>=10.0.0`——9.x 存在多个已知 CVE（含 CVE-2023-4863 堆溢出），渲染链不冒这个险；安装时自动升级
+
+**English**
+
+##### 🔧 Fixes
+
+- **No more internal details on command errors**: when a reading / single-draw fails, the user only gets a fixed friendly notice (e.g. "this reading broke"); exception details (server paths, internals) go to the server log only — previously the raw exception text was formatted into the reply
+- **Dependency floor**: `Pillow` bottom raised to `>=10.0.0` — 9.x ships known CVEs (incl. CVE-2023-4863 heap overflow); not worth the risk in the render path; auto-upgraded on install
+
 #### v0.5.1
 
 ##### 🔧 修复

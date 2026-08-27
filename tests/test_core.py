@@ -525,7 +525,7 @@ class TestCommandEntry:
         p = self._plugin()
         evt = self._evt()
         out = self._collect(p._command_entry(evt, " 问题 ",
-                                             err_tpl="e:{e}", helpable=True))
+                                             err_tpl="占卜断了，换个时候再来。", helpable=True))
         assert out == ["res"]
         assert ("should_call_llm", True) in evt.calls
         assert ("stop_event",) not in evt.calls
@@ -534,10 +534,25 @@ class TestCommandEntry:
         p = self._plugin()
         evt = self._evt()
         out = self._collect(p._command_entry(evt, "帮助",
-                                             err_tpl="e:{e}", helpable=True))
+                                             err_tpl="占卜断了，换个时候再来。", helpable=True))
         assert out and isinstance(out[0], str) and "星羽塔罗" in out[0]
         assert ("should_call_llm", True) in evt.calls
         assert ("stop_event",) not in evt.calls
+
+    def test_error_path_hides_exception_details(self):
+        # 安全回归：异常（路径/内部结构）只进日志，用户提示保持友好文案
+        p = self._plugin()
+        evt = self._evt()
+
+        async def boom_gate(event, for_command):
+            raise RuntimeError("C:\\secret\\plugin\\path\\leak")
+        p.gate.check = boom_gate
+        out = self._collect(p._command_entry(
+            evt, " 问题 ", err_tpl="哼，这场占卜断了。牌灵今天状态不好，换个时候再来问。",
+            helpable=True))
+        assert out == ["哼，这场占卜断了。牌灵今天状态不好，换个时候再来问。"]
+        joined = "".join(out)
+        assert "C:" not in joined and "leak" not in joined and "RuntimeError" not in joined
 
 
 class TestRequirePrefix:

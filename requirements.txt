@@ -1,3 +1,4 @@
 # 星羽塔罗 Star Feather — 运行环境：Python 3.12+（与 AstrBot 最低要求一致）
-pillow>=9.0
+# Pillow 底线钉在 10.0.0：9.x 存在多个已知 CVE（含 CVE-2023-4863 等），渲染链不值得冒这个险
+pillow>=10.0.0
 fonttools>=4.0
