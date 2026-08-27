@@ -736,6 +736,22 @@ class TestDivineToolDirect:
         assert out and all(isinstance(x, str) for x in out)
         assert evt.sent == []
 
+    def test_non_reading_branches_do_not_claim_sent(self):
+        """v0.5.1 防回归：未占卜的分支（空文本/节流/每日上限/未开启）不得复述
+        「占卜结果已发送」——那是成功路径的收尾池文案，这里没有结果。"""
+        cases = [
+            (self._plugin(), self._evt(text="")),
+            (self._plugin(throttle_remain=25), self._evt()),
+            (self._plugin(limit_block="今天已经问过牌灵 5 次啦~"), self._evt()),
+        ]
+        for p, evt in cases:
+            out = self._collect(p.divine_tool(evt))
+            assert all("已发送" not in s for s in out)
+        p = self._plugin()
+        p.tarot.llm_tool_enabled = False
+        out = self._collect(p.divine_tool(self._evt()))
+        assert all("已发送" not in s for s in out)
+
 
 # ---------- 启动横幅 ----------
 class TestStartupBanner:

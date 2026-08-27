@@ -234,6 +234,10 @@
 
 ## 📜 更新记录
 
+#### v0.5.1
+
+- 修复：工具入口（自然语言占卜）在未开启 / 节流 / 每日上限 / 空问题等场景，不再复述「占卜结果已发送」这类与事实不符的收尾，改为对应的引导语
+
 #### v0.5.0
 
 > 完整更新日志见 [CHANGELOG.md](https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/CHANGELOG.md)（中文在前，英文在后）。

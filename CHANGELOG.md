@@ -2,6 +2,18 @@
 
 > 每个版本条目均为中文在前、英文在后。
 
+#### v0.5.1
+
+##### 🔧 修复
+
+- **工具入口非占卜分支措辞**：工具未开启 / 节流 / 每日上限 / 空问题等场景，不再复述「占卜结果已发送」这类与事实不符的收尾，改为对应的引导语
+
+**English**
+
+##### 🔧 Fixes
+
+- **Non-reading tool branches**: the disabled / throttled / daily-quota / empty-question scenarios no longer echo a "reading sent" wrap-up that didn't happen; each yields an accurate follow-up line instead
+
 #### v0.5.0
 
 ##### ✨ 新功能

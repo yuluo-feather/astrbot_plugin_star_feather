@@ -57,7 +57,7 @@ from astrbot.api.message_components import Plain  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-VERSION = "0.5.0"
+VERSION = "0.5.1"
 
 # 牌阵定义见 spreads.py（FORMATIONS）
 
@@ -199,17 +199,19 @@ class StarFeatherPlugin(Star):
         或 None —— 否则 runner 判定无返回值并 DONE，respond 空消息跳过，
         收口钩子不触发、群聊防并发门闩死锁（见 _tool_send）。
         """
-        # 收尾引导语（prompts 集中管理，随机一条）：让 LLM 生成一句简短确认（同时保住 respond 非空）
+         # 收尾引导语（prompts 集中管理，随机一条）：让 LLM 生成一句简短确认（同时保住 respond 非空）
         note = random.choice(TOOL_EPILOGUE)
         # 打开开关：运行期判断（装饰器静态注册无法卸载，见 __init__ 注释）
         if not self.tarot.llm_tool_enabled:
             await self._tool_send(event, "星羽塔罗的自然语言占卜未开启～ 试试 /占卜 感情 这样的命令。")
-            yield note
+            # 非占卜分支：不 yield 收尾池文案（它说「占卜结果已发送」，这里没有结果），
+            # 改为明确引导，让 LLM 自然回一句即可（仍是字符串，保 Agent Loop 不断）
+            yield "已告知用户自然语言占卜未开启。请自然回应一句，不必再调用工具。"
             return
-        # message_str 属性异常/缺失时按空文本处理（回到上面空文本分支，保 Agent Loop 不中断）
+        # message_str 属性异常/缺失时按空文本处理（保 Agent Loop 不中断）
         text = (getattr(event, "message_str", "") or "").strip()
         if not text:
-            yield note
+            yield "工具收到空文本：用户没说占卜什么。请回一句，引导用户说出想占卜的内容（如感情、事业、学业、今日运势）。"
             return
         # 工具节流：同会话冷却期内不重复触发，防止模型连续调用刷屏
         umo = getattr(event, "unified_msg_origin", None)
@@ -217,13 +219,13 @@ class StarFeatherPlugin(Star):
                                                   self.tarot.llm_tool_cooldown)
         if remain > 0:
             await self._tool_send(event, f"牌灵刚才才为你算过~ 让它歇 {remain} 秒，或者用 /占卜 再来一卦。")
-            yield note
+            yield f"已提示用户节流中（剩 {remain} 秒）。请自然回应一句，不必再调用工具。"
             return
         # 每日次数限流（与命令入口同一闸门，仅跳过会话级节流）
         block = await self.gate.check(event, for_command=False)
         if block:
             await self._tool_send(event, block)
-            yield note
+            yield "已提示用户今日次数限制。请自然回应一句，不必再调用工具。"
             return
         try:
             # 统一抽牌 + 统一流程（与 /占卜 同一套逻辑，行为一致）
