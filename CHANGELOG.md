@@ -2,6 +2,24 @@
 
 > 每个版本条目均为中文在前、英文在后。
 
+#### v0.5.3
+
+##### 🔧 修复
+
+- **每日牌运判定收紧**：「最近 / 近期 / 每日」不再单独作为运势词——带具体主题（感情、事业、学业、他/她等）的问题按具体问题正常选阵并自由随机，不再被误吞进当日固定牌运（此前「最近她对我什么感觉」「我最近学业怎么样」问什么都拿到同一张牌、同一段解读）
+- **每日牌运解读按主题区分**：同一天询问不同主题（如「今天感情运势」「最近学业怎么样」）各自生成并缓存解读，不再共用当天第一次生成的解读；无主题泛问（当日牌运）仍当天固定同一段
+- **AI 解读牌义锚定**：解读须基于抽牌结果括号内给出的牌义关键词展开，不过度偏离、不自创牌义
+- **帮助请求判定收紧**：只有整句是帮助请求（「帮助」/「help」/「使用帮助」/「看下说明」等）才显示使用说明；问题正文里带「帮助」二字（如「帮助我做出决定」）不再误触发帮助页——此前这类占卜问题收到的却是帮助文案
+
+**English**
+
+##### 🔧 Fixes
+
+- **Tighter daily-reading detection**: "最近 / 近期 / 每日" (recently / daily) no longer counts as a fortune word on its own — questions with a specific topic (love, career, study, him/her, etc.) now go through normal spread selection and free draws instead of being swallowed by the fixed daily reading (previously "what does she think of me lately" or "how's my study lately" always got the same card and the same reading all day)
+- **Topic-aware daily readings**: asking different topics on the same day (e.g. today's love fortune / my study lately) now generates and caches a reading per topic instead of reusing the first one of the day; generic fortune questions (no specific topic) still stay fixed for the day
+- **AI reading anchored to card meaning**: readings must be based on the meaning keywords given in the draw result, without drifting too far or inventing meanings
+- **Tighter help detection**: only a standalone help request ("帮助 / help / 使用帮助 / 看下说明" etc.) shows the usage guide; the word "帮助" (help) inside a question body (e.g. "help me decide") no longer trips the help page — previously such divination questions got the usage text instead
+
 #### v0.5.2
 
 ##### 🔧 修复

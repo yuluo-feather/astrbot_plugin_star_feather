@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-  <img src="https://img.shields.io/badge/version-v0.5.2-f8a5c2" alt="v0.5.2"/>
+  <img src="https://img.shields.io/badge/version-v0.5.3-f8a5c2" alt="v0.5.3"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -233,6 +233,13 @@
 - 纯逻辑单测位于 `tests/`（pytest，按域分文件，用例数随开发变化）：`test_core`（抽牌、渲染门控、解读器集成、三入口编排、每日牌运降级）、`test_settings`（默认值与旧配置迁移）、`test_spreads`（选阵/别名/问题清洗）、`test_hardening`（注入剥除/截断/结构校验）、`test_identity`（用户标识降级链）、`test_gating`（限流闸门）、`test_log_setup`（日志路径候选链与幂等安装）、`test_card_render`（渲染冒烟、图片清理）、`test_fonts`（字体覆盖与回退/缓存回归）、`test_deliver`（分段与分发）、`test_limiter`、`test_config`（配置读取原语）；先 `pip install pytest`，再运行 `python -m pytest tests` 即可验证
 
 ## 📜 更新记录
+
+#### v0.5.3
+
+- 修复：每日牌运判定收紧，「最近/近期/每日」不再单独视为运势词，带具体主题的问题按具体问题选阵，不再被吞进当日固定牌运
+- 修复：每日牌运解读按主题区分缓存，同一天问不同主题各出各的解读，不再共用第一段
+- 修复：AI 解读锚定抽牌结果中的牌义关键词展开，不过度偏离或自创牌义
+- 修复：帮助请求判定收紧，问题正文里的「帮助」二字不再误触发帮助页（整句匹配，仅「帮助/help/使用帮助/看下说明」等才算）
 
 #### v0.5.2
 

@@ -22,6 +22,7 @@
 import logging
 import os
 import random
+import re
 import sys
 
 # 插件被动态 __import__ 加载时不在 sys.path 里，得自己把插件目录塞进去——不然 import 直接炸。
@@ -57,7 +58,17 @@ from astrbot.api.message_components import Plain  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-VERSION = "0.5.2"
+VERSION = "0.5.3"
+
+# 帮助请求判定：整句剥掉祈使词后只剩「帮助 / help / 说明」才算。
+# 旧版用 "帮助" in text，问题正文里带「帮助」（如「帮助我做出决定」）
+# 会误触发帮助页——踩过：占卜长问题里写「帮助我做出更清醒的决定」，
+# 用户收到的却是帮助文案。这里是收紧后的整句匹配，句中出现不算。
+_HELP_REQUEST_RE = re.compile(
+    r"^(?:请|帮我|给我|麻烦|来|看看|看下|查一下|查查|使用|查看|瞅瞅)*\s*"
+    r"(?:帮助|help|帮助说明|使用说明|说明)(?:一下|下)?\s*[？?！!。.]*$",
+    re.IGNORECASE,
+)
 
 # 牌阵定义见 spreads.py（FORMATIONS）
 
@@ -133,7 +144,7 @@ class StarFeatherPlugin(Star):
         # 这坑踩过了，别再踩。
         event.should_call_llm(True)
         try:
-            if helpable and ("帮助" in text or "help" in text.lower()):
+            if helpable and _HELP_REQUEST_RE.fullmatch((text or "").strip()):
                 yield event.plain_result(self._help())
                 return
             block = await self.gate.check(event, for_command=True)

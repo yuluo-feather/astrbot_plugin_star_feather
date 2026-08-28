@@ -287,6 +287,17 @@ class TestDailyRequest:
         assert not _is_daily_request("下周面试")
         assert not _is_daily_request("")
 
+    def test_time_words_with_specific_topic_not_daily(self):
+        # 「最近/近期」不是运势词：带具体主题的问题是具体请求，
+        # 不该被吞进今日固定牌（踩过：问什么都返回同一张牌同一段解读）
+        assert not _is_daily_request("最近她对我什么感觉")
+        assert not _is_daily_request("我最近的学业怎么样")
+        assert not _is_daily_request("近期和他复合还有可能吗")
+        assert not _is_daily_request("最近和男朋友吵架了，占卜一下关系")
+        assert not _is_daily_request("今天她理我吗")  # 与上同旨：时间词+主题词
+        assert _is_daily_request("最近怎么样")  # 无主题泛问 → 当日牌运
+        assert _is_daily_request("每日一签")
+
 
 class TestDailyPick:
     def test_deterministic_same_day_user(self):
@@ -538,6 +549,26 @@ class TestCommandEntry:
         assert out and isinstance(out[0], str) and "星羽塔罗" in out[0]
         assert ("should_call_llm", True) in evt.calls
         assert ("stop_event",) not in evt.calls
+
+    def test_help_variants_still_trigger(self):
+        # 帮助请求的合规变体照常触发（整句匹配，不是子串）
+        p = self._plugin()
+        for q in ("help", "使用帮助", "帮我看看帮助说明", "help一下"):
+            evt = self._evt()
+            out = self._collect(p._command_entry(evt, q,
+                                                 err_tpl="占卜断了，换个时候再来。", helpable=True))
+            assert out and "星羽塔罗" in out[0], q
+
+    def test_help_word_inside_question_not_help(self):
+        # 「帮助」出现在问题正文里不是帮助请求（踩过：占卜问题写
+        # 「帮助我做出更清醒的决定」，用户收到的却是帮助页）
+        p = self._plugin()
+        evt = self._evt()
+        out = self._collect(p._command_entry(
+            evt, "最近公司调岗，帮助我做出决定",
+            err_tpl="占卜断了，换个时候再来。", helpable=True))
+        assert out and out[0] == "res"  # 走正常抽牌流程而非帮助文本
+        assert "星羽塔罗" not in out[0]
 
     def test_error_path_hides_exception_details(self):
         # 安全回归：异常（路径/内部结构）只进日志，用户提示保持友好文案
@@ -836,6 +867,71 @@ class TestDailyCacheMerge:
         cached = kv["sf_daily_u1"]
         assert cached["card"] in TAROT_CARDS
         assert "interp" not in cached  # 首次写入不虚构解读字段
+
+
+class TestDailyInterpTopic:
+    """解读缓存按主题指纹（_norm_topic）分桶：同主题复用、换主题现场生成。
+
+    旧版无主题区分：同一天问什么都返回当天第一段解读（「事业运」的解读
+    被「感情运」「学业运」共用），这是「不管问什么答案都一样」的元凶之一。
+    """
+
+    @staticmethod
+    def _daily(kv):
+        from daily import DailyFortune
+        calls = []
+
+        class _Ctx:
+            async def get_kv_data(self, key, default=None):
+                return kv.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                kv[key] = value
+
+        async def fake_ai(event, formation, positions, picks, clean):
+            calls.append(clean)
+            return f"解读:{clean}"
+
+        return DailyFortune(_Ctx(), types.SimpleNamespace(_ai_interpret=fake_ai)), calls
+
+    def test_same_specific_topic_reuses(self):
+        import time as _time
+        kv = {}
+        df, calls = self._daily(kv)
+        async def go():
+            a = await df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], "今天感情运势")
+            b = await df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], "今天感情运势")
+            return a, b
+        a, b = asyncio.run(go())
+        assert a == b == "解读:今天感情运势"
+        assert len(calls) == 1  # 同主题只生成一次
+
+    def test_different_topic_regenerates(self):
+        import time as _time
+        kv = {}
+        df, calls = self._daily(kv)
+        async def go():
+            a = await df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], "最近事业运")
+            b = await df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], "今天感情运势")
+            c = await df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], "最近事业运")
+            return a, b, c
+        a, b, c = asyncio.run(go())
+        assert a == "解读:最近事业运" and b == "解读:今天感情运势"
+        assert c == "解读:最近事业运"  # 换主题后回来仍复用
+        assert len(calls) == 2  # 两个主题各生成一次，不串答
+
+    def test_generic_question_shared_all_day(self):
+        import time as _time
+        kv = {}
+        df, calls = self._daily(kv)
+        async def go():
+            a = await df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], "")
+            b = await df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], "看看今天的运势")
+            return a, b
+        a, b = asyncio.run(go())
+        # 泛问（无具体主题词）统一归为当日牌运，共享同一段解读（防刷版本）
+        assert a == b == "解读:（今日牌运）"
+        assert len(calls) == 1
 
 
 class TestDailyKvFallback:
