@@ -1,7 +1,8 @@
-"""Prompt 防护：输入侧越狱句式剥除 / 超长截断，输出侧结构校验。
+"""Prompt 防护：输入侧归一化 / 越狱句式剥除 / 超长截断，输出侧结构校验。
 
 interpret.py 只负责「找模型 → 发请求 → 拿文本」；
-文本安全（输入侧）与结构契约（输出侧）都在这一层，与解读器解耦、独立单测。
+文本安全（输入侧：归一化先行 → 截断 → 句式剥除）与结构契约（输出侧）都在这一层，
+与解读器解耦、独立单测。
 
 说人话：想往牌灵嘴里塞怪东西？先过这一关。
 """
@@ -16,6 +17,36 @@ logger = logging.getLogger(__name__)
 # AI 解读的问题长度上限：防超长输入（费 token + 扩大 Prompt 注入面），
 # 超长时头尾保号压缩（见 clip_question）；默认值权威在 settings.DEFAULT_QUESTION_MAX_LEN
 MAX_QUESTION_LEN = DEFAULT_QUESTION_MAX_LEN
+
+
+# ---- 输入归一化（清洗链路第一步）----
+# 目的：让越狱句式的绕过手段（全角字符 / 零宽分隔 / bidi 控制符）在正则之前先失效，
+# 之后 _INJECTION_PATTERNS 只需写标准形即可命中，规则数不增而覆盖变宽。
+# 红线（2026-08-29 技能规范）：
+# 1) 不转全角标点——中文问题里的“，。？！”是正常标点，转了反而污染原文；
+#    只转全角字母/数字（ＡＢＣ → ABC），英文注入才吃这套。
+# 2) 保留 ZWJ/ZWNJ（U+200C/U+200D）——它们是 emoji 序列的粘合剂，剥离会拆碎正常 emoji。
+_FULLWIDTH_ALNUM = {0xFF10 + i: chr(0x30 + i) for i in range(10)}
+_FULLWIDTH_ALNUM.update({0xFF21 + i: chr(0x41 + i) for i in range(26)})
+_FULLWIDTH_ALNUM.update({0xFF41 + i: chr(0x61 + i) for i in range(26)})
+# 零宽/bidi 控制符（含 BOM）；ZWJ/ZWNJ 按红线二保留，不在此列
+_ZERO_WIDTH_CTRL = {"\u200b", "\u200e", "\u200f", "\ufeff"}
+_ZERO_WIDTH_CTRL.update(chr(0x202A + i) for i in range(5))  # U+202A..U+202E 定向嵌入
+_ZERO_WIDTH_CTRL.update(chr(0x2066 + i) for i in range(4))  # U+2066..U+2069 定向隔离
+
+
+def normalize_injection_input(text: str) -> str:
+    """输入归一化（先行）：剥离零宽/bidi 控制符 → 全角字母数字转半角 → 空白折叠。
+
+    归一化后由调用方继续「截断 → 句式剥除」；返回文本可能为空（全零宽输入）。
+    红线：不转全角标点、保留 ZWJ/ZWNJ（见上方注释）。
+    """
+    text = text or ""
+    text = text.translate({ord(c): None for c in _ZERO_WIDTH_CTRL})
+    text = text.translate(_FULLWIDTH_ALNUM)
+    # 空白折叠：全角空格统一为半角，连续空白压成一个（不动换行，保原文结构）
+    text = re.sub(r"[ 	\u3000]+", " ", text)
+    return text
 
 
 def clip_question(text: str, limit: int = MAX_QUESTION_LEN) -> str:

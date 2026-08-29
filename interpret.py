@@ -12,6 +12,7 @@ import time
 
 from hardening import (
     clip_question,
+    normalize_injection_input,
     strip_injection_fragments,
     validate_interpret_structure,
 )
@@ -27,7 +28,11 @@ setup_logging(logger)
 
 
 class AiInterpreter:
-    """AI 深度解读器：候选链 + 单请求超时 + 全部失败后的冷却。
+    """AI 深度解读器：候选链 + 单请求超时 + 按 Provider 粒度的失败冷却。
+
+    冷却粒度是「Provider」而不是插件全局（2026-08-29 调整）：
+    单个模型挂掉只冷却它自己，其他模型与其他用户不受拖累；
+    候选全部失败（全部冷却）时才回退本地牌义。
 
     对塔罗数据零依赖：牌面详情（detail）由调用方（StarTarot）格式化传入，
     本类只负责「找模型 → 发请求 → 拿文本」与失败兜底状态；
@@ -43,7 +48,28 @@ class AiInterpreter:
         self.ai_cooldown = ai_cooldown
         self.ai_provider_id = ai_provider_id
         self.max_question_len = max_question_len
-        self._ai_fail_ts = 0.0  # 上次 AI 全部失败的时间戳：冷却期内不再空等，0.0 = 从未失败过
+        # provider 级失败冷却：key=provider id → 上次服务失败时间戳。
+        # 粒度到 provider（而非插件全局熔断）：单个模型挂掉只冷却它自己，
+        # 其他模型与其他用户不受拖累；冷却期内该 provider 直接从候选链里跳过。
+        self._fail_ts_by_provider: dict[str, float] = {}
+
+    def _provider_id(self, provider) -> str:
+        try:
+            return provider.meta().id
+        except Exception:
+            return f"obj:{id(provider)}"
+
+    def _in_cooldown(self, pid: str) -> bool:
+        """该 provider 是否处于失败冷却期（cooled 后不发起请求，省一次空等超时）。"""
+        if self.ai_cooldown <= 0:
+            return False
+        ts = self._fail_ts_by_provider.get(pid, 0.0)
+        return ts > 0 and time.time() - ts < self.ai_cooldown
+
+    def _mark_fail(self, pid: str) -> None:
+        """记录一次服务级失败：进入该 provider 的冷却期（服务没挂则不记冷却）。"""
+        if self.ai_cooldown > 0:
+            self._fail_ts_by_provider[pid] = time.time()
 
     def _provider_candidates(self, umo: str | None) -> list:
         """收集候选：当前会话 > 全局默认 > 全部已加载，按 id 去重。
@@ -118,15 +144,13 @@ class AiInterpreter:
 
     async def interpret(self, event, formation: str, positions: list[str],
                         picks: list[dict], user_input: str, detail: str) -> str | None:
-        """AI 结构化解读。返回 None 表示本轮没有 AI 解读（全部候选失败或处于失败冷却期），
+        """AI 结构化解读。返回 None 表示本轮没有 AI 解读（候选全部失败或全部处于冷却期），
         由调用方回退本地牌义。给用户的感觉是：解读要么有，要么是牌义，不会等成雕塑。
         """
         if not self.enable_ai:
             return None
-        # 冷却期内直接放弃尝试：provider 刚挂过，别让用户再空等一遍超时
-        if self.ai_cooldown > 0 and time.time() - self._ai_fail_ts < self.ai_cooldown:
-            logger.info("AI 解读处于失败冷却期，直接使用本地牌义")
-            return None
+        # 清洗链路顺序（技能规范）：归一化（先行）→ 截断 → 句式剥除
+        user_input = normalize_injection_input(user_input)  # 归一化先行：全角/零宽/bidi 绕行先失效
         if self.max_question_len > 0:
             user_input = clip_question(user_input, self.max_question_len)  # 超长压缩（0=不压缩）
         user_input = strip_injection_fragments(user_input)  # 剥除夹带的越狱句式
@@ -136,18 +160,27 @@ class AiInterpreter:
         prompt = build_reading_prompt(user_input, formation, detail)
         umo = getattr(event, "unified_msg_origin", None)
         got_text = False  # 是否至少有一个候选产出了文本（区分“服务失败”与“结构失格”）
+        tried = 0
         for provider in self._provider_candidates(umo):
+            pid = self._provider_id(provider)
+            if self._in_cooldown(pid):
+                logger.info(f"AI 解读 provider[{pid}] 处于失败冷却期，跳过")
+                continue
+            tried += 1
             text = await self._chat_once(provider, prompt, SYSTEM_PROMPT_DIVINE)
             if not text:
+                self._mark_fail(pid)  # 服务级失败：只冷却这一个 provider
                 continue
             got_text = True
             if not validate_interpret_structure(text, len(positions)):
                 logger.warning("AI 解读未按【第N张·位置】结构输出，弃用该候选，继续尝试")
                 continue
             return text
+        if tried == 0:
+            logger.info("AI 解读候选全部处于失败冷却期，直接使用本地牌义")
+            return None
         if not got_text:
-            self._ai_fail_ts = time.time()  # 只有服务级失败才进入失败冷却
-            logger.warning("所有可用提供商均未产出 AI 解读，进入失败冷却")
+            logger.warning("所有可用提供商均未产出 AI 解读（已按 provider 记录失败冷却）")
         else:
             logger.warning("所有候选均产出但结构失格，回退本地牌义（不进入失败冷却）")
         return None

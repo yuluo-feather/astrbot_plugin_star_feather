@@ -113,11 +113,24 @@ class TestAiInterpret:
         t = self._tarot(p1, others=[p2])
         out = asyncio.run(t._ai_interpret(EVENT, "羽签", ["你的当下"], [PICK], "问题"))
         assert out is None
-        assert t.interpreter._ai_fail_ts > 0  # 进入失败冷却
-        # 冷却期内再次调用：不再碰任何 provider，直接回退牌义
+        assert set(t.interpreter._fail_ts_by_provider) >= {"p1", "p2"}  # 失败按 provider 逐个记冷却
+        # 冷却期内再次调用：候选全部冷却，不再碰任何 provider，直接回退牌义
         out2 = asyncio.run(t._ai_interpret(EVENT, "羽签", ["你的当下"], [PICK], "问题"))
         assert out2 is None
         assert p1.calls == 1 and p2.calls == 1
+
+    def test_failed_provider_cooldown_does_not_block_others(self):
+        """provider 粒度冷却：p1 失败只冷却 p1，p2 立即可用——全局熔断会拖垮所有用户。"""
+        p1 = FakeProvider("p1", exc=RuntimeError("挂"))
+        p2 = FakeProvider("p2", result=OK_INTERP)
+        t = self._tarot(p1, others=[p2])
+        out = asyncio.run(t._ai_interpret(EVENT, "羽签", ["你的当下"], [PICK], "问题"))
+        assert out == OK_INTERP
+        assert set(t.interpreter._fail_ts_by_provider) == {"p1"}
+        # 冷却期内再来：p1 被跳过（calls 不变），p2 继续正常服务
+        out2 = asyncio.run(t._ai_interpret(EVENT, "羽签", ["你的当下"], [PICK], "问题"))
+        assert out2 == OK_INTERP
+        assert p1.calls == 1 and p2.calls == 2
 
     def test_timeout_skips_to_next(self):
         p1 = FakeProvider("p1", result=OK_INTERP, delay=1.0)
@@ -196,7 +209,7 @@ class TestInjectionGuard:
         t = self._tarot(p1)
         out = asyncio.run(t._ai_interpret(EVENT, "羽签", ["你的当下"], [PICK], "问题"))
         assert out is None
-        assert t.interpreter._ai_fail_ts == 0.0
+        assert not t.interpreter._fail_ts_by_provider
 
 
 # ---------- prompts.py：提示词集中管理回归 ----------

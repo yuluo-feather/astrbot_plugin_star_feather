@@ -58,7 +58,7 @@ from astrbot.api.message_components import Plain  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-VERSION = "0.5.3"
+VERSION = "0.5.4"
 
 # 帮助请求判定：整句剥掉祈使词后只剩「帮助 / help / 说明」才算。
 # 旧版用 "帮助" in text，问题正文里带「帮助」（如「帮助我做出决定」）
