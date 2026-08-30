@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-  <img src="https://img.shields.io/badge/version-v0.5.4-f8a5c2" alt="v0.5.4"/>
+  <img src="https://img.shields.io/badge/version-v0.5.5-f8a5c2" alt="v0.5.5"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -234,6 +234,12 @@
 
 ## 📜 更新记录
 
+#### v0.5.5
+
+- 修复：越狱绕过防护增强（续），换行夹在越狱句中间不再能绕过注入句式剥除
+- 修复：每日牌运泛时间词补充，「这个月/这两天/这段时间」无主题泛问按当日牌运处理
+- 修复：判定边界加固——泛时间词收紧为白名单（「最近怎么样/每日塔罗」仍当日牌运，「最近总是失眠/今天下午开会吗」走具体占卜）；「我们的未来/她未来会爱我吗」这类关系+时间线问法改用关系阵，纯时间线问法不变
+
 #### v0.5.4
 
 - 修复：AI 失败冷却按提供商隔离，单个模型故障只冷却它自己，其余模型照常出解读
@@ -267,7 +273,7 @@
 #### v0.4.9
 
 - 修复：误提交的 `commit_msg.txt` 移出版本库并加入 `.gitignore`；清理 4 个冗余「皇后」素材副本（与「王后」字节完全相同），包体瘦身约 0.47MB
-- 修复：`/占卜 帮助` 分支补齐 `stop_event()`，与其余分支行为一致
+- 修复：`/占卜 帮助` 分支行为与其余命令路径一致（帮助页之后不再跟一串默认回应）
 - 字体缺字回退：渲染前用 fonttools 校验文本字形覆盖，内置子集缺字时自动回退到能覆盖的系统字体（新增依赖 `fonttools>=4.0`）；主字体为内置 Noto Sans SC 子集（品牌化命名 `StarFeather-*.otf`，牌面文案全覆盖），GB2312 之外的生僻字自动回退系统字体
 - 新增 `tests/` 单测（pytest，27 例）：选阵、别名剥离、分段、抽牌、字体覆盖与渲染冒烟
 - 文档补充：字体文件为品牌化命名（`StarFeather-*.otf`，实为 Noto Sans SC 子集）及缺字回退机制说明

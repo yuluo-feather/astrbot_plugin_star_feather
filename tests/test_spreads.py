@@ -26,6 +26,16 @@ class TestSelectFormation:
         assert select_formation("今天天气不错") == "羽时三刻"
         assert select_formation("") == "羽时三刻"
 
+    def test_timeline_word_with_relation_goes_lovers_cross(self):
+        # 时间线词 + 关系语义 = 关系预测，不是纯时间线问题（2026-08-29 边界）
+        assert select_formation("我们的未来") == "恋羽十字"
+        assert select_formation("她未来会爱我吗") == "恋羽十字"
+        assert select_formation("我和他的过去") == "恋羽十字"
+
+    def test_timeline_word_alone_stays_three(self):
+        # 无关系主体的时间线问法不变
+        assert select_formation("我的未来") == "羽时三刻"
+
     def test_blank_is_safe(self):
         assert select_formation(None) == "羽时三刻"
 

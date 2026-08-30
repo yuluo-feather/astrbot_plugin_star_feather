@@ -28,6 +28,13 @@ KEYWORD_MAP = [
 ]
 
 # 阵名别名（新名 + 经典名）：用户显式指定时直接采用（顺序即优先级）
+# 关系语义词（选阵推断层与「时间线词冲突」判定共用）：
+# 他/她/我们 是推断层主体词；感情类词与 KEYWORD_MAP 感情组重叠（那组命中时
+# 结果已是恋羽十字，这里只是同一类语义一处维护）。
+RELATION_WORDS = ("他", "她", "我们", "喜欢我吗", "还爱",
+                  "感情", "喜欢", "恋爱", "复合", "分手", "爱情")
+
+
 FORMATION_ALIASES = {
     "羽签": "羽签", "单张问询": "羽签", "单抽": "羽签",
     "羽时三刻": "羽时三刻", "时间之流": "羽时三刻", "三张时间线": "羽时三刻",
@@ -60,8 +67,12 @@ def select_formation(text: str) -> str:
         if score > best_score:  # 严格大于：平局保持 KEYWORD_MAP 顺序优先级
             best_name, best_score = name, score
     if best_name:
+        # 时间线词 + 关系语义 = 关系预测（「我们的未来」「她未来会爱我吗」），
+        # 不是纯时间线问题——时间线阵只留给无关系主体的问法（「我的未来」）。
+        if best_name == "羽时三刻" and any(k in text for k in RELATION_WORDS):
+            return "恋羽十字"
         return best_name
-    if any(k in text for k in ("他", "她", "我们", "喜欢我吗", "还爱")):
+    if any(k in text for k in RELATION_WORDS):
         return "恋羽十字"
     return "羽时三刻"
 

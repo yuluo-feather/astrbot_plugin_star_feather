@@ -2,6 +2,24 @@
 
 > 每个版本条目均为中文在前、英文在后。
 
+#### v0.5.5
+
+##### 🔧 修复
+
+- **越狱绕过防护增强（续）**：换行夹在越狱句中间不再能绕过——此前「忽略上文
+所有指令」这类跨行句式躲过句式剥除
+- **每日牌运泛时间词补充**：「这个月 / 这两天 / 这段时间 + 无主题」的泛问按当日牌运处理——此前这类问法会被判为普通占卜
+- **判定边界加固**：①泛时间词收紧为**正向白名单**——「最近怎么样 / 每日塔罗」仍是当日牌运，「最近总是失眠 / 今天下午开会吗 / 今天真的好累」这类事件/日程/状态描述走具体占卜（旧规则「时间词+无主题」会把它们全吞进固定牌运）；②「我们的未来 / 她未来会爱我吗」这类关系语义+时间线词改用关系阵（恋羽十字），纯时间线问法「我的未来」不变
+
+**English**
+
+##### 🔧 Fixes
+
+- **Jailbreak bypass protection, continued**: newlines inside a jailbreak phrase can no longer slip through — previously multi-line phrasings like "忽略上文
+所有指令" (ignore the above / all instructions) evaded the matcher
+- **More daily-reading time words**: generic questions with "这个月 / 这两天 / 这段时间" (this month / these days, no specific topic) now get the fixed daily reading — previously they fell into normal readings
+- **Judgement boundary tightened**: ① time-word questions are now a positive whitelist — "how have I been lately / daily tarot" still count as daily fortune, while event/agenda/state descriptions ("I keep losing sleep lately", "is there a meeting this afternoon", "I'm so tired today") get a free draw (the old "time word + no topic" rule swallowed them all); ② relationship semantics + timeline words ("our future", "will she love me") now pick the Lovers' Cross (relationship spread); pure timeline questions ("my future") stay unchanged
+
 #### v0.5.4
 
 ##### 🔧 修复
@@ -138,7 +156,7 @@
 
 
 - 清理：误提交的 `commit_msg.txt`（发版脚本临时产物）移出版本库并加入 `.gitignore`；4 个冗余「皇后」素材副本（与「王后」字节完全相同）删除，包体瘦身约 0.47MB
-- 修复：`/占卜 帮助` 分支补齐 `stop_event()`，行为与其余路径一致
+- 修复：`/占卜 帮助` 分支行为与其余路径一致（补齐收尾抑制，帮助页之后不再跟一串默认回应）
 - 改进：渲染前用 fonttools 校验文本字形覆盖，内置子集缺字时自动回退到能覆盖该系统字体（新增依赖 `fonttools>=4.0`）
 - 新增 `tests/` 单测（pytest，27 例）：选阵、别名剥离、分段、抽牌、字体覆盖与渲染冒烟（conftest 打桩框架 API，不依赖 AstrBot 环境）
 - 文档：中英 README 补充品牌化命名说明（`StarFeather-*.otf` 实为 Noto Sans SC 子集）、缺字回退机制与测试运行说明
@@ -147,7 +165,7 @@
 
 
 - Cleanup: mistakenly committed `commit_msg.txt` (release-script artifact) removed from the repo and added to `.gitignore`; 4 duplicate "Queen" assets (byte-identical to the "王后" files) deleted — package shrunk by ~0.47MB
-- Fix: `/占卜 帮助` branch now calls `stop_event()`, matching every other path
+- Fix: the `/占卜 帮助` branch now behaves like every other path (it suppresses the default follow-up after the help page)
 - Improvement: fonttools now validates glyph coverage before rendering; if the built-in subset lacks a glyph, it falls back to a system font that covers the text (new dependency `fonttools>=4.0`)
 - Added `tests/` unit tests (pytest, 27 cases): spread selection, alias stripping, splitting, drawing, font coverage and render smoke tests (conftest stubs the AstrBot API — no framework required)
 - Docs: EN/zh-CN README updated — branded font names (`StarFeather-*.otf` are Noto Sans SC subsets), glyph-fallback mechanism, test instructions

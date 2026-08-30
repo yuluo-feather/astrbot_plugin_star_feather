@@ -12,6 +12,7 @@
 import hashlib
 import logging
 import random
+import re
 import time
 
 from tarot_data import TAROT_CARDS
@@ -26,7 +27,8 @@ logger = logging.getLogger(__name__)
 # 到同一张牌、同一段解读。具体主题词表（SPECIFIC_WORDS）同时用于
 # 解读缓存的「泛问/具体」归一化（见 _norm_topic），一处词表两处用。
 DAILY_WORDS = ("运势", "运气", "牌运", "日运", "daily")
-TIME_WORDS = ("今天", "今日", "每日", "最近", "近期")
+TIME_WORDS = ("今天", "今日", "每日", "最近", "近期",
+              "这个月", "本月", "这两天", "这段时间")
 SPECIFIC_WORDS = (
     "感情", "爱情", "恋爱", "喜欢", "复合", "分手", "桃花", "关系",
     "事业", "工作", "学业", "考试", "考研", "面试", "升职",
@@ -34,17 +36,31 @@ SPECIFIC_WORDS = (
 )
 
 
-def _is_daily_request(text: str) -> bool:
-    """判断是否为「今日牌运」类请求：明确运势词即算；泛时间词须无具体主题。
+# 泛时间词分支的「正向白名单」两类（2026-08-29 由黑名单大漏斗收紧而来）：
+# a) 泛问句式——「最近怎么样 / 这个月如何」是在问运势；
+# b) 签文类——「每日塔罗 / 今天来一签」语义就是当日牌运；
+# c) 其余（事件/日程/状态描述：最近总是失眠、今天下午开会吗、今天真的好累）
+#    → 自由随机，出针对性解读——旧规则「时间词 + 无主题词即牌运」全把它们吞了。
+_GENERIC_ASK_RE = re.compile(r"(怎么样|如何|还好吗|咋样|怎样|如何了)")
+_SIGN_WORDS = ("塔罗", "一签", "签文")
 
-    「今天她理我吗」是具体问题（旧注释同旨），「最近她对我什么感觉」同理；
-    「最近怎么样」这类无主题泛问则视为当日牌运。
+
+def _is_daily_request(text: str) -> bool:
+    """判断是否为「今日牌运」类请求：明确运势词即算；泛时间词须无具体主题
+    且命中白名单问法（泛问句式 / 签文类）。
+
+    旧规则「时间词 + 无主题词即牌运」是个大漏斗：「最近总是失眠」「今天下午
+    开会吗」「今天真的好累」这类事件/日程/状态描述会被吞进当日固定牌运；
+    收紧为正向白名单后只有真·运势问法才算。术语词表（SPECIFIC_WORDS）同时
+    用于解读缓存的「泛问/具体」归一化（见 _norm_topic），一处词表两处用。
     """
     text = (text or "").lower()
     if any(w in text for w in DAILY_WORDS):
         return True
     if any(w in text for w in TIME_WORDS):
-        return not any(w in text for w in SPECIFIC_WORDS)
+        if any(w in text for w in SPECIFIC_WORDS):
+            return False
+        return bool(_GENERIC_ASK_RE.search(text) or any(w in text for w in _SIGN_WORDS))
     return False
 
 
