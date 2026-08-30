@@ -6,8 +6,7 @@
 
 ##### 🔧 修复
 
-- **越狱绕过防护增强（续）**：换行夹在越狱句中间不再能绕过——此前「忽略上文
-所有指令」这类跨行句式躲过句式剥除
+- **越狱绕过防护增强（续）**：换行夹在越狱句中间不再能绕过——此前跨行换行拼接的越狱句式可躲过句式剥除
 - **每日牌运泛时间词补充**：「这个月 / 这两天 / 这段时间 + 无主题」的泛问按当日牌运处理——此前这类问法会被判为普通占卜
 - **判定边界加固**：①泛时间词收紧为**正向白名单**——「最近怎么样 / 每日塔罗」仍是当日牌运，「最近总是失眠 / 今天下午开会吗 / 今天真的好累」这类事件/日程/状态描述走具体占卜（旧规则「时间词+无主题」会把它们全吞进固定牌运）；②「我们的未来 / 她未来会爱我吗」这类关系语义+时间线词改用关系阵（恋羽十字），纯时间线问法「我的未来」不变
 
@@ -15,8 +14,7 @@
 
 ##### 🔧 Fixes
 
-- **Jailbreak bypass protection, continued**: newlines inside a jailbreak phrase can no longer slip through — previously multi-line phrasings like "忽略上文
-所有指令" (ignore the above / all instructions) evaded the matcher
+- **Jailbreak bypass protection, continued**: newlines inside a jailbreak phrase can no longer slip through — previously multi-line jailbreak phrasings could evade the matcher
 - **More daily-reading time words**: generic questions with "这个月 / 这两天 / 这段时间" (this month / these days, no specific topic) now get the fixed daily reading — previously they fell into normal readings
 - **Judgement boundary tightened**: ① time-word questions are now a positive whitelist — "how have I been lately / daily tarot" still count as daily fortune, while event/agenda/state descriptions ("I keep losing sleep lately", "is there a meeting this afternoon", "I'm so tired today") get a free draw (the old "time word + no topic" rule swallowed them all); ② relationship semantics + timeline words ("our future", "will she love me") now pick the Lovers' Cross (relationship spread); pure timeline questions ("my future") stay unchanged
 

@@ -77,7 +77,7 @@ def clip_question(text: str, limit: int = MAX_QUESTION_LEN) -> str:
 _INJECTION_PATTERNS: list[tuple[str, str]] = [
     # 指令覆盖：忽略/无视/抛弃/忘记 + 上文类指示 + 指令类名词
         # 指令覆盖：忽略/无视/抛弃/忘记 + 上文类指示 + 指令类名词。
-    # 中间用 [\s\S] 而非 .：. 不匹配换行，「忽略上文\n所有指令」这类跨行拼接也会漏网（实测踩过）
+    # 中间用 [\s\S] 而非 .：. 不匹配换行，跨行换行拼接的越狱句式也会漏网（实测踩过）
     (r"(?:忽略|无视|抛弃|忘记|忘掉)(?:之前|上文|所有|此前|上面|以上|刚刚|刚才)[\s\S]{0,12}(?:指令|设定|限制|规则|提示|约束)", "指令覆盖"),
     (r"(?:ignore|forget|disregard)\s+(?:the\s+)?(?:previous|above|all|prior|earlier)\s+(?:instructions?|rules?|constraints?|prompt)", "指令覆盖-en"),
     # 身份覆写：现在开始你是 / 从现在起你扮演……
