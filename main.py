@@ -58,16 +58,25 @@ from astrbot.api.message_components import Plain  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-VERSION = "0.5.5"
+VERSION = "0.5.6"
 
 # 帮助请求判定：整句剥掉祈使词后只剩「帮助 / help / 说明」才算。
 # 旧版用 "帮助" in text，问题正文里带「帮助」（如「帮助我做出决定」）
 # 会误触发帮助页——踩过：占卜长问题里写「帮助我做出更清醒的决定」，
 # 用户收到的却是帮助文案。这里是收紧后的整句匹配，句中出现不算。
+# 2026-08-29 语料回归补充：
+# - 核心词与「一下」间允许空白（"help 一下"）；前缀扩入 说/讲/告诉/教 及 说下/讲下 等连缀；
+# - 独立宽松分支 _HELP_USAGE_RE：句中含「怎么用/怎么玩/怎么使用/怎么操作/用法」即算——
+#   这类功能问法引导词千变万化（告诉你怎么用/教我一下/这功能怎么玩），
+#   枚举祈使前缀不现实，改为按「功能意图词」判定，误伤率低（占卜问题里几乎不出现）。
 _HELP_REQUEST_RE = re.compile(
-    r"^(?:请|帮我|给我|麻烦|来|看看|看下|查一下|查查|使用|查看|瞅瞅)*\s*"
-    r"(?:帮助|help|帮助说明|使用说明|说明)(?:一下|下)?\s*[？?！!。.]*$",
+    r"^(?:请|帮我|给我|麻烦|来|看看|看下|查一下|查查|使用|查看|瞅瞅|"
+    r"说|讲|告诉|教|说下|讲下|说一下|讲一下|说说|讲讲)*\s*"
+    r"(?:帮助|help|帮助说明|使用说明|说明)(?:\s*(?:一下|下))?\s*[？?！!。.]*$",
     re.IGNORECASE,
+)
+_HELP_USAGE_RE = re.compile(
+    r"^[^？?！!。]*(?:怎么用|怎么玩|怎么使用|怎么操作|用法)[？?！!。]*$"
 )
 
 # 牌阵定义见 spreads.py（FORMATIONS）
@@ -144,7 +153,9 @@ class StarFeatherPlugin(Star):
         # 这坑踩过了，别再踩。
         event.should_call_llm(True)
         try:
-            if helpable and _HELP_REQUEST_RE.fullmatch((text or "").strip()):
+            text_norm = (text or "").strip()
+            if helpable and (_HELP_REQUEST_RE.fullmatch(text_norm)
+                             or _HELP_USAGE_RE.fullmatch(text_norm)):
                 yield event.plain_result(self._help())
                 return
             block = await self.gate.check(event, for_command=True)
@@ -231,7 +242,7 @@ class StarFeatherPlugin(Star):
         remain = await self.gate.session_throttle(f"sf_tool_cd_{umo}",
                                                   self.tarot.llm_tool_cooldown)
         if remain > 0:
-            await self._tool_send(event, f"牌灵刚才才为你算过~ 让它歇 {remain} 秒，或者用 /占卜 再来一卦。")
+            await self._tool_send(event, f"牌灵刚忙完一卦，让它歇 {remain} 秒，或者用 /占卜 再来一卦~")
             yield f"已提示用户节流中（剩 {remain} 秒）。请自然回应一句，不必再调用工具。"
             return
         # 每日次数限流（与命令入口同一闸门，仅跳过会话级节流）

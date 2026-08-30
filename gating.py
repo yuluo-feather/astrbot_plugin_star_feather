@@ -71,7 +71,7 @@ class LimitGate:
             umo = (getattr(event, "unified_msg_origin", None) or "global")
             remain = await self.session_throttle(f"sf_cmd_cd_{umo}", self.cmd_rate_limit)
             if remain > 0:
-                return f"牌灵刚才才为你算过~ 让它歇 {remain} 秒再来。"
+                return f"牌灵刚忙完一卦，让它歇 {remain} 秒再来问~"
         # ② 每用户每日次数（三入口统一）
         if self.daily_count_limit > 0:
             uid = resolve_sender_uid(event)

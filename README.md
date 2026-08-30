@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-  <img src="https://img.shields.io/badge/version-v0.5.5-f8a5c2" alt="v0.5.5"/>
+  <img src="https://img.shields.io/badge/version-v0.5.6-f8a5c2" alt="v0.5.6"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -233,6 +233,12 @@
 - 纯逻辑单测位于 `tests/`（pytest，按域分文件，用例数随开发变化）：`test_core`（抽牌、渲染门控、解读器集成、三入口编排、每日牌运降级）、`test_settings`（默认值与旧配置迁移）、`test_spreads`（选阵/别名/问题清洗）、`test_hardening`（注入剥除/截断/结构校验）、`test_identity`（用户标识降级链）、`test_gating`（限流闸门）、`test_log_setup`（日志路径候选链与幂等安装）、`test_card_render`（渲染冒烟、图片清理）、`test_fonts`（字体覆盖与回退/缓存回归）、`test_deliver`（分段与分发）、`test_limiter`、`test_config`（配置读取原语）；先 `pip install pytest`，再运行 `python -m pytest tests` 即可验证
 
 ## 📜 更新记录
+
+#### v0.5.6
+
+- 修复：群聊节流提示改为「牌灵刚忙完一卦」，不再把别人的冷却算到提问者头上
+- 修复：帮助请求判定扩展，「怎么用/怎么玩/help 一下」等口语问法也能打开使用说明
+- 修复：事件归因式问法修正，「是因为运势差吗」这类归因咨询走自由随机，不再吞进当日牌运
 
 #### v0.5.5
 

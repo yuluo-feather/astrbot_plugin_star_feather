@@ -2,6 +2,22 @@
 
 > 每个版本条目均为中文在前、英文在后。
 
+#### v0.5.6
+
+##### 🔧 修复
+
+- **群聊节流提示措辞**：冷却提示从「牌灵刚才才为你算过」改为「牌灵刚忙完一卦，让它歇 X 秒」——群内别人触发冷却时不再误导提问者
+- **帮助请求判定扩展**：「怎么用 / 怎么玩 / 怎么使用 / help 一下」等问法也能打开使用说明——此前只有「帮助 / help / 说明」整句形态触发，口语问法会被当成占卜问题
+- **事件归因问法修正**：「手指被夹了，是因为运势太差吗」这类「具体事件 + 归因疑问」不再被「运势」词吞进今日固定牌运——那是查询当日运势值的问法；归因咨询改走自由随机，出针对性解读
+
+**English**
+
+##### 🔧 Fixes
+
+- **Group cooldown message reworded**: the cooldown hint now reads "牌灵刚忙完一卦，让它歇 X 秒" (just finished a reading, let it rest X seconds) — when someone else in the group triggers the cooldown, the asker is no longer misled into thinking they got a reading
+- **Help detection extended**: casual phrasings like "怎么用 / 怎么玩 / 怎么使用 / help 一下" (how do I use this) now open the usage guide — previously only standalone "帮助 / help / 说明" forms triggered it, casual questions were treated as divination
+- **Event-attribution questions fixed**: questions like "我的手指被夹了，是因为运势太差吗" (I got my finger pinched — is it because my luck is bad?) no longer fall into the fixed daily reading — attribution questions get a free draw with a targeted reading instead
+
 #### v0.5.5
 
 ##### 🔧 修复

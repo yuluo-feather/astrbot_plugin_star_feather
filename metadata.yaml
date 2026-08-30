@@ -9,7 +9,7 @@ help: |
   [占卜 帮助] 查看使用说明
   [自然语言] 直接说「帮我算一卦」「看看今天的运势」也可触发（可在配置中关闭）
   触发：私聊直接说「占卜 问题」就行（带 / 前缀也行）；群聊 @ 机器人，或在 WebUI 设置唤醒词后「唤醒词 占卜 …」也能触发；不 @ 不带唤醒词的裸文本不响应——门槛交给框架，牌灵只管算牌
-version: 0.5.5
+version: 0.5.6
 author: 羽落
 repo: https://github.com/yuluo-feather/astrbot_plugin_star_feather
 # 运行环境要求：Python 3.12+（与 AstrBot 最低要求一致）；AstrBot 版本范围在下方 astrbot_version 正式声明
