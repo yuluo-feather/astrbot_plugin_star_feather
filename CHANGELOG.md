@@ -23,14 +23,14 @@
 ##### 🔧 修复
 
 - **AI 失败冷却按提供商隔离**：同时配多个模型时，单个模型故障只冷却它自己，其余模型照常出解读——此前任一模型故障会让所有用户 60 秒内都拿不到 AI 解读
-- **越狱绕过防护增强**：全角字符 / 零宽 / bidi 控制符不再能绕开注入句式剥除——此前用全角字母（ｉｇｎｏｒｅ）或零宽字符隔开（忽‌略‌上‌文）可绕过过滤
+- **越狱绕过防护增强**：全角字符 / 零宽 / bidi 控制符不再能绕开注入句式剥除——此前用全角字母（ｉｇｎｏｒｅ）或零宽字符隔开（忽略上文）可绕过过滤
 
 **English**
 
 ##### 🔧 Fixes
 
 - **Provider-isolated AI failure cooldown**: with multiple models configured, a failing model only cools itself down while others keep serving readings — previously any single model failure left all users without AI readings for 60 seconds
-- **Stronger jailbreak bypass protection**: full-width characters / zero-width / bidi control characters can no longer bypass injection stripping (previously e.g. "ｉｇｎｏｒｅ" or "忽‌略‌上‌文" slipped through)
+- **Stronger jailbreak bypass protection**: full-width characters / zero-width / bidi control characters can no longer bypass injection stripping (previously e.g. "ｉｇｎｏｒｅ" or "忽略上文" slipped through)
 
 #### v0.5.3
 
