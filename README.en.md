@@ -51,7 +51,7 @@
 
 | Feature | Command | Description |
 |---------|---------|-------------|
-| 🎴 Smart reading | `/占卜 [question]` | Picks the best spread by keywords, draws cards and sends card art; requests containing fortune words (运势 / 运气…) use the fixed daily reading instead |
+| 🎴 Smart reading | `/占卜 [question]` | Picks the best spread by keywords, draws cards and sends card art; requests containing fortune words (运势 / 运气…) use the fixed daily reading instead (event-attribution questions — "is it because my luck is bad?" — excepted, they go to the free draw) |
 | 🃏 Quick draw | `/单抽` | Today's fixed fortune: one card per user per day, refreshed at midnight; readings are partitioned by topic, staying fixed within the day; output is a dedicated poster card (card art + date + the spirit's words + sign-off) |
 | ❓ Help | `/占卜 帮助` / `/占卜 help` | Show usage |
 
@@ -128,7 +128,8 @@ User request (any of three entry points)【main.py orchestration】
    ▼
 ④ Run the reading (_run_reading)【tarot_core.py draw & render · interpret.py + hardening.py reading】
    ├─ Shuffle hint: multi-card spreads send a random "✨ 洗牌中……" (shuffle_lines toggleable)
-   ├─ Render card image: official assets + upright/reversed (thread pool, temp image auto-cleaned in 30s)
+   ├─ Render card image: official assets + upright/reversed (thread pool, temp image auto-cleaned in 30s); collage backgrounds now use one card randomly picked from *this* reading (cover-fill + deep-navy overlay), and /单抽 and daily fortunes render a dedicated poster card (card art + date + the pool's fixed signature for the day + sign-off — `output.daily_card` toggle, falls back to a normal card image when off or on failure)
+   ├─ Spirit's words: every reading opens with one spirit line — AI-generated in the persona's voice (fitted to this reading's cards and topic; fixed per person / day / card set, renewed the next day), falling back to the pool's daily line when the AI is unavailable; sent as a naked line (no “spirit's words:” label, no quotes), right after the card image and before the reading
    └─ Generate interpretation:
          ├─ Fixed daily → cached reading for the day (stays fixed all day)
          └─ Free random → AI reading on the fly
@@ -138,6 +139,7 @@ User request (any of three entry points)【main.py orchestration】
    │
    ▼
 ⑤ Deliver result (_deliver)【deliver.py delivery · settings.py config applied】
+   ├─ Presentation order: card image → spirit's words → reading paragraphs → summary → disclaimer (same node order in merged forward)
    ├─ Split by structure: one paragraph per card + summary (80–140 chars per prompt convention; overlong segments re-split at `segment_size`)
    ├─ send_mode decides form: forward merged (default) / plain single chain / text_only
    └─ Disclaimer appended at the end (disclaimer, can be empty)
