@@ -14,7 +14,10 @@ MIN_SEGMENT_SIZE = 50           # 分段长度下限
 DEFAULT_AI_TIMEOUT = 30         # 单次 AI 解读超时（秒）
 MIN_AI_TIMEOUT = 5              # 超时配置下限，避免配置成 0 秒自残
 DEFAULT_DISCLAIMER = "✨ 占卜仅供娱乐参考，选择权永远在你手里。"  # 免责声明默认文案（output.disclaimer，空字符串=不显示）
-DEFAULT_AI_COOLDOWN = 60        # AI 解读全部失败后的冷却（秒），期间直接用本地牌义
+DEFAULT_AI_COOLDOWN = 60        # AI 解读失败后的冷却（秒），按 Provider 粒度：挂掉的模型只冷却自己，其余照常服务
+DEFAULT_AI_PERSONA = "random"   # 牌灵人设（ai.persona）：off=中立 / tsundere 傲娇 / gentle 温柔 / mystic 神秘 / random 每次随机
+PERSONA_VALUES = ("off", "tsundere", "gentle", "mystic", "random")  # 与 _conf_schema.json 的 options 一一对应
+DEFAULT_DAILY_CARD = True       # 今日牌运卡（output.daily_card）：/单抽 与运势请求输出竖版卡片图，关闭则回到普通牌面图
 DEFAULT_TOOL_COOLDOWN = 60      # 自然语言占卜节流（秒），同会话冷却期内不重复触发
 DEFAULT_CMD_RATE_LIMIT = 10     # /占卜、/单抽 命令入口的同会话节流（秒），0=关闭
 DEFAULT_DAILY_COUNT = 0         # 每用户每日占卜次数上限，0=关闭（默认不开，防止升级即限流）
@@ -66,6 +69,8 @@ class TarotSettings:
         self.disclaimer = str(_cfg_get(config, "output", "disclaimer", DEFAULT_DISCLAIMER))
         # 今日固定牌运开关：抽取规则归属 spreads/daily，开关归属这里
         self.daily_fixed = _cfg_bool(config, "output", "daily_fixed", True)
+        # 今日牌运卡开关：/单抽 与运势请求输出竖版海报卡，关闭则回退普通牌面图
+        self.daily_card = _cfg_bool(config, "output", "daily_card", DEFAULT_DAILY_CARD)
         self.ai_timeout = _cfg_int(config, "ai", "ai_timeout", DEFAULT_AI_TIMEOUT,
                                    floor=MIN_AI_TIMEOUT)
         self.ai_cooldown = _cfg_int(config, "ai", "ai_fail_cooldown", DEFAULT_AI_COOLDOWN)
@@ -79,5 +84,9 @@ class TarotSettings:
         self.daily_count_limit = _cfg_int(config, "limit", "daily_count", DEFAULT_DAILY_COUNT)
         # 指定 AI 解读模型（provider id，留空 = 用当前会话模型）
         self.ai_provider_id = str(_cfg_get(config, "ai", "ai_provider", "") or "").strip()
+        # 牌灵人设（ai.persona）：非法值回退默认（off=恢复中立语气）
+        self.ai_persona = str(_cfg_get(config, "ai", "persona", DEFAULT_AI_PERSONA) or "").strip().lower()
+        if self.ai_persona not in PERSONA_VALUES:
+            self.ai_persona = DEFAULT_AI_PERSONA
         # 送 AI 的问题长度上限（字符，0=不压缩）：ai.question_max_len
         self.ai_max_len = _cfg_int(config, "ai", "question_max_len", DEFAULT_QUESTION_MAX_LEN)

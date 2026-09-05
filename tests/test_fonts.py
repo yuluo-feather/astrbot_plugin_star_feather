@@ -1,26 +1,16 @@
-"""字体子系统单测：内置子集覆盖、缺字检测、回退链与缓存污染回归。
+"""字体子系统单测：缺字检测、回退链与缓存污染回归（字形覆盖完整性在 test_integrity）。
 ——想写得好看，先过字体这一关。"""
 import os
 
-import fonts
 from PIL import ImageFont
-from tarot_data import TAROT_CARDS
+
+import fonts
 
 
 class TestFont:
     def _load_builtin(self, bold=False):
         path = os.path.join(fonts._FONT_DIR, "StarFeather-Regular.otf")
         return ImageFont.truetype(path, 20)
-
-    def test_current_texts_covered(self):
-        # 验证 README 声明：当前牌库文案（牌名+正逆位牌义）全部在内置子集内
-        font = self._load_builtin()
-        texts = [cn for _, _, cn, *_ in TAROT_CARDS]
-        texts += [up for _, _, _, _, up, _ in TAROT_CARDS]
-        texts += [down for _, _, _, _, _, down in TAROT_CARDS]
-        texts += ["牌阵 · 羽时三刻", "正位", "逆位", "过去", "现在", "未来", "【过去】"]
-        for t in texts:
-            assert fonts._font_covers(font, t), f"子集缺字: {t!r}"
 
     def test_missing_glyph_detected(self):
         font = self._load_builtin()

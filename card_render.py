@@ -2,7 +2,7 @@
 
 使用 B 站幻星集主题塔罗牌素材（assets/）渲染牌面：
 - 所有牌统一「白边卡牌」样式：外层白色圆角卡底 + 内部牌面图，视觉整齐
-- 画布背景为采样自官方背景.png 的干净渐变（顶白 -> 灰蓝 -> 底白）
+- 画布背景为本签随机一张牌面放大做底 + 深藏青遮罩（与今日牌运卡同款风味）
 - 逆位时内部牌面图旋转 180°，信息区标注正逆位 + 牌名 + 牌义关键词
 素材缺失时抛出异常，由上层（tarot_core）回退纯文本牌面。
 
@@ -11,12 +11,14 @@
 import asyncio
 import logging
 import os
+import random
 import secrets
 import tempfile
 import time
 
+from PIL import Image, ImageDraw
+
 from fonts import _load_font
-from PIL import Image, ImageDraw, ImageEnhance, ImageOps
 from tarot_data import SUIT_CN
 
 logger = logging.getLogger(__name__)
@@ -33,28 +35,29 @@ async def _delayed_remove(path: str, delay: int = 30) -> None:
         pass  # 已被启动清理/其他路径处理，无需管
 
 
-def _schedule_image_cleanup(img: str) -> None:
+def _schedule_image_cleanup(img: str, delay: int = 30) -> None:
     """图片产生点即绑定清理（而不是绑定发送出口）：无论后续走 AI 成功、
     文字兜底还是异常中断，任务都已在渲染成功后注册完毕；
-    不在事件循环（如测试）或进程被杀时，由启动清理兜底。"""
+    不在事件循环（如测试）或进程被杀时，由启动清理兜底。
+    delay 默认 30 秒；今日牌运卡海报按 300 秒（卡片是给人存图转发的）。"""
     if not isinstance(img, str) or not img:
         return
     try:
         asyncio.get_running_loop()
     except RuntimeError:
         return  # 无事件循环（测试环境）：不创建协程，避免悬空；启动清理兜底
-    asyncio.create_task(_delayed_remove(img))
+    asyncio.create_task(_delayed_remove(img, delay))
 
 
 def cleanup_stale_images() -> None:
     """启动时清空渲染临时目录：上次进程可能残留下没删的牌面图，
-    只清 tarot_*.png（不动目录里其他文件）。旧图留着也只是占地方。"""
+    只清 tarot_*.png / daily_*.png（不动目录里其他文件）。旧图留着也只是占地方。"""
     try:
         save_dir = os.path.join(tempfile.gettempdir(), "star_feather")
         if not os.path.isdir(save_dir):
             return
         for name in os.listdir(save_dir):
-            if name.startswith("tarot_") and name.endswith(".png"):
+            if (name.startswith("tarot_") or name.startswith("daily_")) and name.endswith(".png"):
                 try:
                     os.remove(os.path.join(save_dir, name))
                 except OSError:
@@ -159,36 +162,28 @@ def _draw_capsule(d, cx, cy, text, font, pad_x, pad_y, bg, fg):
 
 
 # ---------- 画布背景 ----------
-_BG_CACHE = {}
 
+def _build_card_background(card, w, h) -> Image.Image:
+    """牌面 cover 做底 + 深藏青遮罩——背景跟牌走（今日牌运卡与普通拼图共用）。
 
-def _build_background(w, h) -> Image.Image:
-    """官方牌背 背景.png cover 居中铺满画布（保持比例居中裁剪，不拉伸不变形）。"""
-    key = (w, h)
-    if key in _BG_CACHE:
-        return _BG_CACHE[key].copy()
-    try:
-        img = Image.open(_resolve_asset(os.path.join(_ASSET_ROOT, "Extra", "背景.png"))).convert("RGB")
-        bg = ImageOps.fit(img, (w, h), Image.LANCZOS)
-        # 压暗：保留官方牌背的图案纹理，同时保住深底白卡的层次
-        bg = ImageEnhance.Brightness(bg).enhance(0.62)
-    except Exception:
-        top = (32, 40, 68)
-        mid = (40, 38, 74)
-        bottom = (52, 40, 84)
-        grad = Image.new("RGB", (1, h))
-        for y in range(h):
-            t = y / (h - 1)
-            if t < 0.55:
-                k = t / 0.55
-                c = [int(top[i] + (mid[i] - top[i]) * k) for i in range(3)]
-            else:
-                k = (t - 0.55) / 0.45
-                c = [int(mid[i] + (bottom[i] - mid[i]) * k) for i in range(3)]
-            grad.putpixel((0, y), tuple(c))
-        bg = grad.resize((w, h))
-    _BG_CACHE[key] = bg
-    return bg.copy()
+    cover 放大前先裁中心带：素材上下缘自带牌名/装饰文字，整图放大会把它们
+    放大成底部大字；旧海报背景是纯净花纹+人物剪影，取中心 72% 避开。
+    素材缺失抛 FileNotFoundError：渲染层 fail loudly，回退由编排层兜底。
+    """
+    path = _asset_path(card)
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"塔罗素材缺失: {path}")
+    src = Image.open(path).convert("RGBA")
+    band = max(1, int(src.height * 0.72))
+    band_top = (src.height - band) // 2
+    src = src.crop((0, band_top, src.width, band_top + band))
+    scale = max(w / src.width, h / src.height)
+    bw, bh = int(src.width * scale) + 1, int(src.height * scale) + 1
+    bg = src.resize((bw, bh), Image.LANCZOS)
+    left, top = (bw - w) // 2, (bh - h) // 2
+    canvas = bg.crop((left, top, left + w, top + h)).convert("RGBA")
+    overlay = Image.new("RGBA", (w, h), (28, 34, 56, 178))  # 深藏青遮罩：花纹隐约、文字可读
+    return Image.alpha_composite(canvas, overlay)
 
 
 def _load_card_image(path: str, upright: bool):
@@ -255,7 +250,13 @@ def _draw_card(canvas, x, y, card, upright) -> int:
 
 # ---------- 拼图主函数 ----------
 def render_cards(positions, picks, formation, save_dir=None) -> str:
-    """把抽牌结果渲染成一张图片，返回图片保存路径。"""
+    """把抽牌结果渲染成一张图片，返回图片保存路径。
+
+    背景跟牌走：从本签抽出的 picks 里随机挑一张的牌面做底（3 张阵 3 选 1、
+    十字阵 4 选 1），与今日牌运卡同一套风味；素材缺失抛异常，由 tarot_core
+    回退纯文本。清理与渲染解耦：调用方在拿到路径后自行
+    _schedule_image_cleanup（tarot_core._maybe_render_image / daily 编排）。
+    """
     n = len(picks)
     cols = 1 if n <= 1 else (2 if n == 4 else n)
     rows = (n + cols - 1) // cols
@@ -271,7 +272,9 @@ def render_cards(positions, picks, formation, save_dir=None) -> str:
     W = cols * CARD_OUT_W + (cols - 1) * gap + pad * 2
     H = title_h + rows * (label_h + unit_h) + (rows - 1) * gap + pad * 2
 
-    canvas = _build_background(W, H)
+    # 背景从本签抽出的牌里随机挑一张做底（3 张阵 3 选 1、十字阵 4 选 1）——
+    # 每签背景都可能是本签任意一张的牌面，跟今日牌运卡同为「本签的牌」定基调
+    canvas = _build_card_background(random.choice(picks)["card"], W, H)
     d = ImageDraw.Draw(canvas)
 
     _draw_capsule(d, W / 2, 52, f"牌阵 · {formation}", _load_font(38, bold=True, text=f"牌阵 · {formation}"),
@@ -292,3 +295,89 @@ def render_cards(positions, picks, formation, save_dir=None) -> str:
     path = os.path.join(save_dir, f"tarot_{int(time.time())}_{secrets.token_hex(4)}.png")
     canvas.save(path, "PNG")
     return path
+
+
+# ---------- 今日牌运卡海报 ----------
+DAILY_CARD_W = 680                       # 海报宽（竖版）
+DAILY_CARD_H = 1200                      # 海报高
+_DAILY_SIG_TEXT = (236, 227, 196)        # 签文引用 米金
+_DAILY_DATE_TEXT = (208, 214, 226)       # 日期 灰白
+_DAILY_SIGN_TEXT = (186, 194, 208)       # 署名 灰蓝
+_DAILY_FOOT_TEXT = (236, 188, 204)       # 水印 樱粉（本羽喜欢的颜色）
+
+
+def _split_signature_lines(d, text, font, max_w) -> list[str]:
+    """签文分行：优先在标点（，。！？；、）后断、标点收尾，单句仍超宽再逐字回落。
+
+    断行不丢字不截断（调用方渲染时最多取两行，池内上限 32 字必放下）；
+    短签文（约 18 字）一行居中——旧版牌运卡的秀气观感，别逐字硬切成半句。
+    """
+    segs, cur = [], ""
+    for ch in text:
+        cur += ch
+        if ch in "，。！？；、":
+            segs.append(cur)
+            cur = ""
+    if cur:
+        segs.append(cur)
+    lines, line = [], ""
+    for seg in segs:
+        if d.textlength(line + seg, font=font) <= max_w:
+            line += seg
+            continue
+        if line:
+            lines.append(line)
+            line = ""
+        while d.textlength(seg, font=font) > max_w:  # 单段超宽：逐字切回落到两行以上
+            cut = 0
+            while cut < len(seg) and d.textlength(seg[:cut + 1], font=font) <= max_w:
+                cut += 1
+            lines.append(seg[:cut])
+            seg = seg[cut:]
+        line = seg
+    if line:
+        lines.append(line)
+    return lines
+
+
+def _render_daily_card_img(card, upright, signature, date_text, save_dir=None) -> str:
+    """今日牌运卡海报：同款牌面素材放大做底 + 深色遮罩，竖版 680×1200。
+
+    自上而下：标题胶囊「星羽塔罗·今日牌运」/ 日期（如「8月27日·周四」）/
+    白边卡牌（_draw_card 同款，逆位卡内旋转而背景不转）/ 签文引用「『…』」/
+    署名「—— 牌灵·星羽塔罗」/ 底部水印。同步函数：编排在 daily.render_daily_card
+    经 to_thread 调用；素材缺失抛异常，由编排层兜底回退普通牌面图。
+    """
+    W, H = DAILY_CARD_W, DAILY_CARD_H
+    canvas = _build_card_background(card, W, H)
+    d = ImageDraw.Draw(canvas)
+
+    _draw_capsule(d, W / 2, 72, "星羽塔罗·今日牌运",
+                  _load_font(34, bold=True, text="星羽塔罗·今日牌运"),
+                  36, 14, CAPSULE_BG, CAPSULE_TEXT)
+    _text_center(d, W / 2, 124, date_text,
+                 _load_font(26, text=date_text), _DAILY_DATE_TEXT)
+
+    card_x = (W - CARD_OUT_W) // 2
+    card_y = 176
+    _draw_card(canvas, card_x, card_y, card, upright)
+
+    # 签文引用：24px 常规体（秀气，旧卡同款观感），按标点分行最多两行；
+    # 署名与底部水印固定留白
+    quote = f"『{signature}』"
+    q_font = _load_font(24, text=quote)
+    qy = 992
+    for line in _split_signature_lines(d, quote, q_font, W - 200)[:2]:
+        _text_center(d, W / 2, qy, line, q_font, _DAILY_SIG_TEXT)
+        qy += 38
+    _text_center(d, W / 2, qy + 12, "—— 牌灵·星羽塔罗",
+                 _load_font(23, text="—— 牌灵·星羽塔罗"), _DAILY_SIGN_TEXT)
+    _text_center(d, W / 2, H - 58, "星羽塔罗 Star Feather",
+                 _load_font(21, text="星羽塔罗 Star Feather"), _DAILY_FOOT_TEXT)
+
+    if save_dir is None:
+        save_dir = os.path.join(tempfile.gettempdir(), "star_feather")
+    os.makedirs(save_dir, exist_ok=True)
+    out_path = os.path.join(save_dir, f"daily_{int(time.time())}_{secrets.token_hex(4)}.png")
+    canvas.convert("RGB").save(out_path, "PNG")
+    return out_path

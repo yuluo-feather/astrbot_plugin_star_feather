@@ -2,7 +2,8 @@
 
 main.py 只做入口编排：「读写 KV + 生成拦截文案」收敛于此。
 设计原则（与 limiter.py 一致）：
-- 判定纯逻辑在 limiter（可单测）；本层只做 KV 读写与 try-except 静默降级
+- 判定纯逻辑在 limiter（可单测）；本层只做 KV 读写与降级裁定——读写经 kv_utils
+  安全层（吞异常+打日志，区分存储故障与无记录），本层按 ok 值决定放行还是计数
   （宁可不限流，也不能让占卜入口报错）。
 - 键按「单 key 覆盖式」设计：数据随时间/日期自然失效，零清理任务。
 - 会话级节流（sf_cmd_cd_*）与用户级每日计数（sf_cmd_cnt_*）维度不同，
@@ -14,6 +15,7 @@ import logging
 import time
 
 from identity import resolve_sender_uid
+from kv_utils import kv_get, kv_put
 from limiter import cooldown_remaining, daily_remaining, daily_touch
 
 logger = logging.getLogger(__name__)
@@ -40,18 +42,12 @@ class LimitGate:
         """
         if cooldown <= 0:
             return 0
-        last_ts = 0.0
-        try:
-            last_ts = float(await self.kv_store.get_kv_data(key, 0) or 0)
-        except Exception:
-            pass
+        last_ts, _ok = await kv_get(self.kv_store, key, 0, "会话节流")
+        last_ts = float(last_ts or 0)
         remain = cooldown_remaining(last_ts, time.time(), cooldown)
         if remain > 0:
             return remain
-        try:
-            await self.kv_store.put_kv_data(key, int(time.time()))
-        except Exception:
-            pass
+        await kv_put(self.kv_store, key, int(time.time()), "会话节流")
         return 0
 
     async def check(self, event, for_command: bool) -> str | None:
@@ -71,6 +67,8 @@ class LimitGate:
             umo = (getattr(event, "unified_msg_origin", None) or "global")
             remain = await self.session_throttle(f"sf_cmd_cd_{umo}", self.cmd_rate_limit)
             if remain > 0:
+                # 会话级节流按消息源（群/私聊）维度：群里别人刚问过，等于整个会话歇口气，
+                # 文案别把「为别人算」套在用户头上，用中性的“刚忙完，歇口气”。
                 return f"牌灵刚忙完一卦，让它歇 {remain} 秒再来问~"
         # ② 每用户每日次数（三入口统一）
         if self.daily_count_limit > 0:
@@ -78,19 +76,13 @@ class LimitGate:
             if uid:
                 today = time.strftime("%Y%m%d")
                 key = f"sf_cmd_cnt_{uid}"
-                data = None
-                try:
-                    data = await self.kv_store.get_kv_data(key, None) or {}
-                except Exception:
-                    pass  # 读失败：放行且不计数
+                data, ok = await kv_get(self.kv_store, key, None, "每日计数")
+                data = (data or {}) if ok else None  # 读失败：放行且不计数
                 if data is not None:
                     remain = daily_remaining(self.daily_count_limit, data, today)
                     if remain == 0:
                         return (f"今天已经问过牌灵 {self.daily_count_limit} 次啦~ "
                                 "明天零点牌运刷新后再来。")
                     if remain > 0:
-                        try:
-                            await self.kv_store.put_kv_data(key, daily_touch(data, today))
-                        except Exception:
-                            pass
+                        await kv_put(self.kv_store, key, daily_touch(data, today), "每日计数")
         return None

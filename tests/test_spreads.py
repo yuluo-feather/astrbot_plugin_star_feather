@@ -35,6 +35,8 @@ class TestSelectFormation:
     def test_timeline_word_alone_stays_three(self):
         # 无关系主体的时间线问法不变
         assert select_formation("我的未来") == "羽时三刻"
+        assert select_formation("未来如何") == "羽时三刻"
+        assert select_formation("过去和未来哪个重要") == "羽时三刻"
 
     def test_blank_is_safe(self):
         assert select_formation(None) == "羽时三刻"

@@ -14,8 +14,12 @@ import os
 import random
 import sys
 
-# 插件被动态 __import__ 加载时不在 sys.path 中，需显式加入插件目录
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# 插件被动态 __import__ 加载时不在 sys.path 中，需显式加入插件目录（已在则跳过，防热重载累积）
+_plugin_dir = os.path.dirname(os.path.abspath(__file__))
+if _plugin_dir not in sys.path:
+    sys.path.insert(0, _plugin_dir)
+
+from astrbot.api.all import *
 
 from card_render import _schedule_image_cleanup, render_cards
 from deliver import Deliverer
@@ -23,8 +27,6 @@ from interpret import AiInterpreter
 from settings import TarotSettings
 from spreads import FORMATIONS
 from tarot_data import SUIT_CN, TAROT_CARDS
-
-from astrbot.api.all import *
 
 logger = logging.getLogger(__name__)
 
@@ -36,14 +38,16 @@ class StarTarot:
         # 复制而非持有：让插件各处直接用 self.xxx 取值，不绕道 st.xxx——读起来省心
         st = TarotSettings(config)
         for _k in ("enable_ai", "segment_size", "send_mode", "shuffle_lines",
-                   "disclaimer", "daily_fixed", "ai_timeout", "ai_cooldown",
+                   "disclaimer", "daily_fixed", "daily_card", "ai_timeout", "ai_cooldown",
                    "llm_tool_enabled", "llm_tool_cooldown", "cmd_rate_limit",
-                   "daily_count_limit", "ai_provider_id", "ai_max_len"):
+                   "daily_count_limit", "ai_provider_id", "ai_max_len",
+                   "ai_persona"):  # 牌灵人设：随配置透传，只改解读口吻（见 prompts.build_system_prompt）
             setattr(self, _k, getattr(st, _k))
         # 子组件：AI 解读（interpret.py）与结果分发（deliver.py）
+        # person 只影响 system_prompt 的口吻前缀：解读内容、输出结构与安全规则一字不动
         self.interpreter = AiInterpreter(context, self.enable_ai, self.ai_timeout,
                                          self.ai_cooldown, self.ai_provider_id,
-                                         self.ai_max_len)
+                                         self.ai_max_len, self.ai_persona)
         self.deliverer = Deliverer(self.segment_size, self.disclaimer,
                                    self.send_mode == "forward")
         # 渲染并发锁（×2）：Pillow 拼图丢线程池执行，见 _maybe_render_image
@@ -102,6 +106,9 @@ class StarTarot:
         走纯文本 + 内置牌义；plain / forward 均渲染（forward 时必有图）。
         返回 None 与渲染失败意义统一，调用方无需区分。
 
+        今日牌运的海报卡（标题/日期/签文）由 daily.render_daily_card 独自渲染，
+        本方法只管普通占卜牌面图。
+
         渲染异步化：Pillow 拼图（读取 2~3MB 素材 ×N + 缩放/旋转/圆角 + PNG 编码）
         同步执行约 0.3~1 秒，会阻塞整个事件循环（所有会话/插件一起卡），
         所以丢进线程池（asyncio.to_thread；Pillow 的 C 扩展释放 GIL，并行真实有效），
@@ -117,15 +124,18 @@ class StarTarot:
         return img
 
     async def _ai_interpret(self, event, formation: str, positions: list[str],
-                            picks: list[dict], user_input: str) -> str | None:
+                            picks: list[dict], user_input: str,
+                            persona_eff: str | None = None) -> str | None:
         """AI 结构化解读（委托 AiInterpreter）；牌面详情在核心侧格式化，
-        解读器保持对塔罗数据结构零依赖。"""
+        解读器保持对塔罗数据结构零依赖。persona_eff 由调用方传入（同一签
+        牌灵的话与解读共用同一人格）；None 时解读器自行解析。"""
         lines = []
         for i, (pos, pick) in enumerate(zip(positions, picks), 1):
             _, cn, state, meaning = self._pick_info(pick)
             lines.append(f"- 第{i}张【{pos}】「{cn}」{state}（{meaning}）\n")
         detail = "".join(lines)
-        return await self.interpreter.interpret(event, formation, positions, picks, user_input, detail)
+        return await self.interpreter.interpret(event, formation, positions, picks,
+                                                user_input, detail, persona_eff=persona_eff)
 
     async def _deliver(self, event, interp: str | None, img: str | None, formation: str,
                        positions: list[str], picks: list[dict], fail_note: str = "",

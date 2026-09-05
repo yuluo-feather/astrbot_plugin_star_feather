@@ -3,8 +3,16 @@
 测试按域分文件：test_core（核心与三入口集成）/ test_settings（配置语义）/
 test_spreads（选阵与清洗）/ test_hardening（Prompt 防护）/ test_identity（身份标识）/
 test_gating（限流闸门）/ test_log_setup（运行日志）/ test_card_render（渲染与清理）/
-test_fonts（字体子系统）/ test_deliver（分段与分发）/ test_limiter / test_config，
+test_fonts（字体子系统）/ test_deliver（分段与分发）/ test_limiter / test_config /
+test_dailylines（每日签文池与确定性挑选）/ test_judgement_corpus（判定语料回归），
 共享桩（FakeProvider / FakeContext / 牌常量）在 stubs.py。
+
+【导入约定】测试文件一律用插件根相对导入（from daily import ...），
+不要用 data.plugins.astrbot_plugin_star_feather.xxx 全路径——那是 AstrBot
+运行时的包路径，独立跑 pytest 时 data 包不存在，会在收集阶段直接
+ModuleNotFoundError（踩过：test_dailylines 曾全路径导入导致整个测试收集中断）。
+从 launcher 根目录跑 AstrBot 测试同理：脚本内部 import 也走插件根。
+
 conftest 只提供最小名字桩：@register / @command / @llm_tool 装饰器与消息组件类
 （At / Plain / Node 等），不需要模拟行为；事件对象与插件实例另由各测试文件构造。
 
@@ -60,7 +68,9 @@ class At:
 
 
 class Image:
-    pass
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
 
 
 class Node:

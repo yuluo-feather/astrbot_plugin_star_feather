@@ -3,8 +3,9 @@
 import asyncio
 import types
 
-from deliver import Deliverer, split_sections, split_text
 from stubs import PICK
+
+from deliver import Deliverer, split_sections, split_text
 
 
 class TestSplitText:
@@ -28,6 +29,12 @@ class TestSplitText:
     def test_empty(self):
         assert split_text("", 10) == []
         assert split_text(None, 10) == []
+
+    def test_nonpositive_size_safe(self):
+        """size<=0 防御：不进入 while 死循环，整体单段返回（调用方由 settings floor 保护）。"""
+        assert split_text("一行文本", 0) == ["一行文本"]
+        assert split_text("一行文本", -5) == ["一行文本"]
+        assert split_text("", 0) == []
 
 
 class TestSplitSections:
@@ -76,3 +83,27 @@ class TestDeliverEpilogue:
         self._collect(d.deliver(evt, "【总结】二", None,
                                 "羽时三刻", ["过去"], [PICK], lambda *a: "兜底"))
         assert all(getattr(c, "text", "") != "✨ 收尾句" for c in evt.result)
+
+    def test_message_order_image_then_preface_then_sections(self):
+        """呈现顺序契约：牌面 → 牌灵的话(preface 裸句无前缀无引号) → 解读段 → 总结 → 免责。"""
+        evt = self._evt()
+        d = Deliverer(300, "免责声明", False)
+        self._collect(d.deliver(evt, "【第1张·过去】一【总结】二", "img.png",
+                                "羽时三刻", ["过去"], [PICK], lambda *a: "兜底",
+                                preface="今天安心"))
+        kinds = [type(c).__name__ for c in evt.result]
+        assert kinds == ["Image", "Plain", "Plain", "Plain", "Plain"]
+        assert evt.result[1].text == "今天安心\n"  # chain 模式 preface 带尾随换行
+        assert "免责声明" in evt.result[-1].text
+
+    def test_message_order_image_then_preface_forward(self):
+        """合并转发模式同序：牌面节点在前，牌灵的话次之，最后免责。"""
+        evt = self._evt()
+        d = Deliverer(300, "免责声明", True)
+        self._collect(d.deliver(evt, "【总结】二", "img.png",
+                                "羽时三刻", ["过去"], [PICK], lambda *a: "兜底",
+                                preface="今天安心"))
+        nodes = evt.result[0].nodes
+        assert "✨ 星羽塔罗 · 牌面" in nodes[0].content[1].text
+        assert nodes[1].content[0].text == "今天安心"
+        assert "免责声明" in nodes[-1].content[0].text

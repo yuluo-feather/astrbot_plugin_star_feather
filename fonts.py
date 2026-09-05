@@ -8,6 +8,7 @@
 （想写得好看，先过字体这一关——本羽的排面不能是豆腐块。）
 """
 import functools
+import json
 import os
 
 from PIL import ImageFont
@@ -26,7 +27,8 @@ def _font_candidates(bold: bool) -> tuple[str, ...]:
         os.path.join(_FONT_DIR, "StarFeather-Bold.otf" if bold else "StarFeather-Regular.otf"),
         # Windows
         r"C:\Windows\Fonts\msyhbd.ttc" if bold else r"C:\Windows\Fonts\msyh.ttc",
-        r"C:\Windows\Fonts\msyh.ttc",
+        # 普通雅黑仅在粗体链需要（非粗体时上一项已与首选重复，不保留冗余候选）
+        *([r"C:\Windows\Fonts\msyh.ttc"] if bold else []),
         r"C:\Windows\Fonts\simhei.ttf",
         r"C:\Windows\Fonts\simsun.ttc",
         # macOS
@@ -44,7 +46,12 @@ def _font_candidates(bold: bool) -> tuple[str, ...]:
 def _font_covers(font, text: str) -> bool:
     """校验字形覆盖：内置子集命中后仍检查文本中每个字符是否在 cmap 内，
     缺字时回退链继续找下一个候选（避免未来新增生僻字牌义变豆腐块）。
-    无 fontTools / 无法解析时保守放行。"""
+
+    校验数据源三级：fontTools 动态解析 cmap > 打包的静态清单 fonts/charsets.json
+    > 无法校验（极端环境）。无法校验时：内置子集保守视为「不覆盖」（继续回退
+    系统字体，宁可换字体不可豆腐），系统字体保守放行（系统字体校验失败同样
+    无法自证覆盖，但系统字体几乎全字形，且回退到它已是最后防线，放行优于
+    直接甩 load_default）。"""
     path = getattr(font, "path", None)
     if not path or not text:
         return True
@@ -59,11 +66,30 @@ def _font_covers(font, text: str) -> bool:
                     cmap.update(table.cmap.keys())
             tf.close()
         except Exception:
-            cmap = None  # 解析失败/无 fontTools：视为全覆盖，不拦截
+            cmap = _load_static_cmap(path)  # fontTools 解析失败：读打包清单兜底
         _FONT_CMAP[path] = cmap
     if cmap is None:
-        return True
+        # 静态清单也没有（文件被删/损坏）：内置子集不放行，系统字体放行
+        return not path.startswith(_FONT_DIR)
     return all(ord(c) in cmap for c in text if not c.isspace())
+
+
+@functools.cache
+def _load_static_cmap(path: str) -> set | None:
+    """打包的预先导出的 cmap 清单（fonts/charsets.json），fontTools 不可用时的兜底。
+
+    清单只收录内置子集字体（字体文件是静态常量，发布时导出，随插件分发）；
+    清单里没有的字体（系统字体）返回 None——表示无覆盖数据，
+    由 _font_covers 判定路径：内置字体保守回退、系统字体放行。
+    清单缺失/解析失败同样返回 None。"""
+    try:
+        charset_path = os.path.join(_FONT_DIR, "charsets.json")
+        with open(charset_path, encoding="utf-8") as f:
+            data = json.load(f)
+        chars = data["fonts"].get(os.path.basename(path))
+        return set(chars) if chars else None
+    except Exception:
+        return None
 
 
 def _load_font(size: int, bold: bool = False, text: str = None):

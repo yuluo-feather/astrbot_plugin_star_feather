@@ -2,6 +2,28 @@
 
 > 每个版本条目均为中文在前、英文在后。
 
+#### v0.6.0
+
+##### ✨ 新功能
+
+- **牌灵人设化**：AI 解读口吻三选一（傲娇 / 温柔 / 神秘）或每签随机（`ai.persona`，off 恢复中立语气）——每格人设卡带口吻硬约束（至少两处、禁占卜师腔）与签文风格样板；随机时一签从开始到结束固定同一人格，下一签才换；解读内容与输出结构不变。**牌灵的话**一并人设化：所有牌阵（羽签 / 羽时三刻 / 羽镜 / 恋羽十字 / 每日牌运）都有一句牌灵的开口，AI 按牌灵人设现生成（贴合本次牌面与问题），同人同日同牌组当天固定同一句、第二天换新，AI 不可用回退池内签文；裸句直出（无「牌灵的话：」标签与引号），一句话说人话（比喻一读就懂，不玩晦涩意象），置于牌面图之后、解读之前
+- **今日牌运卡**：`/单抽` 与每日牌运输出专属海报卡（牌面 + 日期 + 牌灵的话 + 署名 + 水印）——海报卡面印池内当日固定签文，引用式呈现「『…』—— 牌灵·星羽塔罗」；海报渲染失败自动回退普通牌面图；自带开关 `output.daily_card`（默认开），关闭后回到普通牌面图、牌灵的话仍随解读出现。**这套视觉语言顺带普及到所有牌阵**：拼图背景从官方牌背改为本签随机一张牌的牌面（cover 放大做底 + 深藏青遮罩）——羽时三刻 3 选 1、恋羽十字 4 选 1，与今日牌运卡同一套风味，每签背景都可能是本签任意一张牌给整幅图定基调
+
+##### 🔧 修复
+
+- **卡面字体回退加固**：今日牌运卡与所有牌面图在字体校验组件未就绪（如依赖安装进行中）时不再显示方块字——此前内置子集缺字（引号、破折号等模板字符）在校验失效时会被直接渲染成豆腐块，现在无论校验组件是否可用都会正确回退到系统字体
+
+**English**
+
+##### ✨ New features
+
+- **Spirit persona**: AI readings now come in three voices — tsundere / gentle / mystic — or a random pick per reading (`ai.persona`; `off` restores the neutral voice); each persona card ships hard tone requirements (at least two tells, no generic fortune-teller phrasing) and a signature-style sample; only the tone changes, the reading content and output structure stay identical, and on random the chosen persona stays fixed for the whole reading (next reading may differ). The **spirit's words** are part of the same persona: every reading — Feather Sign / Feather Hour Three / Feather Mirror / Lovers' Feather Cross and the daily fortune — opens with a spirit's line, AI-generated in the persona's voice (fitted to this reading's cards and question), fixed per person / day / card set and renewed daily, falling back to the pool line when the AI is unavailable; sent as a naked line (no "spirit's words: " label, no quotation marks), said in plain words with metaphors that are instantly clear, right after the card image and before the reading
+- **Daily fortune card**: `/单抽` and daily fortunes now render a dedicated poster card (card art + date + signature + watermark) — the card face prints the pool's fixed signature for the day, quoted as 「『…』—— 牌灵·星羽塔罗」; if the poster fails it falls back to a normal card image; ships with a switch `output.daily_card` (default on) — turn it off for the normal card image while the spirit's words still follow. The same visual language now reaches every collage: spread backgrounds switched from the official card back to a randomly picked card from *this* reading (cover-fill plus deep-navy overlay — 3 choices in Feather Hour Three, 4 in Lovers' Feather Cross, same feel as the daily fortune card, so any card in the spread can set the tone)
+
+##### 🔧 Fixes
+
+- **Card font fallback hardened**: the daily fortune card and all card images no longer show tofu boxes when the font-checking dependency isn't ready (e.g. mid-install) — previously missing glyphs in the bundled subset (template characters like quote marks and em-dashes) were rendered straight as boxes once validation failed; now they always fall back to a system font regardless of the checker's availability
+
 #### v0.5.6
 
 ##### 🔧 修复

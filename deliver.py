@@ -4,9 +4,9 @@
 结果如何呈现（分段 / 合并转发 / 免责声明）全部收敛于此。
 ——牌是占出来了，怎么端到你面前，本羽说了算。
 """
-from prompts import SECTION_MARK_RE
-
 from astrbot.api.message_components import Image, Node, Nodes, Plain
+
+from prompts import SECTION_MARK_RE
 
 
 def split_text(text: str, size: int) -> list[str]:
@@ -14,6 +14,9 @@ def split_text(text: str, size: int) -> list[str]:
     text = (text or "").strip()
     if not text:
         return []
+    if size <= 0:
+        # 非法尺寸防御：整体单段返回，绝不进入 while 死循环（正常配置被 settings floor 保护）
+        return [text]
     parts = []
     while len(text) > size:
         cut = text[:size].rfind("\n")
@@ -63,19 +66,19 @@ class Deliverer:
                       plain_text, fail_note: str = "", preface: str = ""):
         """发送占卜结果。plain_text: callable(formation, positions, picks) -> str，
         生成无 AI 解读时的本地牌义兜底文案。
-        preface: 降级通道（仅在 event.send 独立发送洗牌提示失败时由调用方传入），
-        作为发送内容的第一条并入；正常路径为空。框架对 asyncgen 型工具只保留
-        最后一个 yield 发送，本方法内容合并进单次 yield。
+        preface: 牌面之后的独立前置行（正常路径是「牌灵的话」；亦承接洗牌提示
+        独立发送失败时的降级并入），排在图片之后、解读段之前。框架对 asyncgen
+        型工具只保留最后一个 yield 发送，本方法内容合并进单次 yield。
         收尾句不带在这里：命令入口在 _run_reading 里独立直发（不入合并转发），
         工具入口收尾由 Agent Loop 的 LLM 回复承担——本分发器只发结果本体。
         """
         if not interp:
             chain = []
-            if preface:
-                chain.append(Plain(preface))
             if img:
                 chain.append(Image(file=img))
-            else:
+            if preface:
+                chain.append(Plain(preface))
+            elif not img:
                 chain.append(Plain(plain_text(formation, positions, picks)))
             if fail_note:
                 chain.append(Plain(fail_note))
@@ -96,21 +99,21 @@ class Deliverer:
             uin = str(event.get_self_id() or "0")
         if self.forward_result:
             # 是否含图由调用方门控（text_only 模式下 img 为 None → 纯文字转发）
-            # preface 仅降级路径使用（洗牌提示独立发送失败时并入首节点）
+            # preface = 牌灵的话（正常路径）/洗牌提示降级并入；节点序：牌面 → preface → 解读段
             nodes = []
-            if preface:
-                nodes.append(Node(content=[Plain(preface)], name="星羽塔罗", uin=uin))
             if img:
                 nodes.append(Node(content=[Image(file=img), Plain("\n✨ 星羽塔罗 · 牌面")], name="星羽塔罗", uin=uin))
+            if preface:
+                nodes.append(Node(content=[Plain(preface)], name="星羽塔罗", uin=uin))
             nodes.extend(Node(content=[Plain(seg)], name="星羽塔罗", uin=uin) for seg in parts)
             yield event.chain_result([Nodes(nodes)])
         else:
             # 非转发模式：内容合并进一条链消息（框架只发送最后一个 yield，逐段 yield 会被丢弃）
             chain = []
-            if preface:
-                chain.append(Plain(preface + "\n"))
             if img:
                 chain.append(Image(file=img))
+            if preface:
+                chain.append(Plain(preface + "\n"))
             for i, seg in enumerate(parts):
                 tail = "" if i == len(parts) - 1 else "\n"
                 chain.append(Plain(seg + tail))

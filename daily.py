@@ -9,12 +9,18 @@
 
 说人话：今天这张牌，本羽说了算——问一百遍也是它，别想改命。
 """
+import asyncio
 import hashlib
 import logging
 import random
 import re
 import time
+from datetime import datetime
 
+from card_render import _render_daily_card_img, _schedule_image_cleanup
+from dailylines import pick_signature
+from kv_utils import kv_get, kv_put
+from prompts import SPIRIT_PROMPT_V
 from tarot_data import TAROT_CARDS
 
 logger = logging.getLogger(__name__)
@@ -40,12 +46,15 @@ SPECIFIC_WORDS = (
 CAUSE_WORDS = ("是因为", "是不是因为", "难道是因为", "就是因为",
                "可能因为", "或许因为是")
 
-
 # 泛时间词分支的「正向白名单」两类（2026-08-29 由黑名单大漏斗收紧而来）：
 # a) 泛问句式——「最近怎么样 / 这个月如何」是在问运势；
 # b) 签文类——「每日塔罗 / 今天来一签」语义就是当日牌运；
 # c) 其余（事件/日程/状态描述：最近总是失眠、今天下午开会吗、今天真的好累）
 #    → 自由随机，出针对性解读——旧规则「时间词 + 无主题词即牌运」全把它们吞了。
+_GENERIC_ASK_RE = re.compile(r"(怎么样|如何|还好吗|咋样|怎样|如何了)")
+_SIGN_WORDS = ("塔罗", "一签", "签文")
+
+
 def _is_event_attribution(text: str) -> bool:
     """事件归因式？——「运势/运气」等词出现在因果连词之后（作归因宾语）。
 
@@ -60,10 +69,6 @@ def _is_event_attribution(text: str) -> bool:
         if any(w in text[i:] for w in DAILY_WORDS):
             return True
     return False
-
-
-_GENERIC_ASK_RE = re.compile(r"(怎么样|如何|还好吗|咋样|怎样|如何了)")
-_SIGN_WORDS = ("塔罗", "一签", "签文")
 
 
 def _is_daily_request(text: str) -> bool:
@@ -97,7 +102,7 @@ def _daily_pick(uid: str, date_str: str) -> tuple:
     重启不变，且不碰全局 random，不影响 /占卜 的自由随机；
     正逆位同样由种子决定，纯随机、不可刷。
     """
-    seed = hashlib.md5(f"{date_str}:{uid}".encode()).hexdigest()
+    seed = hashlib.md5(f"{date_str}:{uid}".encode()).hexdigest()  # nosec B324 非安全用途：仅作确定性随机种子
     rng = random.Random(seed)
     upright = rng.random() < 0.5
     return rng.choice(TAROT_CARDS), upright
@@ -138,6 +143,29 @@ class DailyFortune:
         self.kv_store = kv_store
         self.tarot = tarot
 
+    async def render_daily_card(self, topics: list[str], picks: list[dict], uid: str) -> str | None:
+        """今日牌运卡海报编排：签文（确定性函数）+ 日期文本 + 线程池渲染 + 300s 清理。
+
+        渲染失败一律返回 None——调用方回退普通牌面图，不拦占卜主流程；
+        清理期 300 秒而非常规 30 秒：卡片是给人存图转发的，别转个身就没了。
+        topics 保留接口（当前海报标题固定「星羽塔罗·今日牌运」，供日志与后续扩展）。
+        """
+        try:
+            card = picks[0]["card"]
+            upright = bool(picks[0]["upright"])
+            date_text = (f"{int(time.strftime('%m'))}月{int(time.strftime('%d'))}日"
+                         f"·周{'一二三四五六日'[datetime.now().weekday()]}")
+            signature = pick_signature(card, upright, uid, time.strftime("%Y%m%d"))
+            img = await asyncio.to_thread(_render_daily_card_img, card, upright, signature,
+                                          date_text)
+            if not img or not isinstance(img, str) or not img.strip():
+                return None
+            _schedule_image_cleanup(img, delay=300)
+            return img
+        except Exception as e:
+            logger.warning(f"今日牌运卡渲染失败，回退普通牌面图: {e}")
+            return None
+
     async def pick_cached(self, uid: str) -> tuple | None:
         """今日固定抽牌：单 key 覆盖式缓存（按日期判失效，无垃圾积累、零清理任务）。
         返回 (formation, positions, picks)；uid 为空时返回 None，
@@ -145,31 +173,30 @@ class DailyFortune:
         if not uid:
             return None
         key, today = f"sf_daily_{uid}", time.strftime("%Y%m%d")
-        data = {}
-        try:
-            data = await self.kv_store.get_kv_data(key, None) or {}
-            if isinstance(data, dict) and data.get("date") == today:
-                card, upright = data.get("card"), data.get("upright")
-                if card in TAROT_CARDS and isinstance(upright, bool):
-                    return _daily_result(card, upright)
-        except Exception as e:
-            logger.warning(f"每日牌运缓存读取失败，改由确定性函数直接出牌: {e}")
+        data, ok = await kv_get(self.kv_store, key, None, "每日牌运缓存")
+        if ok and isinstance(data, dict) and data.get("date") == today:
+            card, upright = data.get("card"), data.get("upright")
+            if card in TAROT_CARDS and isinstance(upright, bool):
+                return _daily_result(card, upright)
         # 缓存坏掉不丢固定：_daily_pick 是确定性纯函数，同（用户,日期）必然同牌
         card, upright = _daily_pick(uid, today)
-        try:
+        if ok:
+            # 只有正常读到（ok=True）才合并写回：读故障时不写（写回了也未必可靠、
+            # 且旧实现同样跳过写回）；无记录时 data=None，合并从空壳起步即可
             # 合并写而非覆盖：保留可能已存在的 interps（缓存不变量：
             # 「card/upright 恒存在」——即使解读先被写入、抽牌后重置也不丢弃）
             merged = dict(data) if isinstance(data, dict) else {}
             merged.update({"date": today, "card": card, "upright": upright})
             if not isinstance(data, dict) or data.get("date") != today:
                 merged.pop("interps", None)  # 跨天：旧解读分桶作废
-            await self.kv_store.put_kv_data(key, merged)
-        except Exception:
-            logger.warning("每日牌运缓存写入失败，本次仍返回固定牌")
+            await kv_put(self.kv_store, key, merged, "每日牌运缓存")
+        else:
+            logger.warning("每日牌运缓存不可用，改由确定性函数直接出牌")
         return _daily_result(card, upright)
 
     async def interp_cached(self, event, uid: str, formation: str, positions: list[str],
-                            picks: list[dict], clean: str) -> str | None:
+                            picks: list[dict], clean: str,
+                            persona_eff=None) -> str | None:
         """今日牌运的解读缓存：按主题指纹（_norm_topic）分桶缓存。
 
         泛问（无具体主题）统一归为当日牌运，当天固定同一段解读，防止
@@ -181,25 +208,58 @@ class DailyFortune:
         """
         if not uid:
             return await self.tarot._ai_interpret(
-                event, formation, positions, picks, clean or "（今日牌运）")
+                event, formation, positions, picks, clean or "（今日牌运）",
+                persona_eff=persona_eff)
         topic = _norm_topic(clean)
         key, today = f"sf_daily_{uid}", time.strftime("%Y%m%d")
-        try:
-            data = await self.kv_store.get_kv_data(key, None) or {}
+        data, ok = await kv_get(self.kv_store, key, None, "每日牌运解读缓存")
+        if ok and isinstance(data, dict) and data.get("date") == today:
             slots = data.get("interps") if isinstance(data, dict) else None
-            if isinstance(data, dict) and data.get("date") == today \
-                    and isinstance(slots, dict) and slots.get(topic):
+            if isinstance(slots, dict) and slots.get(topic):
                 return slots[topic]
-        except Exception:
-            pass
         interp = await self.tarot._ai_interpret(
-            event, formation, positions, picks, clean or "（今日牌运）")
-        try:
-            data = dict(await self.kv_store.get_kv_data(key, None) or {})
+            event, formation, positions, picks, clean or "（今日牌运）",
+            persona_eff=persona_eff)
+        if ok:
+            # 仅正常读到才写回分桶：读故障时旧缓存保持原样（写回可能把有效数据
+            # 覆盖成只含本主题的空壳），旧实现同样走 except 跳过写回
+            data = dict(data or {})
             slots = dict(data.get("interps") or {}) if isinstance(data.get("interps"), dict) else {}
             data["date"], data["interps"] = today, slots
             data["interps"][topic] = interp
-            await self.kv_store.put_kv_data(key, data)
-        except Exception:
-            pass
+            await kv_put(self.kv_store, key, data, "每日牌运解读缓存")
         return interp
+
+    async def spirit_cached(self, event, uid: str, picks: list, clean: str,
+                            persona_eff) -> str:
+        """牌灵的话：AI 按人设生成（贴合本次牌面+主题），当日同牌组缓存同一句；
+        AI 失败回退池内当日签文（不写缓存，下次恢复后重新生成）。
+
+        所有牌阵共用（每日牌运单张、普通占卜整签）：缓存键 sf_spirit_{uid}
+        单 key 覆盖式，命中条件=当日+同牌组指纹（顺序+正逆），同人同日同牌组
+        当天同一句、第二天换新的。与海报卡面分工：海报印池内固定句（卡面装饰）；
+        聊天这句是牌灵的开口（人设化、每天新鲜一句）。
+        """
+        today = time.strftime("%Y%m%d")
+        if not picks:
+            return ""
+        card, upright = picks[0]["card"], picks[0]["upright"]
+        fallback = pick_signature(card, upright, uid, today)
+        if not uid:
+            return fallback  # 无标识：连缓存都无从谈起，直接池内兜底
+        key = f"sf_spirit_{uid}"
+        sig = "|".join(f"{p['card'][2]}:{1 if p['upright'] else 0}" for p in picks)
+        data, ok = await kv_get(self.kv_store, key, None, "牌灵的话缓存")
+        if ok and isinstance(data, dict) and data.get("v") == SPIRIT_PROMPT_V \
+                and data.get("date") == today and data.get("sign") == sig \
+                and data.get("line"):
+            return data["line"]
+        line = await self.tarot.interpreter.spirit_line(
+            event, [(p["card"], p["upright"]) for p in picks],
+            _norm_topic(clean), persona_eff)
+        if not line:
+            return fallback  # AI 失败：池内当日句；不写缓存，下次再试 AI
+        await kv_put(self.kv_store, key, {"v": SPIRIT_PROMPT_V, "date": today,
+                                          "sign": sig, "line": line},
+                     "牌灵的话缓存")
+        return line

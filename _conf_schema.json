@@ -17,6 +17,14 @@
         "_special": "select_provider",
         "default": ""
       },
+      "persona": {
+        "type": "string",
+        "description": "牌灵人设（AI 解读口吻）",
+        "_special": "select",
+        "options": ["off", "tsundere", "gentle", "mystic", "random"],
+        "default": "random",
+        "hint": "off-中立语气（与旧版一致）；tsundere-傲娇牌灵，整段嘴硬心软（嘴上嫌弃、牌面认真解）；gentle-温柔牌灵，轻声安抚贯穿整段；mystic-神秘牌灵，点到为止的画面感语言；random-每签固定随机一种（本签全程不变，下一签才换）。人设只改口吻，解读内容与输出结构不变；牌灵的话由 AI 按人设另行生成（所有牌阵都有）。"
+      },
       "ai_timeout": {
         "description": "单次 AI 解读超时（秒）",
         "type": "int",
@@ -103,6 +111,12 @@
         "type": "bool",
         "default": true,
         "hint": "开启后 /单抽 与带「运势/运气/牌运」等词的请求同一天始终是同一张牌，零点自动刷新，防止反复问刷出不同结果；关闭则恢复自由随机。默认值：true。"
+      },
+      "daily_card": {
+        "description": "今日牌运卡海报（/单抽 与每日牌运的竖版卡片图）",
+        "type": "bool",
+        "default": true,
+        "hint": "开启后 /单抽 与每日牌运输出竖版海报卡（牌面+日期+牌灵的话+署名）；关闭则回到普通牌面图，牌灵的话仍随解读出现。默认值：true。"
       },
       "shuffle_lines": {
         "description": "显示洗牌提示语",

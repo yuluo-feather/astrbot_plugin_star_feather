@@ -17,8 +17,14 @@ from hardening import (
     validate_interpret_structure,
 )
 from log_setup import setup_logging
-from prompts import SYSTEM_PROMPT_DIVINE, build_reading_prompt
-from settings import DEFAULT_QUESTION_MAX_LEN
+from prompts import (
+    SYSTEM_PROMPT_DIVINE,
+    build_reading_prompt,
+    build_spirit_line_prompt,
+    build_system_prompt,
+    resolve_persona,
+)
+from settings import DEFAULT_AI_PERSONA, DEFAULT_QUESTION_MAX_LEN
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +38,7 @@ class AiInterpreter:
 
     冷却粒度是「Provider」而不是插件全局（2026-08-29 调整）：
     单个模型挂掉只冷却它自己，其他模型与其他用户不受拖累；
-    候选全部失败（全部冷却）时才回退本地牌义。
-
+    候选全部失败/全部冷却时才回退本地牌义。
     对塔罗数据零依赖：牌面详情（detail）由调用方（StarTarot）格式化传入，
     本类只负责「找模型 → 发请求 → 拿文本」与失败兜底状态；
     问题清洗（截断/剥除）与输出校验委托 hardening。
@@ -41,13 +46,15 @@ class AiInterpreter:
 
     def __init__(self, context, enable_ai: bool = True, ai_timeout: int = 30,
                  ai_cooldown: int = 60, ai_provider_id: str = "",
-                 max_question_len: int = DEFAULT_QUESTION_MAX_LEN):
+                 max_question_len: int = DEFAULT_QUESTION_MAX_LEN,
+                 persona: str = DEFAULT_AI_PERSONA):
         self.context = context
         self.enable_ai = enable_ai
         self.ai_timeout = ai_timeout
         self.ai_cooldown = ai_cooldown
         self.ai_provider_id = ai_provider_id
         self.max_question_len = max_question_len
+        self.persona = persona  # 牌灵人设（ai.persona），见 prompts.build_system_prompt
         # provider 级失败冷却：key=provider id → 上次服务失败时间戳。
         # 粒度到 provider（而非插件全局熔断）：单个模型挂掉只冷却它自己，
         # 其他模型与其他用户不受拖累；冷却期内该 provider 直接从候选链里跳过。
@@ -83,10 +90,8 @@ class AiInterpreter:
         def _add(provider):
             if provider is None:
                 return
-            try:
-                pid = provider.meta().id
-            except Exception:
-                pid = id(provider)  # 拿不到 meta 时按对象身份去重
+            # 与失败冷却同一标识口径（_provider_id 内部已带 obj: 兜底），看见的都是同一种 id
+            pid = self._provider_id(provider)
             if pid in seen:
                 return
             seen.add(pid)
@@ -121,6 +126,36 @@ class AiInterpreter:
             pass
         return out
 
+    async def spirit_line(self, event, cards: list, topic: str,
+                          persona_eff) -> str | None:
+        """牌灵的一句话（聊天「牌灵的话」）：AI 按人设生成短句（25 字内）。
+
+        cards: [(card, upright), ...] —— 羽签/每日牌运单张、羽时三刻/恋羽十字
+        整签，一句话锚定整组牌面（贴合本签主题）。与解读共用候选链，但失败
+        **不记失败冷却**——牌灵的话挂了自己回退池内签文就行，别把 provider
+        冻住拖累解读。返回 None 表示没生成（调用方兜底）。
+        """
+        if not self.enable_ai:
+            return None
+        topic = strip_injection_fragments(topic or "")
+        prompt = build_spirit_line_prompt(
+            [(card[2], upright) for card, upright in cards], topic, persona_eff)
+        # system 用中立底稿而非 persona 段：persona 段夹带【第N张】解读格式约束，
+        # 会让「一句话」生成跑偏成结构化解读；人设风格已拼在 prompt 的 signature_style
+        system = SYSTEM_PROMPT_DIVINE
+        umo = getattr(event, "unified_msg_origin", None)
+        for provider in self._provider_candidates(umo):
+            pid = self._provider_id(provider)
+            if self._in_cooldown(pid):
+                continue
+            text = await self._chat_once(provider, prompt, system)
+            if not text:
+                continue
+            line = text.strip().strip("「」『』“”\"'").strip().splitlines()[0].strip()
+            if 0 < len(line) <= 40:
+                return line
+        return None
+
     async def _chat_once(self, provider, prompt: str, system_prompt: str) -> str | None:
         """对单个候选发起解读请求：超时或异常一律返回 None，交给下一个候选。"""
         try:
@@ -143,9 +178,13 @@ class AiInterpreter:
             return None
 
     async def interpret(self, event, formation: str, positions: list[str],
-                        picks: list[dict], user_input: str, detail: str) -> str | None:
+                        picks: list[dict], user_input: str, detail: str,
+                        persona_eff: str | None = None) -> str | None:
         """AI 结构化解读。返回 None 表示本轮没有 AI 解读（候选全部失败或全部处于冷却期），
         由调用方回退本地牌义。给用户的感觉是：解读要么有，要么是牌义，不会等成雕塑。
+
+        persona_eff：调用方（如 daily 牌灵的话同签共用人格）传解析后的人格；
+        None 时本方法自解析（每次调用一次掷骰）。
         """
         if not self.enable_ai:
             return None
@@ -158,6 +197,11 @@ class AiInterpreter:
             logger.info("问题剥除注入句式后为空，回退本地牌义")
             return None
         prompt = build_reading_prompt(user_input, formation, detail)
+        # 人设只叠加口吻，保护句（只解读塔罗/无视指令）与内容结构不动；
+        # system_prompt 必须在候选链循环外构建：一次占卜只掷一次骰子，
+        # random 时本签全程同一人格、下一签才换——中途变脸是 bug（有测试锁）
+        eff = persona_eff if persona_eff is not None else resolve_persona(self.persona)
+        system_prompt = build_system_prompt(eff)
         umo = getattr(event, "unified_msg_origin", None)
         got_text = False  # 是否至少有一个候选产出了文本（区分“服务失败”与“结构失格”）
         tried = 0
@@ -167,9 +211,9 @@ class AiInterpreter:
                 logger.info(f"AI 解读 provider[{pid}] 处于失败冷却期，跳过")
                 continue
             tried += 1
-            text = await self._chat_once(provider, prompt, SYSTEM_PROMPT_DIVINE)
+            text = await self._chat_once(provider, prompt, system_prompt)
             if not text:
-                self._mark_fail(pid)  # 服务级失败：只冷却这一个 provider
+                self._mark_fail(pid)  # 服务级失败：只冷却这个 provider
                 continue
             got_text = True
             if not validate_interpret_structure(text, len(positions)):

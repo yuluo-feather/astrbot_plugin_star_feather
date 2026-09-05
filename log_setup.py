@@ -4,6 +4,8 @@
 data/logs/star_feather.log，方便排障与观察注入防护效果。
 
 与 interpret 解耦：日志是「运行诊断」域，AI 客户端只负责调模型。
+
+——牌灵做过什么，这里都留一底账，出状况时翻它。
 """
 import logging
 import os

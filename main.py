@@ -1,22 +1,12 @@
 """星羽塔罗插件入口：命令注册、三入口编排。其他事都分出去了，这里只管进门。
 
-每个模块负责什么，一次说清楚——别指望我讲第二遍：
+每个模块负责什么，按域分组一次说清楚——别指望我讲第二遍：
 
-- main.py       入口/编排：/占卜、/单抽、自然语言三入口、统一抽牌与发送流程
-- settings.py   配置语义：全部默认值、旧配置迁移、TarotSettings（一份配置的解析结果）
-- config.py     配置读取原语（分组优先/扁平回退/类型转换）
-- identity.py   事件身份标识：发送者用户标识两级降级（daily 与限流共用）
-- spreads.py    牌阵与问题清洗：选阵规则、阵名别名、祈使词剥离
-- tarot_core.py 塔罗核心：抽牌、牌义、渲染与发送的委托——牌怎么抽，它说了算
-- interpret.py  AI 解读：候选链、超时、失败冷却——AI 不老实就换人
-- hardening.py  Prompt 防护：越狱剥除、问题截断、输出结构校验
-- log_setup.py  运行日志落盘：每日轮转文件 handler（关键事件可排障）
-- daily.py      今日固定牌运：确定性抽牌、当日缓存
-- deliver.py    发送编排：分段、合并转发、免责声明——结果怎么递到你手上
-- gating.py     限流闸门：会话节流与每日计数的 KV 粘合（纯逻辑在 limiter.py）
-- limiter.py    限流纯逻辑——想连刷？牌灵会累的
-- prompts.py    提示词集中：AI 解读提示/模板、洗牌提示语、帮助文案、工具收尾引导
-- card_render.py / fonts.py / tarot_data.py  牌面渲染与图片生命周期 / 字体子系统 / 牌义数据
+- 配置层：settings.py（全部默认值与旧配置迁移）、config.py（读取原语）、identity.py（事件身份标识）
+- 占卜核心：spreads.py（选阵与问题清洗）、tarot_core.py（抽牌与牌义）、tarot_data.py（牌库）、daily.py / dailylines.py（今日固定牌运 / 每日签文池）
+- AI 解读：interpret.py（候选链与超时）、hardening.py（Prompt 防护）、prompts.py（提示词与全部文案）
+- 输出与兜底：deliver.py（发送编排）、card_render.py / fonts.py（渲染与字体）、log_setup.py（运行日志落盘）
+- 限流与存储：gating.py / limiter.py（限流闸门与纯逻辑）、kv_utils.py（KV 读写原语，daily/gating 共用）
 """
 # ruff: noqa: F403, F405  # 星导入是 AstrBot 插件惯例，名字进来自框架，静态分析无从溯源
 import logging
@@ -26,39 +16,43 @@ import re
 import sys
 
 # 插件被动态 __import__ 加载时不在 sys.path 里，得自己把插件目录塞进去——不然 import 直接炸。
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# 守卫写法：已在则跳过，热重载时不重复累积 sys.path 条目。
+_plugin_dir = os.path.dirname(os.path.abspath(__file__))
+if _plugin_dir not in sys.path:
+    sys.path.insert(0, _plugin_dir)
 
 # 重载防御：AstrBot 重载插件时只卸载星模块（data.plugins.astrbot_plugin_star_feather），
 # 顶层子模块（prompts 等）会赖在 sys.modules 里不走——旧模块没有新名字（如 TOOL_EPILOGUE）
 # 时，from prompts import ... 直接 ImportError。所以在导入前无条件清掉本插件子模块，
 # 保证每次加载的都是磁盘上的最新代码，不给我留僵尸模块。
-for _sf_mod in ("config", "daily", "gating", "hardening", "identity", "interpret",
+for _sf_mod in ("config", "daily", "dailylines", "gating", "hardening", "identity", "interpret",
                 "limiter", "log_setup", "prompts", "settings", "spreads",
                 "tarot_core", "tarot_data", "card_render", "deliver", "fonts"):
     sys.modules.pop(_sf_mod, None)
 
 # 本插件的模块间引用（实现分别在 config / daily / gating / identity / prompts / settings / spreads）：
 # 测试与外部如需内部函数，请直接从实现模块导入，别绕道本入口文件转发。
-from card_render import cleanup_stale_images  # noqa: E402
-from daily import DailyFortune, _is_daily_request  # noqa: E402
-from gating import LimitGate  # noqa: E402
-from identity import resolve_sender_uid  # noqa: E402
-from prompts import (  # noqa: E402
+from astrbot.api.all import *
+from astrbot.api.event import AstrMessageEvent, MessageChain, filter
+from astrbot.api.message_components import Plain
+
+from card_render import cleanup_stale_images
+from daily import DailyFortune, _is_daily_request
+from gating import LimitGate
+from identity import resolve_sender_uid
+from prompts import (
     HELP_TEXT,
     RESULT_EPILOGUE,
     SHUFFLE_LINES,
     TOOL_EPILOGUE,
+    resolve_persona,
 )
-from spreads import clean_tool_question, select_formation  # noqa: E402
-from tarot_core import StarTarot  # noqa: E402
-
-from astrbot.api.all import *  # noqa: E402
-from astrbot.api.event import AstrMessageEvent, MessageChain, filter  # noqa: E402
-from astrbot.api.message_components import Plain  # noqa: E402
+from spreads import clean_tool_question, select_formation
+from tarot_core import StarTarot
 
 logger = logging.getLogger(__name__)
 
-VERSION = "0.5.6"
+VERSION = "0.6.0"
 
 # 帮助请求判定：整句剥掉祈使词后只剩「帮助 / help / 说明」才算。
 # 旧版用 "帮助" in text，问题正文里带「帮助」（如「帮助我做出决定」）
@@ -81,7 +75,7 @@ _HELP_USAGE_RE = re.compile(
 
 # 牌阵定义见 spreads.py（FORMATIONS）
 
-@register("star_feather", "羽落", "星羽塔罗：78张塔罗牌 AI 占卜与深度解读，官方素材渲染牌面图", "0.5.0")
+@register("star_feather", "羽落", "星羽塔罗：78张塔罗牌 AI 占卜与深度解读，官方素材渲染牌面图", VERSION)
 class StarFeatherPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         super().__init__(context)
@@ -95,6 +89,8 @@ class StarFeatherPlugin(Star):
         # 开关的默认值与读取收敛在 settings.TarotSettings（见 self.tarot.llm_tool_enabled）。
         # 今日固定牌运开关：核心在初始化时已从 output.daily_fixed 读取，这里直接取用
         self.daily_fixed = self.tarot.daily_fixed
+        # 今日牌运卡开关（output.daily_card）：关闭时 /单抽 与运势请求回退普通牌面图
+        self.daily_card = self.tarot.daily_card
         # 限流闸门：KV 粘合与拦截文案在 gating.py，纯逻辑在 limiter.py
         self.gate = LimitGate(self, self.tarot.cmd_rate_limit, self.tarot.daily_count_limit)
         # 启动清空渲染临时目录：防止上次进程遗留的牌面图无限堆积（磁盘兜底）
@@ -223,7 +219,7 @@ class StarFeatherPlugin(Star):
         或 None —— 否则 runner 判定无返回值并 DONE，respond 空消息跳过，
         收口钩子不触发、群聊防并发门闩死锁（见 _tool_send）。
         """
-         # 收尾引导语（prompts 集中管理，随机一条）：让 LLM 生成一句简短确认（同时保住 respond 非空）
+        # 收尾引导语（prompts 集中管理，随机一条）：让 LLM 生成一句简短确认（同时保住 respond 非空）
         note = random.choice(TOOL_EPILOGUE)
         # 打开开关：运行期判断（装饰器静态注册无法卸载，见 __init__ 注释）
         if not self.tarot.llm_tool_enabled:
@@ -317,13 +313,35 @@ class StarFeatherPlugin(Star):
             except Exception as e:
                 logger.warning(f"洗牌提示独立发送失败，降级并入最终结果: {e}")
                 preface = hint
-        img = await self.tarot._maybe_render_image(formation, positions, picks)  # 线程池渲染，清理已在产生点注册
         clean = clean_tool_question(question)  # 送 AI 的问题：剥祈使词+阵名（spreads）
+        # 今日牌运卡：海报卡面印池内固定签文（卡面装饰）；聊天「牌灵的话」由 AI 按
+        # 人设生成（每日牌运与普通占卜共用：同人同日同牌组当天同句）——AI 失败回退
+        # 池内当日句。海报渲染失败或 text_only 时回退普通牌面图（_maybe_render_image
+        # 统一管发送模式）
+        sig_text = ""
+        img = None
+        persona_eff = None
+        if is_daily and daily_uid and picks:
+            persona_eff = resolve_persona(self.tarot.ai_persona)
+            # 开关 output.daily_card 只控海报渲染：关掉回到普通牌面图，牌灵的话照常
+            if self.daily_card and self.tarot.send_mode != "text_only":
+                img = await self.daily.render_daily_card(["今日牌运"], picks, daily_uid)
+        if not img:
+            img = await self.tarot._maybe_render_image(formation, positions, picks)
+        # 牌灵的话：所有占卜路径统一生成（羽签/羽时三刻/羽镜/恋羽十字都有这句
+        # 牌灵的开口）——裸句直出，无「牌灵的话：」前缀与引号
+        if picks:
+            eff = persona_eff if persona_eff is not None else resolve_persona(self.tarot.ai_persona)
+            sig_text = await self.daily.spirit_cached(event, daily_uid, picks, clean, eff)
         if is_daily and daily_uid:
-            interp = await self.daily.interp_cached(event, daily_uid, formation, positions, picks, clean)
+            interp = await self.daily.interp_cached(event, daily_uid, formation, positions,
+                                                    picks, clean, persona_eff)
         else:
             interp = await self.tarot._ai_interpret(
                 event, formation, positions, picks, clean or empty_fallback)
+        if sig_text:
+            # 牌灵的话随 preface 进结果：AI 全失败回退牌义时，牌灵的话一句不丢
+            preface = f"{preface}\n{sig_text}" if preface else sig_text
         epilogue_text = random.choice(RESULT_EPILOGUE) if epilogue else ""
         async for r in self.tarot._deliver(event, interp, img, formation, positions, picks,
                                            fail_note=fail_note, preface=preface):

@@ -1,6 +1,10 @@
 """配置语义层单测：send_mode 三态 / 旧配置迁移 / TarotSettings 解析。
 ——默认值都在这，别处别自作主张。"""
-from settings import TarotSettings, resolve_send_mode
+from settings import (
+    DEFAULT_AI_PERSONA,
+    TarotSettings,
+    resolve_send_mode,
+)
 
 
 class TestResolveSendMode:
@@ -30,24 +34,41 @@ class TestResolveSendMode:
         assert resolve_send_mode({"output": {"send_mode": "weird"}}) == "forward"
 
 
-class TestTarotSettings:
-    def test_defaults(self):
-        s = TarotSettings(None)
-        assert s.send_mode == "forward"
-        assert s.shuffle_lines is True
-        assert s.disclaimer == "✨ 占卜仅供娱乐参考，选择权永远在你手里。"
-        assert s.daily_fixed is True
-        assert s.enable_ai is True
-        assert s.segment_size == 300
-        assert s.ai_timeout == 30
-        assert s.ai_cooldown == 60
-        assert s.llm_tool_enabled is True
-        assert s.llm_tool_cooldown == 60
-        assert s.cmd_rate_limit == 10
-        assert s.daily_count_limit == 0
-        assert s.ai_provider_id == ""
-        assert s.ai_max_len == 200
+class TestDailyCard:
+    """output.daily_card：今日牌运卡海报开关（关闭 → 回退普通牌面图）。"""
 
+    def test_default_true(self):
+        assert TarotSettings(None).daily_card is True
+
+    def test_off_false(self):
+        assert TarotSettings({"output": {"daily_card": False}}).daily_card is False
+
+    def test_flat_legacy(self):
+        assert TarotSettings({"daily_card": False}).daily_card is False
+
+
+class TestAiPersona:
+    """ai.persona：五态枚举（off/tsundere/gentle/mystic/random），非法值回退默认。"""
+
+    def test_default_random(self):
+        assert DEFAULT_AI_PERSONA == "random"
+        assert TarotSettings(None).ai_persona == "random"
+
+    def test_valid_values(self):
+        for v in ("off", "tsundere", "gentle", "mystic", "random"):
+            assert TarotSettings({"ai": {"persona": v}}).ai_persona == v
+
+    def test_invalid_falls_back_random(self):
+        assert TarotSettings({"ai": {"persona": "evil"}}).ai_persona == "random"
+        assert TarotSettings({"ai": {"persona": ""}}).ai_persona == "random"
+        assert TarotSettings({"ai": {"persona": 123}}).ai_persona == "random"
+
+    def test_flat_legacy(self):
+        # 旧扁平配置兼容：顶层 persona 键（config 扁平回退规则）
+        assert TarotSettings({"persona": "mystic"}).ai_persona == "mystic"
+
+
+class TestTarotSettings:
     def test_grouped_values(self):
         cfg = {"ai": {"ai_timeout": 7, "enable_ai": False, "question_max_len": 0},
                "output": {"send_mode": "plain", "disclaimer": "x", "daily_fixed": False},

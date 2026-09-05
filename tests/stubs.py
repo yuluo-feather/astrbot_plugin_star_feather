@@ -20,6 +20,7 @@ class FakeProvider:
     async def text_chat(self, **kwargs):
         self.calls += 1
         self.last_prompt = kwargs.get("prompt")
+        self.last_system_prompt = kwargs.get("system_prompt")
         if self.delay:
             await asyncio.sleep(self.delay)
         if self.exc:
