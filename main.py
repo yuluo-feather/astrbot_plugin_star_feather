@@ -52,7 +52,7 @@ from tarot_core import StarTarot
 
 logger = logging.getLogger(__name__)
 
-VERSION = "0.6.0"
+VERSION = "0.6.1"
 
 # 帮助请求判定：整句剥掉祈使词后只剩「帮助 / help / 说明」才算。
 # 旧版用 "帮助" in text，问题正文里带「帮助」（如「帮助我做出决定」）

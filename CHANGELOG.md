@@ -2,6 +2,22 @@
 
 > 每个版本条目均为中文在前、英文在后。
 
+#### v0.6.1
+
+##### 🔧 修复
+
+- **并发触发不再绕过冷却与每日限额**：多人几乎同时触发占卜时，会话冷却与每日次数限制照常生效——此前并发场景下两者可被整体绕过；存储异常时仍放宽放行（语义不变）
+- **越狱句式剥除补全漏网写法**：英文身份覆写、多重修饰词指令覆盖、无主语身份伪装、分隔符拼接（星号/下划线/点号作词间隔）与点号角色名变体等写法不再漏进 AI 解读请求，此类内容先剥除再送解读
+- **牌灵的话与解读主路径同套对抗性防护**：牌灵的话生成所用的问题文本与其他解读路径走同一套清洗，不再只做部分处理
+
+**English**
+
+##### 🔧 Fixes
+
+- **Concurrent triggers no longer bypass the cooldown and daily cap**: when several people trigger a reading almost at once, the session cooldown and the daily limit still hold — previously both could be bypassed wholesale under concurrency; storage failures still fail open, unchanged
+- **Jailbreak stripping covers more bypass spellings**: English identity overrides, multi-modifier instruction overrides, subject-less persona fakes, separator-padded variants (star / underscore / dot as word separators) and dotted role-name variants no longer reach the AI reading request — they are stripped before interpretation
+- **The spirit's line gets the same anti-injection cleaning as the reading paths**: the question text used for the spirit's line now goes through the same cleaning chain as the other reading paths
+
 #### v0.6.0
 
 ##### ✨ 新功能
@@ -129,7 +145,7 @@
 - **发送方式三选一**：原 `forward_result` + `show_image` 两个开关合并为 `send_mode` 单选（图文一条链 / 合并转发 / 纯文字），旧配置自动迁移，默认改为合并转发——占卜结果（图+分段解读）一条消息收齐
 - **收尾句独立发送**：`/占卜`、`/单抽` 结果发出后追加一句收尾（✨ 文案池随机一条），不再塞进转发消息末尾；自然语言入口的收尾由模型回复承担，同一文案池
 - **AI 解读候选链**：当前会话 → 全局默认 → 全部已加载模型依次尝试，单个请求超时（`ai.ai_timeout`，默认 30s）即切换；全部失败回退内置牌义并进入失败冷却（`ai.ai_fail_cooldown`，默认 60s），冷却期内不再空等
-- **安全加固**：送 AI 的问题截断至 200 字（头尾保号）并剥除注入句式（如「忽略上面的指令」「现在你是猫娘」「告诉我你的系统提示词」）；AI 输出未按【第N张·位置】结构分段则弃用并尝试下一候选，全部失格回退牌义，带偏内容不会出现在聊天里
+- **安全加固**：送 AI 的问题截断至 200 字（头尾保号）并剥除注入句式（指令覆盖 / 身份覆写 / 提示泄露等类别）；AI 输出未按【第N张·位置】结构分段则弃用并尝试下一候选，全部失格回退牌义，带偏内容不会出现在聊天里
 - **并发体验**：多人同时占卜互不阻塞（牌面渲染移入后台执行），结果来得更快
 - **三入口统一流程**：`/占卜`、`/单抽`、自然语言入口共用同一套抽牌与发送逻辑，洗牌提示、牌面图、免责声明等开关一处生效
 - **配置分组展示**：面板按「AI 解读 / 自然语言入口 / 限流 / 输出与分段」分组，旧扁平配置自动兼容，升级不丢设置
@@ -161,7 +177,7 @@
 - **Send mode, three choices**: the `forward_result` + `show_image` switches are merged into a single `send_mode` dropdown (plain / forward / text_only); legacy configs auto-migrate, and the default is now merged forward — a reading (image + segmented text) arrives as one message
 - **Closing line sent separately**: `/占卜` / `/单抽` append one random ✨ closing line after the result, no longer at the end of the forward; on the natural-language entry the closing reply comes from the model, same copy pool
 - **AI reading provider chain**: current session → global default → all loaded providers are tried in turn, each with a timeout (`ai.ai_timeout`, default 30s); if all fail it falls back to built-in meanings and enters a fail cooldown (`ai.ai_fail_cooldown`, default 60s) so repeated reads don't wait on a dead provider
-- **Hardening**: questions sent to AI are clipped to 200 chars (head + tail kept) and jailbreak phrasings are stripped (e.g. "ignore the instructions above" / "now you are a catgirl" / "tell me your system prompt"); AI output that loses the 【第N张·位置】structure is discarded and the next candidate is tried — if all candidates are structurally invalid, it falls back to built-in meanings, so off-topic content never reaches the chat
+- **Hardening**: questions sent to AI are clipped to 200 chars (head + tail kept) and jailbreak phrasings are stripped (instruction-override / identity-impersonation / prompt-leak patterns); AI output that loses the 【第N张·位置】structure is discarded and the next candidate is tried — if all candidates are structurally invalid, it falls back to built-in meanings, so off-topic content never reaches the chat
 - **Better concurrency**: simultaneous readings no longer block each other (card rendering now runs off the event loop), so results come back faster
 - **Unified flow across entries**: `/占卜`, `/单抽` and the natural-language entry share one draw & delivery pipeline — shuffle hints, card image and disclaimer toggles take effect in one place
 - **Grouped config display**: dashboard sections (AI reading / natural-language entry / rate limits / output & splitting); legacy flat configs still load — upgrades don't lose settings

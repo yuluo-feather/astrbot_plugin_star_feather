@@ -78,16 +78,26 @@ _INJECTION_PATTERNS: list[tuple[str, str]] = [
     # 指令覆盖：忽略/无视/抛弃/忘记 + 上文类指示 + 指令类名词。
     # 中间用 [\s\S] 而非 .：. 不匹配换行，跨行换行拼接的越狱句式也会漏网（实测踩过）
     (r"(?:忽略|无视|抛弃|忘记|忘掉)(?:之前|上文|所有|此前|上面|以上|刚刚|刚才)[\s\S]{0,12}(?:指令|设定|限制|规则|提示|约束)", "指令覆盖"),
-    (r"(?:ignore|forget|disregard)\s+(?:the\s+)?(?:previous|above|all|prior|earlier)\s+(?:instructions?|rules?|constraints?|prompt)", "指令覆盖-en"),
+    # 英文指令覆盖：\s 放宽到 [\s*_.-]（星号/下划线/点做词间隔的变体注入，2026-09-06 渗透实测）
+    (r"(?:ignore|forget|disregard)[\s*_.\-]+(?:the[\s*_.\-]+)?(?:previous|above|all|prior|earlier)[\s*_.\-]+(?:instructions?|rules?|constraints?|prompt)", "指令覆盖-en"),
+    # 英文指令覆盖·双修饰词：ignore all previous instructions（单修饰规则吃不下两个修饰词，实测漏网）
+    (r"(?:ignore|forget|disregard)[\s*_.\-]+(?:all|every|any)[\s*_.\-]+(?:previous|above|prior|earlier|other)[\s*_.\-]+(?:instructions?|rules?|prompts?|constraints?)", "指令覆盖-en2"),
+    # 身份伪装：你（现在）是猫娘 / 你是一只猫娘 / 你是DAN……
+    # 主语「你/我」可选：无主语变体「现在是猫娘」实测漏网；「我是猫娘」在占卜语境同样可疑。
+    # 本规则必须排在「身份覆写」之前：覆写规则只剥前缀（「从现在起你是」），
+    # 先剥它会让角色词（猫娘/DAN）失去动词而漏网（顺序错误实测：剩「猫娘，」）。
+    (r"(?:现在|立刻|马上)?(?:你|我)?(?:现在)?(?:是|扮演|变成|成为|叫)(?:一(?:只|个|位|名))?(?:猫娘|女仆|DAN|dan|开发者|越狱|恶魔|邪恶|解放|奴隶)", "身份伪装"),
     # 身份覆写：现在开始你是 / 从现在起你扮演……
     (r"(?:现在开始|从现在起|从今以后|接下来|从现在开始)(?:你)?(?:是|扮演|变成|成为|叫)", "身份覆写"),
     (r"(?:from\s+now\s+on|from\s+now)\s+(?:you\s+)?(?:are|act\s+as|pretend\s+to\s+be|become)", "身份覆写-en"),
-    # 身份伪装：你（现在）是猫娘 / 你是一只猫娘 / 你是DAN……
-    (r"(?:现在|立刻|马上)?你(?:现在)?(?:是|扮演|变成|成为|叫)(?:一(?:只|个|位|名))?(?:猫娘|女仆|DAN|dan|开发者|越狱|恶魔|邪恶|解放|奴隶)", "身份伪装"),
+    # 英文身份伪装：you are now / now you are + 角色词——英文最高频越狱句式
+    # （2026-09-06 渗透实测：原规则只有 from now on 变体，此句式全量漏网）。
+    # 角色词覆盖 D.A.N. 变体（d\.?\s*a\.?\s*n\.?）；连接符放宽同指令覆盖。
+    (r"(?:you[\s*_.\-]+are[\s*_.\-]+now|now[\s*_.\-]+you[\s*_.\-]+are)[\s*_.\-]+(?:a[\s*_.\-]+|an[\s*_.\-]+|the[\s*_.\-]+)?(?:catgirl|maid|d\.?\s*a\.?\s*n\.?|developer|jailbreak\w*|slave|devil|evil|unrestricted)", "身份伪装-en"),
     # 提示泄露：告诉我/输出/显示 + 系统提示词/人设……
     (r"(?:告诉我|输出|显示|泄露|交出|复述|背诵|给我)(?:你的|系统)?(?:系统提示词|系统指令|提示词|prompt|system\s*prompt|内部指令|人设|角色设定)", "提示泄露"),
     (r"(?:你的|系统)(?:系统提示词|系统指令|提示词)是(?:什么|啥)", "提示泄露"),
-    (r"(?:your\s+)?system\s+(?:prompt|instructions?)", "提示泄露-en"),
+    (r"(?:your\s+)?system[\s*_.\-]+(?:prompt|instructions?)", "提示泄露-en"),
     # 越狱特征词（独立词，正常占卜语境几乎不出现；单字“越狱”不算，避免误伤“和越狱有关吗”）
     (r"(?:越狱模式|越狱指令|jailbreak|developer\s*mode|dan\s*mode|syst3m)", "越狱特征词"),
     # 模型内建标记 / 角色伪装

@@ -29,6 +29,26 @@ class BrokenKV:
         raise RuntimeError("kv store down")
 
 
+class SlowKV:
+    """带 IO 延迟的内存 KV：模拟真实 sqlite 的 await 让出点。
+
+    并发测试必需——无让出点的桩（纯 dict 读写）在 gather 下串行完成，
+    测不出读-判-写竞态（2026-09-06 渗透实测教训：快桩 30 并发零超发，
+    慢桩 30 并发全放行）。"""
+
+    def __init__(self, delay=0.001):
+        self.store = {}
+        self.delay = delay
+
+    async def get_kv_data(self, key, default=None):
+        await asyncio.sleep(self.delay)
+        return self.store.get(key, default)
+
+    async def put_kv_data(self, key, value):
+        await asyncio.sleep(self.delay)
+        self.store[key] = value
+
+
 def _evt(uid="u1", origin="g1"):
     e = types.SimpleNamespace(unified_msg_origin=origin)
     e.get_sender_id = lambda: uid
@@ -94,5 +114,41 @@ class TestGateCheck:
         assert asyncio.run(g.check(_evt(uid=""), for_command=False)) is None
 
     def test_broken_kv_passes(self):
+        g = _gate(BrokenKV(), cmd=0, daily=5)
+        assert asyncio.run(g.check(_evt(), for_command=False)) is None
+
+
+class TestConcurrentRace:
+    """读-判-写原子化（实例级锁）：并发放行不得超配额、会话冷却只放行一次。
+
+    修复前（2026-09-06 渗透实测）：带 IO 延迟桩 30 并发/配额5 全部放行、
+    20 并发/冷却10s 全绕过——限流被并发读旧值整体击穿。
+    """
+
+    def test_concurrent_daily_count_no_overshoot(self):
+        kv = SlowKV()
+        g = _gate(kv, cmd=0, daily=5)
+
+        async def fire():
+            return await asyncio.gather(
+                *[g.check(_evt(uid="u1"), for_command=False) for _ in range(30)])
+
+        outs = asyncio.run(fire())
+        allowed = sum(1 for o in outs if o is None)
+        assert allowed <= 5, f"并发超发: {allowed}/5"
+
+    def test_concurrent_session_throttle_single_pass(self):
+        kv = SlowKV()
+        g = _gate(kv, cmd=10)
+
+        async def fire():
+            return await asyncio.gather(
+                *[g.session_throttle("sf_cmd_cd_g1", 10) for _ in range(20)])
+
+        outs = asyncio.run(fire())
+        assert sum(1 for o in outs if o == 0) == 1
+
+    def test_broken_kv_still_passes_with_lock(self):
+        """加锁后 KV 故障降级语义不变：读失败静默放行。"""
         g = _gate(BrokenKV(), cmd=0, daily=5)
         assert asyncio.run(g.check(_evt(), for_command=False)) is None

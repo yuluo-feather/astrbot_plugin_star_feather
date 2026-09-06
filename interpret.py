@@ -137,7 +137,12 @@ class AiInterpreter:
         """
         if not self.enable_ai:
             return None
-        topic = strip_injection_fragments(topic or "")
+        # 清洗链与 interpret() 一致：归一化先行 → 截断 → 句式剥除（防御深度统一，
+        # topic 会整段拼进 prompt，不能只剥不档）
+        topic = normalize_injection_input(topic or "")
+        if self.max_question_len > 0:
+            topic = clip_question(topic, self.max_question_len)
+        topic = strip_injection_fragments(topic)
         prompt = build_spirit_line_prompt(
             [(card[2], upright) for card, upright in cards], topic, persona_eff)
         # system 用中立底稿而非 persona 段：persona 段夹带【第N张】解读格式约束，

@@ -11,6 +11,7 @@ main.py 只做入口编排：「读写 KV + 生成拦截文案」收敛于此。
 
 说人话：想连刷？牌灵会累的——但牌灵也懂体谅，存储挂了就放行。
 """
+import asyncio
 import logging
 import time
 
@@ -32,6 +33,12 @@ class LimitGate:
         self.kv_store = kv_store
         self.cmd_rate_limit = cmd_rate_limit
         self.daily_count_limit = daily_count_limit
+        # 读-判-写原子化（2026-09-06 渗透实测）：真实 KV 每次 IO 都有事件循环让出点，
+        # 并发请求会全部读到旧值 → 每日计数与会话节流被整体绕过（带 IO 延迟桩实测
+        # 30 并发/配额5 全部放行、20 并发/冷却10s 全绕过）。实例级 asyncio.Lock
+        # 串行化「读→判→写」窗口：单进程内原子（AstrBot 单体运行）；多进程部署
+        # 需框架侧分布式锁，此锁不覆盖。KV 异常降级语义不变（锁只在正常路径持有）。
+        self._kv_lock = asyncio.Lock()
 
     async def session_throttle(self, key: str, cooldown: int) -> int:
         """会话级节流（命令/工具入口共用）：返回剩余冷却秒（0=放行并可继续）。
@@ -42,13 +49,14 @@ class LimitGate:
         """
         if cooldown <= 0:
             return 0
-        last_ts, _ok = await kv_get(self.kv_store, key, 0, "会话节流")
-        last_ts = float(last_ts or 0)
-        remain = cooldown_remaining(last_ts, time.time(), cooldown)
-        if remain > 0:
-            return remain
-        await kv_put(self.kv_store, key, int(time.time()), "会话节流")
-        return 0
+        async with self._kv_lock:  # 读-判-写原子化，防并发读旧值绕过冷却（渗透实测）
+            last_ts, _ok = await kv_get(self.kv_store, key, 0, "会话节流")
+            last_ts = float(last_ts or 0)
+            remain = cooldown_remaining(last_ts, time.time(), cooldown)
+            if remain > 0:
+                return remain
+            await kv_put(self.kv_store, key, int(time.time()), "会话节流")
+            return 0
 
     async def check(self, event, for_command: bool) -> str | None:
         """限流闸门（三入口共用）：返回 None 放行，返回文案表示拦截本次占卜。
@@ -76,13 +84,14 @@ class LimitGate:
             if uid:
                 today = time.strftime("%Y%m%d")
                 key = f"sf_cmd_cnt_{uid}"
-                data, ok = await kv_get(self.kv_store, key, None, "每日计数")
-                data = (data or {}) if ok else None  # 读失败：放行且不计数
-                if data is not None:
-                    remain = daily_remaining(self.daily_count_limit, data, today)
-                    if remain == 0:
-                        return (f"今天已经问过牌灵 {self.daily_count_limit} 次啦~ "
-                                "明天零点牌运刷新后再来。")
-                    if remain > 0:
-                        await kv_put(self.kv_store, key, daily_touch(data, today), "每日计数")
+                async with self._kv_lock:  # 读-判-写原子化，防并发读旧值超发配额（渗透实测）
+                    data, ok = await kv_get(self.kv_store, key, None, "每日计数")
+                    data = (data or {}) if ok else None  # 读失败：放行且不计数
+                    if data is not None:
+                        remain = daily_remaining(self.daily_count_limit, data, today)
+                        if remain == 0:
+                            return (f"今天已经问过牌灵 {self.daily_count_limit} 次啦~ "
+                                    "明天零点牌运刷新后再来。")
+                        if remain > 0:
+                            await kv_put(self.kv_store, key, daily_touch(data, today), "每日计数")
         return None
