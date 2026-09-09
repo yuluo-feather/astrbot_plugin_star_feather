@@ -78,7 +78,9 @@ class Deliverer:
                 chain.append(Image(file=img))
             if preface:
                 chain.append(Plain(preface))
-            elif not img:
+            if not img:
+                # 独立 if 而非 elif：preface 恒非空时（spirit_cached 在 picks 非空必返非空），
+                # elif 分支在生产路径不可达 → send_mode=text_only + AI 失败时逐牌牌义整段丢失
                 chain.append(Plain(plain_text(formation, positions, picks)))
             if fail_note:
                 chain.append(Plain(fail_note))

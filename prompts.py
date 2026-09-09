@@ -121,7 +121,7 @@ def build_spirit_line_prompt(cards: list, topic: str, persona_eff) -> str:
     shown = "、".join(f"{cn}·{'正位' if upright else '逆位'}" for cn, upright in cards)
     base = (f"你是星羽塔罗的牌灵。今天抽到的牌是【{shown}】"
             + (f"，主题是「{topic}」" if topic else "")
-            + "。请说一句牌灵的话（25 字以内）：贴合牌面与主题，温柔有画面感。"
+            + "。请说一句牌灵的话（25 字以内）：贴合牌面与主题，温柔有画面感。"  # 门槛说明：prompt 要求 25 字内，interpret.spirit_line 实际接受 ≤40 字（宽容策略，避免过度丢弃）——此处不改代码门槛
               "一句话说人话——比喻必须一读就懂，不玩需要反应的意象；"
               "只输出这句话本身：不加引号、不加解释、不换行。")
     if persona_eff:

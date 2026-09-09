@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-  <img src="https://img.shields.io/badge/version-v0.6.1-f8a5c2" alt="v0.6.1"/>
+  <img src="https://img.shields.io/badge/version-v0.6.2-f8a5c2" alt="v0.6.2"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -248,6 +248,10 @@
 - 纯逻辑单测位于 `tests/`（pytest，按域分文件，用例数随开发变化）：`test_core`（抽牌、渲染门控、解读器集成、三入口编排、每日牌运降级）、`test_settings`（默认值与旧配置迁移）、`test_spreads`（选阵/别名/问题清洗）、`test_hardening`（注入剥除/截断/结构校验）、`test_identity`（用户标识降级链）、`test_gating`（限流闸门）、`test_log_setup`（日志路径候选链与幂等安装）、`test_card_render`（渲染冒烟、图片清理）、`test_fonts`（字体回退/缓存回归）、`test_deliver`（分段与分发）、`test_limiter`、`test_config`（配置读取原语）、`test_dailylines`（每日签文池与确定性挑选）、`test_integrity`（数据完整性域：牌库/签文池/字形覆盖/配置枚举校验）、`test_judgement_corpus`（判定语料回归：帮助/每日牌运边界问法锁定）；先 `pip install pytest`，再运行 `python -m pytest tests` 即可验证。**测试文件导入约定：一律插件根相对导入（`from daily import ...`），禁用 `data.plugins.astrbot_plugin_star_feather.xxx` 全路径**（那是 AstrBot 运行时包路径，独立跑测试时会收集失败）
 
 ## 📜 更新记录
+
+#### v0.6.2
+
+- 修复：AI 不可用时牌义不再丢失——文字模式下关闭 AI 或解读失败时，此前只显示牌灵的一句话、逐张牌义缺失，现在照常给出每张牌的牌义兜底
 
 #### v0.6.1
 

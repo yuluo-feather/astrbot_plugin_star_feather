@@ -991,6 +991,44 @@ class TestDivineToolDirect:
         out = self._collect(p.divine_tool(self._evt()))
         assert all("已发送" not in s for s in out)
 
+    def test_missing_umo_falls_back_to_global_key(self):
+        """E 防回归：事件缺 unified_msg_origin 属性时，工具节流键必须回退
+        sf_tool_cd_global（与命令入口 gating.check 的 or "global" 口径一致），
+        不得拼出 sf_tool_cd_None 把不同来源锁到同一个孤儿键上。"""
+        from main import StarFeatherPlugin
+        p = StarFeatherPlugin.__new__(StarFeatherPlugin)
+        p.tarot = types.SimpleNamespace(llm_tool_cooldown=30, llm_tool_enabled=True)
+        seen = []
+
+        async def spy_throttle(key, cooldown):
+            seen.append(key)
+            return 0
+
+        async def fake_gate(event, for_command):
+            return None
+        p.gate = types.SimpleNamespace(session_throttle=spy_throttle, check=fake_gate)
+
+        async def fake_pick(event, text, force_daily=False, fixed_formation=""):
+            return (False, "", "羽签", ["你的当下"], [PICK])
+        p._pick_reading = fake_pick
+
+        async def fake_run(event, fmt, pos, picks, question, **kw):
+            yield event.chain_result([Plain("按规矩洗牌")])
+        p._run_reading = fake_run
+
+        # 事件故意不带 unified_msg_origin（SimpleNamespace 默认无此属性）
+        evt = types.SimpleNamespace(message_str="帮我算一卦")
+        evt.sent = []
+        async def send(chain):
+            evt.sent.append(chain)
+        evt.send = send
+        from main import MessageChain
+        evt.chain_result = lambda chain: MessageChain(chain=chain)
+        out = self._collect(p.divine_tool(evt))
+        assert seen and seen[0] == "sf_tool_cd_global"
+        assert all(isinstance(x, str) for x in out)
+        assert len(evt.sent) == 1  # 正常走到抽牌发送
+
 
 # ---------- 启动横幅 ----------
 class TestStartupBanner:

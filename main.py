@@ -26,7 +26,7 @@ if _plugin_dir not in sys.path:
 # 时，from prompts import ... 直接 ImportError。所以在导入前无条件清掉本插件子模块，
 # 保证每次加载的都是磁盘上的最新代码，不给我留僵尸模块。
 for _sf_mod in ("config", "daily", "dailylines", "gating", "hardening", "identity", "interpret",
-                "limiter", "log_setup", "prompts", "settings", "spreads",
+                "kv_utils", "limiter", "log_setup", "prompts", "settings", "spreads",
                 "tarot_core", "tarot_data", "card_render", "deliver", "fonts"):
     sys.modules.pop(_sf_mod, None)
 
@@ -52,7 +52,7 @@ from tarot_core import StarTarot
 
 logger = logging.getLogger(__name__)
 
-VERSION = "0.6.1"
+VERSION = "0.6.2"
 
 # 帮助请求判定：整句剥掉祈使词后只剩「帮助 / help / 说明」才算。
 # 旧版用 "帮助" in text，问题正文里带「帮助」（如「帮助我做出决定」）
@@ -233,8 +233,9 @@ class StarFeatherPlugin(Star):
         if not text:
             yield "工具收到空文本：用户没说占卜什么。请回一句，引导用户说出想占卜的内容（如感情、事业、学业、今日运势）。"
             return
-        # 工具节流：同会话冷却期内不重复触发，防止模型连续调用刷屏
-        umo = getattr(event, "unified_msg_origin", None)
+        # 工具节流：同会话冷却期内不重复触发，防止模型连续调用刷屏；
+        # umo 缺失回退 "global"（与 gating.check 命令入口口径一致，避免拼出 sf_tool_cd_None）
+        umo = (getattr(event, "unified_msg_origin", None) or "global")
         remain = await self.gate.session_throttle(f"sf_tool_cd_{umo}",
                                                   self.tarot.llm_tool_cooldown)
         if remain > 0:

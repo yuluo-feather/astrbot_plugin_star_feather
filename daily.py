@@ -204,7 +204,9 @@ class DailyFortune:
         「最近学业怎么样」）各按主题分桶——同主题复用、换主题现场生成、
         换回来不丢，不同问题再不串答案（旧版单槽无主题区分，同一天问什么
         都返回第一段解读——「问什么都一个答案」的元凶）。
-        主题数受每日次数限流兜底，分桶大小有界，无增长风险。
+        主题分桶依赖 limit.daily_count 启用才受每日次数间接约束；默认 0=关闭时
+        主题分桶无硬上界，仅靠跨天 pop（pick_cached 的 interps 清理）回收，
+        同日换主题不回收。
         """
         if not uid:
             return await self.tarot._ai_interpret(

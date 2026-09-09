@@ -107,3 +107,74 @@ class TestDeliverEpilogue:
         assert "✨ 星羽塔罗 · 牌面" in nodes[0].content[1].text
         assert nodes[1].content[0].text == "今天安心"
         assert "免责声明" in nodes[-1].content[0].text
+
+
+def _plain_text(formation, positions, picks):
+    """仿 tarot_core._render_text 的逐牌牌义兜底文案（回归用例用）。"""
+    NL = chr(10)
+    lines = [f"🔮 牌阵：{formation}"]
+    for i, (pos, pick) in enumerate(zip(positions, picks), 1):
+        card = pick["card"]
+        state = "正位" if pick["upright"] else "逆位"
+        meaning = card[4] if pick["upright"] else card[5]
+        lines.append("".join([f"🃏 第{i}张 ·【{pos}】", NL,
+                              f"「{card[2]}」{state}", NL + "   ", meaning]))
+    return NL.join(lines)
+
+
+class TestDeliverAIlessFallback:
+    """AI 失败兜底回归（缺陷 A）：interp=None + img=None + preface 非空 + picks 非空时，
+    逐牌牌义必须仍送达——preface 恒非空（spirit_cached 在 picks 非空时必返非空），
+    旧代码 elif not img 分支在生产路径不可达，牌义整段被吞（本类对该分支零覆盖导致漏网）。"""
+
+    @staticmethod
+    def _evt():
+        e = types.SimpleNamespace()
+        e.result = None
+
+        def chain_result(chain):
+            e.result = chain
+            return e.result
+
+        e.chain_result = chain_result
+        e.get_self_id = lambda: "12345"
+        return e
+
+    @staticmethod
+    def _collect(agen):
+        async def run():
+            return [x async for x in agen]
+
+        return asyncio.run(run())
+
+    def test_no_image_preface_nonempty_keeps_per_card_meanings(self):
+        evt = self._evt()
+        d = Deliverer(300, "", False)
+        positions = ["过去", "现在", "未来"]
+        self._collect(d.deliver(evt, None, None, "羽镜", positions, [PICK] * 3,
+                                _plain_text,
+                                fail_note="📖 解读：" + chr(10) + "（AI 今天闹脾气不肯开口）",
+                                preface="今天安心"))
+        texts = [getattr(c, "text", "") for c in evt.result]
+        assert texts[0] == "今天安心"
+        joined = "".join(texts[1:])
+        assert "🔮 牌阵：羽镜" in joined
+        assert "第1张" in joined and "第2张" in joined and "第3张" in joined
+        assert "愚者" in joined and "新的开始" in joined
+        assert "AI 今天闹脾气" in texts[-1]
+        assert all(t for t in texts)
+
+    def test_with_image_no_meaning_text_appended(self):
+        """有图时行为不变：图内已有牌义信息区，不重复追加逐牌牌义文字。"""
+        evt = self._evt()
+        d = Deliverer(300, "", False)
+        self._collect(d.deliver(evt, None, "img.png", "羽镜",
+                                ["过去", "现在", "未来"], [PICK] * 3,
+                                _plain_text,
+                                fail_note="📖 解读：" + chr(10) + "（AI 今天闹脾气）",
+                                preface="今天安心"))
+        kinds = [type(c).__name__ for c in evt.result]
+        assert kinds == ["Image", "Plain", "Plain"]
+        assert evt.result[1].text == "今天安心"
+        assert evt.result[2].text.startswith("📖")
+        assert not any("🔮 牌阵" in getattr(c, "text", "") for c in evt.result)

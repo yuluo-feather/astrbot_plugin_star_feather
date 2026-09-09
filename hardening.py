@@ -54,7 +54,8 @@ def clip_question(text: str, limit: int = MAX_QUESTION_LEN) -> str:
 
     头尾保号：保留开头主体与结尾关键意图（如“要不要复合？”这类问题常挂在末尾），
     中间省略号；头部就近在断句处（。？！；…）收尾，避免把半句话送进模型。
-    返回长度不超过 limit。
+    返回长度不超过 limit；例外：limit < 10 的极小兜底分支走硬切并附加省略号
+    （text[:limit] + "…"），实际会比 limit 多 1 字符（正常配置不会走到）。
     """
     text = (text or "").strip()
     if len(text) <= limit:

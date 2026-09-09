@@ -29,8 +29,10 @@ from settings import DEFAULT_AI_PERSONA, DEFAULT_QUESTION_MAX_LEN
 logger = logging.getLogger(__name__)
 
 # 运行日志落盘（关键事件：剥除命中/剥空/结构失格/候选链切换/冷却）：
+# 剥除命中由 hardening logger 打出（hardening.strip_injection_fragments），
+# 故连同 hardening logger 一起挂共享文件 handler（同批单 handler，不重复落盘）；
 # 初始化失败只告警，不影响解读主流程。
-setup_logging(logger)
+setup_logging(logger, logging.getLogger("hardening"))
 
 
 class AiInterpreter:
@@ -128,7 +130,8 @@ class AiInterpreter:
 
     async def spirit_line(self, event, cards: list, topic: str,
                           persona_eff) -> str | None:
-        """牌灵的一句话（聊天「牌灵的话」）：AI 按人设生成短句（25 字内）。
+        """牌灵的一句话（聊天「牌灵的话」）：AI 按人设生成短句
+        （要求 25 字内，实际接受 ≤40 字——宽容策略，避免过度丢弃）。
 
         cards: [(card, upright), ...] —— 羽签/每日牌运单张、羽时三刻/恋羽十字
         整签，一句话锚定整组牌面（贴合本签主题）。与解读共用候选链，但失败

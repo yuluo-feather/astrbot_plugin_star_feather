@@ -36,21 +36,30 @@ def resolve_log_path() -> str:
     return "star_feather.log"
 
 
-def setup_logging(logger: logging.Logger) -> bool:
-    """给 logger 安装每日轮转文件 handler（防重复安装），返回是否成功。
+def setup_logging(*loggers: logging.Logger) -> bool:
+    """给一个或多个 logger 安装每日轮转文件 handler（防重复安装），返回是否成功。
 
-    日志文件不可用不影响主流程（小事，别慌）；重复调用只装一次
+    同批传入的多个 logger 共享同一个 handler 实例：不为同一日志文件重复开
+    文件句柄（多头轮转同一文件会在午夜轮转时互相打架）。剥除命中经 hardening
+    logger 打出，故 interpret 侧需把 hardening logger 一并传入（见 interpret.py
+    调用处）。日志文件不可用不影响主流程（小事，别慌）；重复调用只装一次
     （按 handler 上的标记判定，插件热重载安全）。
     """
+    if not loggers:
+        return True
+    targets = [lg for lg in loggers
+               if not any(getattr(h, _HANDLER_FLAG, False) for h in lg.handlers)]
+    if not targets:
+        return True
     try:
-        if not any(getattr(h, _HANDLER_FLAG, False) for h in logger.handlers):
-            fh = TimedRotatingFileHandler(resolve_log_path(), when="midnight",
-                                          backupCount=7, encoding="utf-8")
-            fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] [%(name)s] %(message)s"))
-            fh._sf_log_handler = True
-            logger.addHandler(fh)
-            logger.setLevel(logging.INFO)
+        fh = TimedRotatingFileHandler(resolve_log_path(), when="midnight",
+                                      backupCount=7, encoding="utf-8")
+        fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] [%(name)s] %(message)s"))
+        fh._sf_log_handler = True
+        for lg in targets:
+            lg.addHandler(fh)
+            lg.setLevel(logging.INFO)
         return True
     except Exception as exc:  # 日志文件不可用不影响解读主流程
-        logger.warning(f"star_feather.log 初始化失败: {exc}")
+        loggers[0].warning(f"star_feather.log 初始化失败: {exc}")
         return False

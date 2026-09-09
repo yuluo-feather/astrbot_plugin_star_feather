@@ -55,7 +55,7 @@ REQUEST_WORDS = re.compile(
 
 
 def select_formation(text: str) -> str:
-    """三层决策：显式指定阵名 > 关键词权重累计 > 内容推断 > 兜底。"""
+    """四段决策：显式指定阵名 > 关键词权重累计 > 内容推断 > 兜底。"""
     text = (text or "").strip()
     for alias, name in FORMATION_ALIASES.items():
         if alias in text:

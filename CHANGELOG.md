@@ -2,6 +2,18 @@
 
 > 每个版本条目均为中文在前、英文在后。
 
+#### v0.6.2
+
+##### 🔧 修复
+
+- **AI 不可用时牌义不再丢失**：文字输出模式下，关闭 AI 或 AI 解读失败时，此前只收到一句牌灵的话、逐张牌义整段缺失；现在无论有无牌灵的话都会补上每张牌的牌义兜底
+
+**English**
+
+##### 🔧 Fixes
+
+- **Card meanings are no longer dropped when the AI is unavailable**: in text-only mode, with the AI turned off or a reading failure, you previously got just the spirit's line with all per-card meanings missing; the built-in meanings for every card are now always delivered
+
 #### v0.6.1
 
 ##### 🔧 修复
