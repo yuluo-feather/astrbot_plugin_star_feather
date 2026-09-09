@@ -2,6 +2,18 @@
 
 > 每个版本条目均为中文在前、英文在后。
 
+#### v0.6.3
+
+##### 🔧 变更
+
+- **适配 AstrBot 4.28**：AI 解读的模型选择改用框架推荐的异步路径，升级 AstrBot 4.28 后占卜解读照常工作，不再依赖框架已弃用的同步接口
+
+**English**
+
+##### 🔧 Changes
+
+- **AstrBot 4.28 ready**: the AI reading now picks its model through the framework's recommended async path, so readings keep working after upgrading to AstrBot 4.28 — the deprecated sync interface is no longer relied upon
+
 #### v0.6.2
 
 ##### 🔧 修复

@@ -37,6 +37,9 @@ class FakeContext:
     def get_using_provider(self, umo=None):
         return self.using
 
+    async def get_using_provider_async(self, umo=None):
+        return self.using
+
     def get_all_providers(self):
         return self.others
 

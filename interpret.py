@@ -80,11 +80,12 @@ class AiInterpreter:
         if self.ai_cooldown > 0:
             self._fail_ts_by_provider[pid] = time.time()
 
-    def _provider_candidates(self, umo: str | None) -> list:
+    async def _provider_candidates(self, umo: str | None) -> list:
         """收集候选：当前会话 > 全局默认 > 全部已加载，按 id 去重。
 
-        get_using_provider 在会话配置异常时可能抛 ValueError，
-        这里统一吞掉——宁可少一个候选，也不能让「选提供商」这一步本身出错。
+        用 async 版的 get_using_provider_async（同步版已被框架标 @deprecated）；
+        它在会话配置异常时可能抛 ValueError，这里统一吞掉——
+        宁可少一个候选，也不能让「选提供商」这一步本身出错。
         """
         seen = set()
         out = []
@@ -114,11 +115,11 @@ class AiInterpreter:
                 pass
 
         try:
-            _add(self.context.get_using_provider(umo))
+            _add(await self.context.get_using_provider_async(umo))
         except Exception:
             pass
         try:
-            _add(self.context.get_using_provider())
+            _add(await self.context.get_using_provider_async())
         except Exception:
             pass
         try:
@@ -152,7 +153,7 @@ class AiInterpreter:
         # 会让「一句话」生成跑偏成结构化解读；人设风格已拼在 prompt 的 signature_style
         system = SYSTEM_PROMPT_DIVINE
         umo = getattr(event, "unified_msg_origin", None)
-        for provider in self._provider_candidates(umo):
+        for provider in await self._provider_candidates(umo):
             pid = self._provider_id(provider)
             if self._in_cooldown(pid):
                 continue
@@ -213,7 +214,7 @@ class AiInterpreter:
         umo = getattr(event, "unified_msg_origin", None)
         got_text = False  # 是否至少有一个候选产出了文本（区分“服务失败”与“结构失格”）
         tried = 0
-        for provider in self._provider_candidates(umo):
+        for provider in await self._provider_candidates(umo):
             pid = self._provider_id(provider)
             if self._in_cooldown(pid):
                 logger.info(f"AI 解读 provider[{pid}] 处于失败冷却期，跳过")
