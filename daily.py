@@ -1,6 +1,6 @@
 """今日固定牌运：运势词判定、确定性抽牌与当日缓存。
 
-用户标识解析在 identity.py（daily 与限流共用，不各自实现）；
+用户标识由 identity.py 统一解析、由入口传入（daily 与限流共用同一口径，不各自实现）；
 设计原则：
 - 同一（用户, 日期）永远同一张牌：_daily_pick 是确定性纯函数（md5 种子），
   KV 缓存异常也不丢固定（缓存只做加速与解读复用）。
@@ -31,7 +31,9 @@ logger = logging.getLogger(__name__)
 # 踩坑记录：旧版把「最近/近期/每日」直接当运势词，导致「最近她对我什么感觉」
 # 「我最近学业怎么样」这类具体问题全被吞进每日固定牌——不管问什么都拿
 # 到同一张牌、同一段解读。具体主题词表（SPECIFIC_WORDS）同时用于
-# 解读缓存的「泛问/具体」归一化（见 _norm_topic），一处词表两处用。
+# 解读缓存的「泛问/具体」归一化（见 _norm_topic）。这份词表本节内两处用过，
+# 现已拆开（见下方 TOPIC_WORDS）：判定与分桶曾共用一份，导致「加一个主题词」
+# 会连带改变是否走每日牌运。
 DAILY_WORDS = ("运势", "运气", "牌运", "日运", "daily")
 TIME_WORDS = ("今天", "今日", "每日", "最近", "近期",
               "这个月", "本月", "这两天", "这段时间")
@@ -39,6 +41,23 @@ SPECIFIC_WORDS = (
     "感情", "爱情", "恋爱", "喜欢", "复合", "分手", "桃花", "关系",
     "事业", "工作", "学业", "考试", "考研", "面试", "升职",
     "他", "她", "我们",
+)
+# 分桶专用词表：命中即视为「这个问题有具体主题」，其解读不再与泛问共用。
+#
+# 为什么不并入 SPECIFIC_WORDS：那份词表在 _is_daily_request 里是**排除条件**
+# （泛时间词 + 具体主题 → 判非每日牌运）。把「财运」并进去会连带把
+# 「今天财运怎么样」踢出每日固定牌、变成每问一次重抽——牌本该是当天同一张，
+# 该变的只是解读。故此处另立一份，只喂 _norm_topic。
+# 允许在此新增主题词：判定的归判定，分桶的归分桶；两张表有意不同，
+# 不要以「看着重复」为由合并回去。
+TOPIC_WORDS = SPECIFIC_WORDS + (
+    "财运", "钱财", "收入", "理财", "投资", "金钱",
+    "健康", "身体", "养生", "生病", "失眠", "疾病",
+    "家庭", "家人", "父母", "孩子", "亲子", "婆媳",
+    "人际", "人缘", "朋友", "同事", "社交", "圈子",
+    "婚姻", "结婚", "姻缘", "相亲", "离婚",
+    "出行", "旅行", "搬家", "房子", "买房", "租房",
+    "求职", "跳槽", "离职", "辞职", "转行", "创业",
 )
 # 事件归因式排除：因果连词（句式类，非事件词枚举）——「运势/运气」出现在这些
 # 连词之后时，它是「事件是不是运势导致」的归因宾语，不是被查询的运势值本身。
@@ -122,9 +141,14 @@ def _norm_topic(clean: str) -> str:
     这样「看看今天的运势」「每日一签」这类泛问措辞当天共享同一段解读
     （防反复问刷版本），而「今天感情运势」「最近学业怎么样」各按主题
     缓存——不同问题的解读再也不能互相串用。
+
+    分桶键是清洗后的**原句**，不是词表里的词——「今天财运怎么样」与
+    「今天财运如何」是两个桶。本函数只判「有没有具体主题」，不负责归并近义问法。
+    词表用 TOPIC_WORDS 而非 SPECIFIC_WORDS：后者在 _is_daily_request 里是排除
+    条件，拿它分桶会把判定与分桶重新绑死。
     """
     raw = (clean or "").strip().lower()
-    if not raw or not any(w in raw for w in SPECIFIC_WORDS):
+    if not raw or not any(w in raw for w in TOPIC_WORDS):
         return _GENERIC_TOPIC
     return raw
 
@@ -142,6 +166,9 @@ class DailyFortune:
         # kv_store 传插件自身（见类 docstring）、tarot 是 StarTarot 实例
         self.kv_store = kv_store
         self.tarot = tarot
+        # 缓存读-判-写串行化（gating 同款防线）：并发占卜时两条协程各自读旧值再写回，
+        # 后写的会把先写的分桶整个覆盖掉（实测：并发问两个主题，KV 里只剩一个）
+        self._kv_lock = asyncio.Lock()
 
     async def render_daily_card(self, topics: list[str], picks: list[dict], uid: str) -> str | None:
         """今日牌运卡海报编排：签文（确定性函数）+ 日期文本 + 线程池渲染 + 300s 清理。
@@ -173,25 +200,29 @@ class DailyFortune:
         if not uid:
             return None
         key, today = f"sf_daily_{uid}", time.strftime("%Y%m%d")
-        data, ok = await kv_get(self.kv_store, key, None, "每日牌运缓存")
-        if ok and isinstance(data, dict) and data.get("date") == today:
-            card, upright = data.get("card"), data.get("upright")
-            if card in TAROT_CARDS and isinstance(upright, bool):
-                return _daily_result(card, upright)
-        # 缓存坏掉不丢固定：_daily_pick 是确定性纯函数，同（用户,日期）必然同牌
-        card, upright = _daily_pick(uid, today)
-        if ok:
-            # 只有正常读到（ok=True）才合并写回：读故障时不写（写回了也未必可靠、
-            # 且旧实现同样跳过写回）；无记录时 data=None，合并从空壳起步即可
-            # 合并写而非覆盖：保留可能已存在的 interps（缓存不变量：
-            # 「card/upright 恒存在」——即使解读先被写入、抽牌后重置也不丢弃）
-            merged = dict(data) if isinstance(data, dict) else {}
-            merged.update({"date": today, "card": card, "upright": upright})
-            if not isinstance(data, dict) or data.get("date") != today:
-                merged.pop("interps", None)  # 跨天：旧解读分桶作废
-            await kv_put(self.kv_store, key, merged, "每日牌运缓存")
-        else:
-            logger.warning("每日牌运缓存不可用，改由确定性函数直接出牌")
+        # 读-判-写原子化（gating 同款防线）：并发时两条协程各自读旧值再写回，
+        # 后写的会把先写的字段整个覆盖掉
+        async with self._kv_lock:
+            data, ok = await kv_get(self.kv_store, key, None, "每日牌运缓存")
+            if ok and isinstance(data, dict) and data.get("date") == today:
+                card, upright = data.get("card"), data.get("upright")
+                if card in TAROT_CARDS and isinstance(upright, bool):
+                    return _daily_result(card, upright)
+            # 缓存坏掉不丢固定：_daily_pick 是确定性纯函数，同（用户,日期）必然同牌
+            card, upright = _daily_pick(uid, today)
+            if ok:
+                # 只有正常读到（ok=True）才合并写回：读故障时不写（写回了也未必可靠、
+                # 且旧实现同样跳过写回）；无记录时 data=None，合并从空壳起步即可
+                # 合并写而非覆盖：保留可能已存在的 interps——解读先写入时条目里没有
+                # card/upright（interp_cached 只写 date+interps），由本函数合并补齐，
+                # 抽牌重生成也不丢弃已写好的解读分桶
+                merged = dict(data) if isinstance(data, dict) else {}
+                merged.update({"date": today, "card": card, "upright": upright})
+                if not isinstance(data, dict) or data.get("date") != today:
+                    merged.pop("interps", None)  # 跨天：旧解读分桶作废
+                await kv_put(self.kv_store, key, merged, "每日牌运缓存")
+            else:
+                logger.warning("每日牌运缓存不可用，改由确定性函数直接出牌")
         return _daily_result(card, upright)
 
     async def interp_cached(self, event, uid: str, formation: str, positions: list[str],
@@ -208,28 +239,52 @@ class DailyFortune:
         主题分桶无硬上界，仅靠跨天 pop（pick_cached 的 interps 清理）回收，
         同日换主题不回收。
         """
-        if not uid:
-            return await self.tarot._ai_interpret(
-                event, formation, positions, picks, clean or "（今日牌运）",
-                persona_eff=persona_eff)
         topic = _norm_topic(clean)
         key, today = f"sf_daily_{uid}", time.strftime("%Y%m%d")
-        data, ok = await kv_get(self.kv_store, key, None, "每日牌运解读缓存")
-        if ok and isinstance(data, dict) and data.get("date") == today:
-            slots = data.get("interps") if isinstance(data, dict) else None
-            if isinstance(slots, dict) and slots.get(topic):
-                return slots[topic]
+        # 命中判定原子化；写回另起一次锁（AI 调用不占锁，见下）
+        async with self._kv_lock:
+            data, ok = await kv_get(self.kv_store, key, None, "每日牌运解读缓存")
+            if ok and isinstance(data, dict) and data.get("date") == today:
+                slots = data.get("interps")
+                if isinstance(slots, dict) and slots.get(topic):
+                    return slots[topic]
         interp = await self.tarot._ai_interpret(
             event, formation, positions, picks, clean or "（今日牌运）",
             persona_eff=persona_eff)
         if ok:
-            # 仅正常读到才写回分桶：读故障时旧缓存保持原样（写回可能把有效数据
-            # 覆盖成只含本主题的空壳），旧实现同样走 except 跳过写回
-            data = dict(data or {})
-            slots = dict(data.get("interps") or {}) if isinstance(data.get("interps"), dict) else {}
-            data["date"], data["interps"] = today, slots
-            data["interps"][topic] = interp
-            await kv_put(self.kv_store, key, data, "每日牌运解读缓存")
+            async with self._kv_lock:
+                # 重读再合并：本主题生成期间别的主题可能已写回，拿旧 data 写回会把它覆盖掉
+                fresh, _ = await kv_get(self.kv_store, key, None, "每日牌运解读缓存")
+                # 类型校验链（与 pick_cached 同口径，勿退回 `dict(data or {})`）：
+                # `or` 只兜 falsy，truthy 非 dict（["a"]/"abc"/123，外部工具或旧版残留
+                # 写坏）会直接进 dict(...) 抛 ValueError/TypeError，而上抛前那次写回
+                # 整段跳过 → 坏值永不被覆盖，该用户解读缓存**永久失效**（每次问都重生成）。
+                # 红线：tests/test_core.py::TestDailyPoisonedCacheValue
+                if isinstance(fresh, dict):
+                    data = dict(fresh)
+                elif isinstance(data, dict):
+                    data = dict(data)
+                else:
+                    data = {}
+                # 仅正常读到才写回分桶：读故障时旧缓存保持原样（写回可能把有效数据
+                # 覆盖成只含本主题的空壳），旧实现同样走 except 跳过写回
+                # 写入端自己判跨天：pick_cached 的 interps 清理依赖它那次「读+写回」都成功，
+                # 读故障时它整段跳过（if ok 门），此处不自己判就会把昨天的分桶盖上今天的
+                # 日期复活（同主题当天复用昨天的解读）。判据与 pick_cached 同口径：
+                # date != today 即作废；同一天内仍是原位保留
+                same_day = data.get("date") == today
+                slots = (dict(data.get("interps") or {})
+                         if same_day and isinstance(data.get("interps"), dict) else {})
+                data["date"], data["interps"] = today, slots
+                # 失败不落 falsy：interp 为 None / 空串时只刷新结构与日期，不写分桶。
+                # 写 null 的功能后果其实没有（命中判据 `slots.get(topic)` 对 None 同样是
+                # falsy，下次照样现场重生成），但「interps 里有这个 key」会因此失去含义
+                # ——有 key 必为有效解读，这条不变量值得立住。顺带收益：失败时少一次
+                # 「拿旧 data 覆盖 KV」的机会（fresh 重读失败的回退路径）。
+                # 红线：tests/test_core.py::TestDailyNullInterp
+                if interp:
+                    data["interps"][topic] = interp
+                await kv_put(self.kv_store, key, data, "每日牌运解读缓存")
         return interp
 
     async def spirit_cached(self, event, uid: str, picks: list, clean: str,
@@ -241,6 +296,20 @@ class DailyFortune:
         单 key 覆盖式，命中条件=当日+同牌组指纹（顺序+正逆），同人同日同牌组
         当天同一句、第二天换新的。与海报卡面分工：海报印池内固定句（卡面装饰）；
         聊天这句是牌灵的开口（人设化、每天新鲜一句）。
+
+        【缓存键不含 persona：决策现场，勿重复提议】同牌组即同一签，「本签全程不变」
+        本就要求当天同签同一句——所以同签重问不换口吻是契约，不是漏洞（普通占卜每次
+        重抽牌组必变、自然换人设；daily_fixed 当天固定，属同一签）。唯一残留是「改了
+        ai.persona 配置当天又抽到同一牌组」沿用旧口吻，低频且隔天/换牌组自然消解。
+        SPIRIT_PROMPT_V 指纹刻意把所有人设风格都算进去（改任何人设模板即全缓存失效），
+        那是正确的保守设计，不要为这个场景去动它。
+
+        【读故障仍写回：与 pick/interp 统一在判据上，不在行为上】判据＝写回是否依赖旧
+        数据。pick_cached / interp_cached 是「读旧 dict → 合并 → 写回」，读故障时旧数据
+        缺失、写回会把有效内容覆盖成空壳，所以必须 if ok 门住；本函数是纯覆盖写（只写
+        v/date/sign/line，不读旧值），读故障不影响写入正确性，反而必须写——若门住，故障
+        恢复前的重复查询会重新生成，AI 每次措辞可能不同，直接破坏「当日同牌组同一句」。
+        红线：tests/test_core.py::TestSpiritCache::test_spirit_writes_back_even_on_read_failure
         """
         today = time.strftime("%Y%m%d")
         if not picks:
@@ -250,7 +319,7 @@ class DailyFortune:
         if not uid:
             return fallback  # 无标识：连缓存都无从谈起，直接池内兜底
         key = f"sf_spirit_{uid}"
-        sig = "|".join(f"{p['card'][2]}:{1 if p['upright'] else 0}" for p in picks)
+        sig = "|".join(f"{p['card']['cn']}:{1 if p['upright'] else 0}" for p in picks)
         data, ok = await kv_get(self.kv_store, key, None, "牌灵的话缓存")
         if ok and isinstance(data, dict) and data.get("v") == SPIRIT_PROMPT_V \
                 and data.get("date") == today and data.get("sign") == sig \

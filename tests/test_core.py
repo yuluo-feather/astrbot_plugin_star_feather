@@ -27,7 +27,7 @@ from prompts import (
     resolve_persona,
 )
 from tarot_core import StarTarot
-from tarot_data import TAROT_CARDS
+from tarot_data import TAROT_CARDS, meaning_text
 
 T = StarTarot.__new__(StarTarot)  # 绕过 __init__（不依赖 Context），供抽牌/编排用例复用
 
@@ -40,7 +40,7 @@ class TestDraw:
 
     def test_no_repeat(self):
         _, picks = T._draw("恋羽十字")
-        cards = [p["card"] for p in picks]
+        cards = [(p["card"]["suit"], p["card"]["num"]) for p in picks]
         assert len(set(cards)) == len(cards)
 
     def test_upright_is_bool(self):
@@ -48,13 +48,32 @@ class TestDraw:
         assert isinstance(picks[0]["upright"], bool)
 
     def test_pick_info_orientation(self):
-        pick = {"card": ("wands", "13", "权杖王后", "Queen of Wands",
-                         "自信魅力", "嫉妒占有"), "upright": False}
+        pick = {"card": {"suit": "wands", "num": "13", "cn": "权杖王后", "en": "Queen of Wands",
+                         "up": {"keywords": ["自信魅力"], "what": "", "how": ""},
+                         "down": {"keywords": ["嫉妒占有"], "what": "", "turn": ""}},
+                "upright": False}
         suit, cn, state, meaning = T._pick_info(pick)
         assert (suit, cn, state, meaning) == ("wands", "权杖王后", "逆位", "嫉妒占有")
 
 
 # ---------- 牌面图异步化 _maybe_render_image ----------
+class TestMeaningText:
+    """meaning_text 全量拼接：关键词 → 能量状态（逆位）→ 走向 → 心法/转身。"""
+
+    def test_reversed_with_energy_in_order(self):
+        card = {"suit": "major", "num": "10", "cn": "命运之轮", "en": "Wheel of Fortune",
+                "up": {"keywords": ["转机"], "what": "顺风。", "how": "顺势。"},
+                "down": {"keywords": ["不顺", "错失时机"], "what": "卡住了。",
+                         "turn": "先稳住。", "energy": "受阻 · 外部延迟"}}
+        assert meaning_text(card, False) == "不顺、错失时机。受阻 · 外部延迟。卡住了。先稳住"
+
+    def test_upright_without_energy(self):
+        card = {"suit": "major", "num": "10", "cn": "命运之轮", "en": "Wheel of Fortune",
+                "up": {"keywords": ["转机"], "what": "顺风。", "how": "顺势。"},
+                "down": {"keywords": ["不顺"], "what": "", "turn": ""}}
+        assert meaning_text(card, True) == "转机。顺风。顺势"
+
+
 class TestMaybeRenderAsync:
     """渲染在 asyncio.to_thread 线程池执行：开关关时不渲染，开时出图且不阻塞事件循环。"""
 
@@ -82,7 +101,12 @@ class TestMaybeRenderAsync:
             return str(tmp_path / "tarot_async_test.png")
 
         monkeypatch.setattr(t, "_render_image", fake_render)
-        monkeypatch.setattr("card_render._schedule_image_cleanup", lambda img: None)
+        import tarot_core
+        # 打在调用点实际读的那份引用上：tarot_core 用 `from card_render import
+        # _schedule_image_cleanup` 绑定，改 card_render 的模块属性对调用点无效
+        # （真实函数照跑、还挂了延迟删除任务）；fake 也要接得下真实签名的 delay
+        monkeypatch.setattr(tarot_core, "_schedule_image_cleanup",
+                            lambda img, delay=30: None)
         img = asyncio.run(t._maybe_render_image("羽签", ["你的当下"], []))
         assert img.endswith(".png")
         assert box["thread"] != main_thread  # 确实在线程池执行，未阻塞事件循环
@@ -506,7 +530,7 @@ class _FakeTarot:
 
     async def _maybe_render_image(self, *a):
         return None
-    async def _ai_interpret(self, ev, fmt, pos, picks, clean):
+    async def _ai_interpret(self, ev, fmt, pos, picks, clean, persona_eff=None):
         return "AI:" + str(clean)
     async def _deliver(self, ev, interp, img, fmt, pos, picks, fail_note="", preface=""):
         seg = str(interp) + ("|fail" if fail_note else "")
@@ -566,6 +590,37 @@ class TestRunReading:
                                            "今日运势", is_daily=True, daily_uid="u1"))
         assert calls == []  # 开关关：一次都不调海报渲染
         assert out[0].endswith("DAILY:今日运势")  # 解读照常（牌灵的话+缓存解读）
+
+    def test_persona_resolved_once_for_spirit_and_reading(self, monkeypatch):
+        """回归：ai.persona=random 时，牌灵的话与解读正文必须同一人格。
+
+        旧实现只在每日牌运路径 resolve：自由随机路径里「牌灵的话」拿 resolve 出的
+        eff，解读却在 interpret 内部再 resolve 一次——两次各掷各的骰子，同一签会
+        出现「牌灵傲娇、正文温柔」两副腔调（v0.6.0 承诺的是一签固定同一人格）。
+        """
+        import main as main_mod
+        seen = {}
+
+        def counting_resolve(persona):
+            seen["calls"] = seen.get("calls", 0) + 1
+            return "persona#" + str(seen["calls"])
+
+        monkeypatch.setattr(main_mod, "resolve_persona", counting_resolve)
+        p = self._plugin(hint=False)
+
+        async def spy_spirit(event, uid, picks, clean, persona_eff):
+            seen["spirit"] = persona_eff
+            return "sig"
+
+        async def spy_interpret(ev, fmt, pos, picks, clean, persona_eff=None):
+            seen["interpret"] = persona_eff
+            return "AI"
+
+        p.daily.spirit_cached = spy_spirit
+        p.tarot._ai_interpret = spy_interpret
+        self._collect(p._run_reading(self._evt(), "羽签", ["你的当下"], [PICK], "问感情"))
+        assert seen["calls"] == 1  # 一次占卜只掷一次骰子
+        assert seen["spirit"] == seen["interpret"] == "persona#1"
 
     def test_random_branch_ai(self):
         # 普通占卜（非每日牌运）也带牌灵的话：AI 失败兜底池内当日句（preface 裸句）
@@ -816,7 +871,7 @@ class TestRunReadingRealChain:
         from tarot_core import StarTarot
         t = StarTarot(FakeContext(None), None)
         assert t.send_mode == "forward"  # 默认合并转发，走 forward 分支
-        async def fake_interp(event, formation, positions, picks, clean):
+        async def fake_interp(event, formation, positions, picks, clean, persona_eff=None):
             return "【第1张·过去】一段过去。\
 【第2张·现在】一段现在。\
 【总结】结论。"
@@ -849,7 +904,7 @@ class TestRunReadingRealChain:
         from main import StarFeatherPlugin
         from tarot_core import StarTarot
         t = StarTarot(FakeContext(None), None)
-        async def fake_interp(event, formation, positions, picks, clean):
+        async def fake_interp(event, formation, positions, picks, clean, persona_eff=None):
             return "【第1张·过去】一段过去。\
 【总结】结论。"
         async def fake_render(formation, positions, picks, *a):
@@ -991,6 +1046,40 @@ class TestDivineToolDirect:
         out = self._collect(p.divine_tool(self._evt()))
         assert all("已发送" not in s for s in out)
 
+    def test_early_exits_do_not_consume_random_state(self):
+        """早退分支不得消耗全局随机状态：收尾池抽取只服务于真正走完的占卜。
+
+        旧版把 `note = random.choice(TOOL_EPILOGUE)` 放在函数最开头，四条早退路径
+        （开关关闭 / 空文本 / 节流 / 每日上限）都白白抽一次、抽完就扔——抽到的文案
+        随后被 return 丢掉，一次也没用上。功能上无影响（全局 PRNG 无人依赖消耗
+        次序），但「不走的路径别做无用功」是免费的干净度。
+        """
+        import random
+        cases = [
+            (self._plugin(), self._evt(text="")),                                # 空文本
+            (self._plugin(throttle_remain=25), self._evt()),                     # 节流
+            (self._plugin(limit_block="今天已经问过牌灵 5 次啦~"), self._evt()),  # 每日上限
+        ]
+        for p, evt in cases:
+            random.seed(20260910)
+            before = random.getstate()
+            self._collect(p.divine_tool(evt))
+            assert random.getstate() == before, "早退分支消耗了全局随机状态"
+        p = self._plugin()
+        p.tarot.llm_tool_enabled = False
+        random.seed(20260910)
+        before = random.getstate()
+        self._collect(p.divine_tool(self._evt()))
+        assert random.getstate() == before, "未开启分支消耗了全局随机状态"
+
+    def test_normal_path_does_consume_random_state(self):
+        """反向对照：真正走完的占卜**应当**抽一次收尾——否则上一条红线可能是假绿。"""
+        import random
+        random.seed(20260910)
+        before = random.getstate()
+        self._collect(self._plugin().divine_tool(self._evt("帮我算一卦")))
+        assert random.getstate() != before, "正常路径没有抽取收尾文案，红线失去意义"
+
     def test_missing_umo_falls_back_to_global_key(self):
         """E 防回归：事件缺 unified_msg_origin 属性时，工具节流键必须回退
         sf_tool_cd_global（与命令入口 gating.check 的 or "global" 口径一致），
@@ -1059,9 +1148,14 @@ class TestStartupBanner:
         assert text.index("|____/") < text.index(f"星羽塔罗 v{VERSION}")
 
 
-# ---------- 每日缓存合并写（interp 保留） ----------
+# ---------- 每日缓存合并写（解读分桶保留 / 跨天作废） ----------
 class TestDailyCacheMerge:
-    """模拟 KV：解读先被写入时，抽牌重生成不得覆盖丢掉 interp。"""
+    """模拟 KV：解读先被写入时，抽牌重生成不得覆盖丢掉解读分桶。
+
+    字段名是 interps（主题指纹 → 解读文本的分桶 dict，见 daily._norm_topic /
+    interp_cached），不是 interp。旧用例写的是 interp（实现里根本没有这个键），
+    合并写原样保留未知键所以恒绿——既测不到真字段的保留语义，也测不到跨天清理。
+    """
 
     @staticmethod
     def _plugin(kv_store):
@@ -1078,26 +1172,42 @@ class TestDailyCacheMerge:
         p.daily = DailyFortune(_Ctx(), T)
         return p
 
-    def test_keeps_existing_interp_when_regenerating(self):
+    def test_keeps_existing_interps_when_regenerating(self):
         import time as _time
         today = _time.strftime("%Y%m%d")
-        kv = {"sf_daily_u1": {"date": today, "interp": "旧解读文本"}}  # 只有解读、无 card（模拟异常时序）
+        slots = {"（今日牌运）": "旧解读文本"}
+        # 只有解读分桶、无 card（模拟「解读先写入、抽牌重生成」的异常时序）
+        kv = {"sf_daily_u1": {"date": today, "interps": dict(slots)}}
         p = self._plugin(kv)
         result = asyncio.run(p.daily.pick_cached("u1"))
         assert result is not None
         cached = kv["sf_daily_u1"]
-        # 牌被补上且解读保留
+        # 牌被补上，且当天已写入的解读分桶原样保留（不被抽牌重生成覆盖）
         assert cached["card"] in TAROT_CARDS and isinstance(cached["upright"], bool)
-        assert cached["interp"] == "旧解读文本"
+        assert cached["interps"] == slots
         assert cached["date"] == today
 
-    def test_fresh_cache_has_card_no_interp(self):
+    def test_fresh_cache_has_card_no_interps(self):
         kv = {}
         p = self._plugin(kv)
         asyncio.run(p.daily.pick_cached("u1"))
         cached = kv["sf_daily_u1"]
         assert cached["card"] in TAROT_CARDS
-        assert "interp" not in cached  # 首次写入不虚构解读字段
+        assert "interps" not in cached  # 首次写入不虚构解读分桶
+
+    def test_stale_day_interps_dropped_on_regenerate(self):
+        """跨天：旧解读分桶随抽牌重生成一并作废，不盖章复活。"""
+        import time as _time
+        stale = {"（今日牌运）": "昨天的解读", "最近事业运": "前天的解读"}
+        kv = {"sf_daily_u1": {"date": "19700101", "card": TAROT_CARDS[0],
+                              "upright": True, "interps": dict(stale)}}
+        p = self._plugin(kv)
+        result = asyncio.run(p.daily.pick_cached("u1"))
+        assert result is not None
+        cached = kv["sf_daily_u1"]
+        assert cached["date"] == _time.strftime("%Y%m%d")
+        assert "interps" not in cached      # 跨天作废：旧分桶不得跟着新日期复活
+        assert cached["card"] in TAROT_CARDS
 
 
 class TestDailyInterpTopic:
@@ -1124,6 +1234,22 @@ class TestDailyInterpTopic:
             return f"解读:{clean}"
 
         return DailyFortune(_Ctx(), types.SimpleNamespace(_ai_interpret=fake_ai)), calls
+
+    def test_topic_table_decoupled_from_daily_judgement(self):
+        """分桶与判定解耦：有具体主题仍走每日固定牌，但解读不与泛问共用。
+
+        SPECIFIC_WORDS 一度一份词表两处用（既是 _is_daily_request 的排除条件、
+        又是 _norm_topic 的分桶判据），于是「今天财运怎么样」只有两种命：与
+        「今天运势」共用解读，或被踢出每日牌运、每问重抽。拆表后两者兼得——
+        牌仍是当天同一张（_is_daily_request 为真），解读各归各（topic 不同）。
+        """
+        from daily import _GENERIC_TOPIC, _is_daily_request, _norm_topic
+
+        assert _is_daily_request("今天财运怎么样")
+        assert _norm_topic("今天财运怎么样") != _GENERIC_TOPIC
+        # 无主题的泛问仍共享同一段（防反复问刷版本）
+        for q in ("今天运势", "看看今天的运势", "每日一签"):
+            assert _norm_topic(q) == _GENERIC_TOPIC, q
 
     def test_same_specific_topic_reuses(self):
         kv = {}
@@ -1161,6 +1287,83 @@ class TestDailyInterpTopic:
         assert a == b == "解读:（今日牌运）"
         assert len(calls) == 1
 
+    def test_concurrent_topics_both_persist(self):
+        """并发问两个主题：两个分桶都要在。
+
+        加锁 + 写回前重读之前，两条协程各自读旧值再写回，后写的会把先写的整个覆盖
+        （实测 KV 里只剩一个分桶，另一个主题白花一次 AI 调用）。
+        """
+        from daily import DailyFortune, _norm_topic
+        kv = {}
+
+        class _SlowCtx:
+            async def get_kv_data(self, key, default=None):
+                await asyncio.sleep(0.005)   # 制造交错窗口
+                return kv.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                await asyncio.sleep(0.005)
+                kv[key] = value
+
+        async def fake_ai(event, formation, positions, picks, clean, persona_eff=None):
+            await asyncio.sleep(0.01)        # AI 调用期间另一条协程会进来
+            return f"解读:{clean}"
+
+        df = DailyFortune(_SlowCtx(), types.SimpleNamespace(_ai_interpret=fake_ai))
+        t1, t2 = "今天感情运势", "最近事业运"
+
+        async def go():
+            return await asyncio.gather(
+                df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], t1),
+                df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], t2))
+
+        a, b = asyncio.run(go())
+        assert a == f"解读:{t1}" and b == f"解读:{t2}"
+        assert set(kv["sf_daily_u1"]["interps"]) == {_norm_topic(t1), _norm_topic(t2)}
+
+    def test_stale_day_slots_dropped_when_pick_read_recovers(self):
+        """跨天 + pick_cached 读故障：写入端自己判跨天，昨天的分桶不得盖章复活。
+
+        时序：pick_cached 读故障（if ok 门跳过写回、也跳过 interps 清理）→
+        interp_cached 这次读成功 → 旧分桶若被原样沿用，就会跟着今天的新日期
+        写回去，当天同主题直接复用昨天的解读（写入端只认 data["date"] == today）。
+        """
+        stale = {"最近事业运": "昨天的解读"}
+        kv = {"sf_daily_u1": {"date": "19700101", "card": None, "upright": True,
+                              "interps": dict(stale)}}
+        from daily import DailyFortune
+        calls = []
+
+        class _FlakyCtx:
+            def __init__(self):
+                self.n = 0
+
+            async def get_kv_data(self, key, default=None):
+                self.n += 1
+                if self.n == 1:                    # 第一次读（pick_cached）瞬时故障
+                    raise RuntimeError("kv 瞬时故障")
+                return kv.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                kv[key] = value
+
+        async def fake_ai(event, formation, positions, picks, clean, persona_eff=None):
+            calls.append(clean)
+            return f"解读:{clean}"
+
+        df = DailyFortune(_FlakyCtx(), types.SimpleNamespace(_ai_interpret=fake_ai))
+
+        async def go():
+            await df.pick_cached("u1")             # 读故障：不写回、不清理
+            a = await df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], "今天感情运势")
+            b = await df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], "最近事业运")
+            return a, b
+
+        a, b = asyncio.run(go())
+        assert a == "解读:今天感情运势"
+        assert b == "解读:最近事业运"              # 昨天的分桶已作废：现场重生成
+        assert len(calls) == 2
+
 
 class TestDailyKvFallback:
     """KV 接口不可用时的降级回归：真实 AstrBot Context 没有 get/put_kv_data
@@ -1192,6 +1395,131 @@ class TestDailyKvFallback:
         out = asyncio.run(df.pick_cached("u1"))
         assert out is not None
         assert out[2][0]["card"] in TAROT_CARDS
+
+
+class TestDailyPoisonedCacheValue:
+    """KV 里该 key 存了**非 dict**（外部工具、旧版本残留写坏）时，解读写回必须自愈。
+
+    旧写法 `data = dict(fresh) if isinstance(fresh, dict) else dict(data or {})`
+    里的 `data or {}` 只兜 falsy；**truthy 非 dict**（["a"] / "abc" / 123）会直接
+    进 dict(...)，抛 ValueError（"dictionary update sequence element #0..."）或
+    TypeError（"object is not iterable"）。异常上抛前那次写回**整段跳过**，
+    于是 KV 里的坏值永远不会被好值覆盖 —— 该用户的每日牌运解读缓存**永久失效**：
+    之后每次问都现场重生成，"当天固定同一段解读"的承诺彻底破掉。
+    触发条件比"非 dict"窄一格：只有 truthy 非 dict 会炸，falsy 有 `or {}` 兜着。
+
+    修复口径与同文件 pick_cached 对齐（它一直用 `isinstance(data, dict)`）。
+    """
+
+    @staticmethod
+    def _daily(kv):
+        from daily import DailyFortune
+        calls = []
+
+        class _Ctx:
+            async def get_kv_data(self, key, default=None):
+                return kv.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                kv[key] = value
+
+        async def fake_ai(event, formation, positions, picks, clean, persona_eff=None):
+            calls.append(clean)
+            return f"解读:{clean}"
+
+        return DailyFortune(_Ctx(), types.SimpleNamespace(_ai_interpret=fake_ai)), calls
+
+    def test_truthy_non_dict_cache_value_self_heals(self):
+        """truthy 非 dict：既不抛异常，也要把坏值覆盖成合法结构（真正自愈）。"""
+        import time as _time
+
+        from daily import _norm_topic
+        today = _time.strftime("%Y%m%d")
+        topic = "今天感情运势"
+        for poison in (["a"], "abc", 123):
+            kv = {"sf_daily_u1": poison}
+            df, calls = self._daily(kv)
+            out = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], topic))
+            assert out == f"解读:{topic}", f"毒值 {poison!r} 下解读应正常返回"
+            cached = kv["sf_daily_u1"]
+            assert isinstance(cached, dict), f"毒值 {poison!r} 未被覆盖成合法结构"
+            assert cached.get("date") == today
+            assert cached["interps"] == {_norm_topic(topic): out}
+            assert len(calls) == 1
+
+    def test_falsy_non_dict_cache_value_also_survives(self):
+        """falsy 非 dict（None / 0 / "" / []）本就走 `or {}` 分支，一并锁住不回归。"""
+        import time as _time
+        today = _time.strftime("%Y%m%d")
+        for poison in (None, 0, "", []):
+            kv = {"sf_daily_u1": poison}
+            df, calls = self._daily(kv)
+            out = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], "今天感情运势"))
+            assert out == "解读:今天感情运势"
+            assert isinstance(kv["sf_daily_u1"], dict) and kv["sf_daily_u1"].get("date") == today
+
+
+
+class TestDailyNullInterp:
+    """AI 解读失败（返回 None / 空串）时不得把 falsy 值写进 interps 分桶。
+
+    写入 null 的功能后果其实没有——命中判据 `slots.get(topic)` 对 None 与空串
+    同样是 falsy，下次照样现场重生成。但「interps 里有这个 key」会因此失去含义：
+    有 key 就一定是一段有效解读，这条不变量值得立住（也让 KV 不白占空间）。
+    顺带收益：失败时少一次「拿旧 data 覆盖 KV」的机会（fresh 重读失败的回退路径）。
+    """
+
+    @staticmethod
+    def _daily(kv, ret):
+        from daily import DailyFortune
+        calls = []
+
+        class _Ctx:
+            async def get_kv_data(self, key, default=None):
+                return kv.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                kv[key] = value
+
+        async def fake_ai(event, formation, positions, picks, clean, persona_eff=None):
+            calls.append(clean)
+            return ret
+
+        return DailyFortune(_Ctx(), types.SimpleNamespace(_ai_interpret=fake_ai)), calls
+
+    def test_none_interp_not_written_into_slots(self):
+        import time as _time
+
+        from daily import _norm_topic
+        today = _time.strftime("%Y%m%d")
+        topic = _norm_topic("今天感情运势")
+        for ret in (None, ""):
+            kv = {}
+            df, calls = self._daily(kv, ret)
+            out = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], "今天感情运势"))
+            assert out == ret and len(calls) == 1
+            cached = kv.get("sf_daily_u1")
+            if cached is None:
+                continue                      # 整个写回被跳过也可以接受
+            assert isinstance(cached, dict) and cached.get("date") == today
+            slots = cached.get("interps") or {}
+            assert topic not in slots, f"失败值 {ret!r} 被写进了分桶"
+            assert all(v for v in slots.values()), "分桶里出现了 falsy 值"
+
+    def test_failure_keeps_other_topics_intact(self):
+        """AI 失败只影响本主题：别的主题已缓存内容不得被清掉或改写。"""
+        import time as _time
+
+        from daily import _norm_topic
+        today = _time.strftime("%Y%m%d")
+        other = _norm_topic("最近事业运")
+        kv = {"sf_daily_u1": {"date": today, "interps": {other: "事业解读"}}}
+        df, calls = self._daily(kv, None)
+        out = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], "今天感情运势"))
+        assert out is None
+        slots = kv["sf_daily_u1"]["interps"]
+        assert slots.get(other) == "事业解读"
+        assert _norm_topic("今天感情运势") not in slots
 
 
 
@@ -1229,8 +1557,46 @@ class TestSpiritCache:
         assert l2 == "AI 说的那句" and len(calls) == 1  # 缓存复用：不再调 AI
         cache = next(v for k, v in kv.items() if k.startswith("sf_spirit_"))
         assert cache["date"] == strftime("%Y%m%d") and cache["line"] == "AI 说的那句"
-        assert cache["sign"] == f"{PICK['card'][2]}:1"  # 牌组指纹（卡名:正逆）
+        assert cache["sign"] == f"{PICK['card']['cn']}:1"  # 牌组指纹（卡名:正逆）
         assert cache["v"] == SPIRIT_PROMPT_V  # prompt 版本号：文案迭代旧缓存自动失效
+
+    def test_spirit_writes_back_even_on_read_failure(self):
+        """读故障仍写回——方向与 pick/interp 的 if ok 门相反，是有意的。
+
+        判据＝写回是否依赖旧数据：pick_cached / interp_cached 读旧 dict 再合并写回，读故障
+        时旧数据缺失、写回会把有效内容覆盖成空壳，所以必须门住；本函数是纯覆盖写（只写
+        v/date/sign/line，不读旧值），读故障不影响写入正确性。机械地「统一」成门住，会让
+        故障恢复前的重复查询重新生成，AI 措辞可能不同，破坏「当日同牌组同一句」的承诺。
+        """
+        from daily import DailyFortune
+        kv = {}
+        calls = []
+
+        class _FlakyCtx:
+            def __init__(self):
+                self.n = 0
+
+            async def get_kv_data(self, key, default=None):
+                self.n += 1
+                if self.n == 1:                     # 首次读瞬时故障 → ok=False
+                    raise RuntimeError("kv 瞬时故障")
+                return kv.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                kv[key] = value
+
+        async def fake_spirit(event, cards, topic, persona_eff):
+            calls.append(topic)
+            return "故障期间生成的那句"
+
+        tarot = types.SimpleNamespace(interpreter=types.SimpleNamespace(spirit_line=fake_spirit))
+        df = DailyFortune(_FlakyCtx(), tarot)
+        l1 = asyncio.run(df.spirit_cached(EVENT, "u1", [PICK], "今日运势", None))
+        assert l1 == "故障期间生成的那句" and len(calls) == 1
+        cache = next(v for k, v in kv.items() if k.startswith("sf_spirit_"))
+        assert cache["line"] == "故障期间生成的那句"   # 读故障也写回：覆盖写不依赖旧值
+        l2 = asyncio.run(df.spirit_cached(EVENT, "u1", [PICK], "今日运势", None))
+        assert l2 == l1 and len(calls) == 1           # 恢复后命中缓存：同签同句成立
 
     def test_ai_fail_falls_back_static_without_cache(self):
         from time import strftime
@@ -1247,7 +1613,7 @@ class TestSpiritCache:
         # prompt 文案迭代后 SPIRIT_PROMPT_V +1：无版本号的旧缓存不命中（旧句不复活）
         from time import strftime
         kv = {"sf_spirit_u1": {"date": strftime("%Y%m%d"),
-                               "sign": f"{PICK['card'][2]}:1", "line": "旧谜语句"}}
+                               "sign": f"{PICK['card']['cn']}:1", "line": "旧谜语句"}}
         df, calls = self._daily(kv, line="新直白句")
         l1 = asyncio.run(df.spirit_cached(EVENT, "u1", [PICK], "今日运势", None))
         assert l1 == "新直白句" and len(calls) == 1  # 重新生成，不复用旧句
@@ -1316,6 +1682,17 @@ class TestSpiritLine:
         assert "牌灵一句话签文" in p1.last_prompt  # 人设签文样板进 prompt
 
 
+    def test_quotes_only_returns_none_not_crash(self):
+        """模型只回一个引号或纯空白时不得下标越界。
+
+        旧实现 strip 后直接 splitlines()[0]：空列表 IndexError 会把整个
+        spirit_line 协程抛掉，而 daily.spirit_cached 没兜这一句，会一路冒到
+        入口最外层（用户侧变成「这场占卜断了」）。
+        """
+        p1 = FakeProvider("p1", result="「」")
+        i = self._interp(p1)
+        assert asyncio.run(i.spirit_line(EVENT, [(CARD, True)], "感情", None)) is None
+
 # ---------- 牌灵的话：build_spirit_line_prompt ----------
 class TestSpiritPrompt:
     def test_persona_style_included(self):
@@ -1339,3 +1716,105 @@ class TestSpiritPrompt:
             p = build_spirit_line_prompt([("圣杯侍从", True)], "感情", eff)
             assert "一读就懂" in p, eff
 
+    def test_version_is_content_fingerprint(self, monkeypatch):
+        """版本号由内容指纹生成：改模板或人设签名风格，当日缓存自动失效。
+
+        旧实现是手工常量配「改文案记得 +1」的注释——靠人记着的隐性契约，迟早
+        漏改，漏了就是旧句复活。
+        """
+        import prompts
+        assert prompts.SPIRIT_PROMPT_V == prompts._spirit_prompt_fingerprint()
+        base = prompts.SPIRIT_PROMPT_V
+        monkeypatch.setattr(prompts, "_SPIRIT_TEMPLATE", prompts._SPIRIT_TEMPLATE + "改一笔")
+        assert prompts._spirit_prompt_fingerprint() != base
+
+
+class TestRenderTextNoSuitDuplicate:
+    """本地牌义兜底文案不得重复标注花色。
+
+    56 张小阿卡纳牌名全自带花色（「权杖首牌」这类写法），22 张大阿卡纳牌名独一无二。
+    旧版统一加「（花色）」：大牌那处是「愚者」配「大阿卡纳」的废话，小牌那处更糟——
+    实际输出过「圣杯首牌」（圣杯）逆位，同一行里同一个词出现两遍。
+    """
+
+    def test_minor_arcana_names_all_carry_their_suit(self):
+        """前提断言：哪天出现不带花色的牌名，说明花色标注不能再省，这条先红。"""
+        from tarot_data import SUIT_CN, TAROT_CARDS
+        missing = [(c["suit"], c["cn"]) for c in TAROT_CARDS
+                   if c["suit"] != "major" and SUIT_CN[c["suit"]] not in c["cn"]]
+        assert not missing, f"有牌名不含花色，需恢复花色标注：{missing}"
+
+    def test_render_text_does_not_repeat_suit(self):
+        import tarot_core
+        from tarot_data import SUIT_CN, TAROT_CARDS
+        stub = tarot_core.StarTarot.__new__(tarot_core.StarTarot)
+        for suit in ("major", "cups", "pentacles"):
+            card = next(c for c in TAROT_CARDS if c["suit"] == suit)
+            txt = stub._render_text("羽签", ["你的当下"], [{"card": card, "upright": True}])
+            assert f"（{SUIT_CN[suit]}）" not in txt, f"{suit} 又标了花色：{txt!r}"
+            assert f"「{card['cn']}」正位" in txt, txt
+
+
+class TestCommandEntryEpilogueEndToEnd:
+    """命令入口必须实打实传 epilogue=True——收尾句发不发由它决定。
+
+    _command_entry 曾经声明 epilogue 参数却在内部写死 True（死参数）；而若照它改成
+    epilogue=epilogue，divine/single 都不传 → 拿默认 False → 命令入口的收尾句静默消失，
+    而且现有三个 epilogue 用例全都直接调 _run_reading、抓不到（_command_entry 自己的用例
+    又把 _run_reading 换成了桩）。这条走真链：_command_entry → 真 _run_reading → 真 _deliver。
+    """
+
+    @staticmethod
+    def _collect(agen):
+        async def run():
+            return [x async for x in agen]
+        return asyncio.run(run())
+
+    @staticmethod
+    def _evt():
+        evt = types.SimpleNamespace()
+        evt.result = None
+        evt.calls = []
+        evt.sent = []
+        evt.get_self_id = lambda: "12345"
+        evt.should_call_llm = lambda v: evt.calls.append(("should_call_llm", v))
+        def chain_result(chain):
+            evt.result = chain
+            return evt.result
+        evt.chain_result = chain_result
+        evt.plain_result = lambda s: s
+        async def send(chain):
+            evt.sent.append(chain)
+        evt.send = send
+        return evt
+
+    def test_command_entry_sends_epilogue(self):
+        from main import StarFeatherPlugin
+        from prompts import RESULT_EPILOGUE
+        from tarot_core import StarTarot
+        t = StarTarot(FakeContext(None), None)
+        async def fake_interp(event, formation, positions, picks, clean, persona_eff=None):
+            return "【第1张·过去】一段过去。\
+【总结】结论。"
+        async def fake_render(formation, positions, picks, *a):
+            return None
+        t._ai_interpret = fake_interp
+        t._maybe_render_image = fake_render
+        p = StarFeatherPlugin.__new__(StarFeatherPlugin)
+        p.tarot = t
+        p._shuffle_hint = lambda: None
+        async def fake_spirit(event, uid, picks, clean, persona_eff):
+            from time import strftime
+            return pick_signature(picks[0]["card"], picks[0]["upright"], uid, strftime("%Y%m%d"))
+        p.daily = types.SimpleNamespace(spirit_cached=fake_spirit)
+        async def fake_gate(event, for_command):
+            return None
+        p.gate = types.SimpleNamespace(check=fake_gate)
+        async def fake_pick(event, text, force_daily=False, fixed_formation=""):
+            return (False, "", "羽时三刻", ["过去"], [PICK])
+        p._pick_reading = fake_pick
+        evt = self._evt()
+        self._collect(p._command_entry(evt, "问感情", err_tpl="断了"))
+        texts = [c.chain[0].text for c in evt.sent if getattr(c, "chain", None)]
+        assert texts, "命令入口应当独立直发收尾句"
+        assert texts[-1] in RESULT_EPILOGUE, f"末条直发不是收尾句：{texts!r}"
