@@ -6,6 +6,7 @@ import types
 from stubs import PICK
 
 from deliver import Deliverer, split_sections, split_text
+from tarot_data import meaning_text
 
 
 class TestSplitText:
@@ -110,15 +111,16 @@ class TestDeliverEpilogue:
 
 
 def _plain_text(formation, positions, picks):
-    """仿 tarot_core._render_text 的逐牌牌义兜底文案（回归用例用）。"""
+    """仿 tarot_core._render_text 的逐牌牌义兜底文案（回归用例用）。
+    用 tarot_data.meaning_text 渲染（与生产路径同源，防两根线走偏）。"""
     NL = chr(10)
     lines = [f"🔮 牌阵：{formation}"]
     for i, (pos, pick) in enumerate(zip(positions, picks), 1):
         card = pick["card"]
         state = "正位" if pick["upright"] else "逆位"
-        meaning = card[4] if pick["upright"] else card[5]
+        meaning = meaning_text(card, bool(pick["upright"]))
         lines.append("".join([f"🃏 第{i}张 ·【{pos}】", NL,
-                              f"「{card[2]}」{state}", NL + "   ", meaning]))
+                              f"「{card['cn']}」{state}", NL + "   ", meaning]))
     return NL.join(lines)
 
 

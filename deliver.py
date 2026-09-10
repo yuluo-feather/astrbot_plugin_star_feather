@@ -81,6 +81,9 @@ class Deliverer:
             if not img:
                 # 独立 if 而非 elif：preface 恒非空时（spirit_cached 在 picks 非空必返非空），
                 # elif 分支在生产路径不可达 → send_mode=text_only + AI 失败时逐牌牌义整段丢失
+                # 只补 text_only / 图片渲染失败：图片模式有卡面两行关键词，再叠完整牌义会抹平
+                # 两种模式的区别，也让用户误以为「AI 其实说了、只是排版乱」；想看逐张详义的
+                # 请切纯文字模式（2026-09-10 定案，那是配置项的职责，不是渲染路径该兜的）。
                 chain.append(Plain(plain_text(formation, positions, picks)))
             if fail_note:
                 chain.append(Plain(fail_note))
