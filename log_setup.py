@@ -47,15 +47,23 @@ def setup_logging(*loggers: logging.Logger) -> bool:
     """
     if not loggers:
         return True
+    # 本批已有共享 handler 就复用它，绝不为缺的那个新建第二个句柄：
+    # 否则「A 已装、B 没装」时会给 B 新建一个，两个 logger 各持一句柄指向同一文件，
+    # TimedRotatingFileHandler 午夜轮转 rename 后另一个句柄仍指向旧 inode → 日志分裂。
+    existing = next((h for lg in loggers for h in lg.handlers
+                     if getattr(h, _HANDLER_FLAG, False)), None)
     targets = [lg for lg in loggers
                if not any(getattr(h, _HANDLER_FLAG, False) for h in lg.handlers)]
     if not targets:
         return True
     try:
-        fh = TimedRotatingFileHandler(resolve_log_path(), when="midnight",
-                                      backupCount=7, encoding="utf-8")
-        fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] [%(name)s] %(message)s"))
-        fh._sf_log_handler = True
+        if existing is not None:
+            fh = existing
+        else:
+            fh = TimedRotatingFileHandler(resolve_log_path(), when="midnight",
+                                          backupCount=7, encoding="utf-8")
+            fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] [%(name)s] %(message)s"))
+            fh._sf_log_handler = True
         for lg in targets:
             lg.addHandler(fh)
             lg.setLevel(logging.INFO)

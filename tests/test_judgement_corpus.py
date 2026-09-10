@@ -11,13 +11,16 @@
 import pytest
 
 from daily import _is_daily_request
-from main import _HELP_REQUEST_RE, _HELP_USAGE_RE
+from main import _is_help_request
 
 
 def is_help(text: str) -> bool:
-    """帮助判定入口：与 main._command_entry 保持一致（两个分支任一命中即算）。"""
-    t = (text or "").strip()
-    return bool(_HELP_REQUEST_RE.fullmatch(t) or _HELP_USAGE_RE.fullmatch(t))
+    """帮助判定入口 = main._is_help_request（与生产同一个函数）。
+
+    旧版在这里复刻判定逻辑，于是 main 侧收紧（多行闸门）时测试继续绿、
+    生产行为已变——复刻的那份总会失联。
+    """
+    return _is_help_request(text)
 
 
 # ---------- 帮助请求判定 ----------
@@ -57,6 +60,11 @@ class TestHelpJudgement:
         "他说明天来",
         # 纯占卜问法
         "帮我占卜一下", "今天运势如何",
+        # 多行输入不走「功能意图词」宽松分支（2026-09-10）：多行 = 在铺陈问题，
+        # 误判为帮助会把问题整个吞掉；漏判只是走占卜、用户多问一句
+        "我最近失眠\n怎么用",
+        "我最近失眠\r\n怎么用",
+        "占卜\n怎么用"
     ])
     def test_not_trigger(self, q):
         assert not is_help(q), f"不应当判为帮助请求: {q!r}"
@@ -184,7 +192,7 @@ class TestHelpAntiRegression:
 
     @staticmethod
     def _is_help(q):
-        return bool(_HELP_REQUEST_RE.fullmatch(q) or _HELP_USAGE_RE.fullmatch(q))
+        return is_help(q)
 
     @pytest.mark.parametrize("q", [
         "帮助我算一卦",
@@ -194,3 +202,24 @@ class TestHelpAntiRegression:
     ])
     def test_help_plus_divination_not_help(self, q):
         assert not self._is_help(q), f"帮助词+占卜意图不应判为帮助: {q!r}"
+class TestHelpMultilineGuard:
+    """多行输入不得走「功能意图词」宽松分支（2026-09-10 加固）。
+
+    该分支靠「整段就是一句话」成立，而旧实现的前置字符类不排除换行，于是
+    「我最近失眠 + 换行 + 怎么用」被当成问用法、把问题整个吞掉。双向断言：
+    多行不判帮助，同时单行仍命中（防止把闸门关死）。
+    """
+
+    @pytest.mark.parametrize("q", [
+        "占卜\n怎么用",
+        "我最近失眠\n怎么用",
+        "我最近失眠\r\n怎么用",
+        "我最近失眠\x0b怎么用",
+        "我最近失眠\u2028怎么用",
+    ])
+    def test_multiline_not_help(self, q):
+        assert not is_help(q), f"多行输入不应判为帮助: {q!r}"
+
+    @pytest.mark.parametrize("q", ["怎么用", "占卜 怎么用", "这个功能怎么玩"])
+    def test_single_line_still_help(self, q):
+        assert is_help(q), f"单行功能问法应仍判为帮助: {q!r}"

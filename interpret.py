@@ -10,6 +10,7 @@ import asyncio
 import logging
 import time
 
+import hardening
 from hardening import (
     clip_question,
     normalize_injection_input,
@@ -32,8 +33,18 @@ logger = logging.getLogger(__name__)
 # 剥除命中由 hardening logger 打出（hardening.strip_injection_fragments），
 # 故连同 hardening logger 一起挂共享文件 handler（同批单 handler，不重复落盘）；
 # 初始化失败只告警，不影响解读主流程。
-setup_logging(logger, logging.getLogger("hardening"))
+# 【为什么传 hardening.logger 对象，而不是 logging.getLogger("hardening")】
+# 按名字取只在 hardening.__name__ 恰好等于短名 "hardening" 时才对得上，而那个前提
+# 当前只靠 main.py 的 sys.path.insert（顶层导入）维持。一旦按 plugin-import-model
+# 的方向改成包路径相对导入，__name__ 变全路径，handler 就装到一个没人写的孤儿
+# logger 上——剥除命中/剥空日志静默消失（不报错，只是再也看不到）。
+# 红线：tests/test_log_setup.py::TestInterpretLoggerBinding
+setup_logging(logger, hardening.logger)
 
+
+# 输出清洗用的引号集：中英引号 + 直角引号 + 单引号。用码点拼出，避开源码里的转义
+# 引号写法（编辑工具会把转义解码成真实字符，这坑踩过）。
+_QUOTE_CHARS = "「」『』“”" + chr(34) + chr(39)
 
 class AiInterpreter:
     """AI 深度解读器：候选链 + 单请求超时 + 按 Provider 粒度的失败冷却。
@@ -148,7 +159,7 @@ class AiInterpreter:
             topic = clip_question(topic, self.max_question_len)
         topic = strip_injection_fragments(topic)
         prompt = build_spirit_line_prompt(
-            [(card[2], upright) for card, upright in cards], topic, persona_eff)
+            [(card["cn"], upright) for card, upright in cards], topic, persona_eff)
         # system 用中立底稿而非 persona 段：persona 段夹带【第N张】解读格式约束，
         # 会让「一句话」生成跑偏成结构化解读；人设风格已拼在 prompt 的 signature_style
         system = SYSTEM_PROMPT_DIVINE
@@ -160,7 +171,10 @@ class AiInterpreter:
             text = await self._chat_once(provider, prompt, system)
             if not text:
                 continue
-            line = text.strip().strip("「」『』“”\"'").strip().splitlines()[0].strip()
+            text = text.strip().strip(_QUOTE_CHARS).strip()
+            if not text:
+                continue  # 模型只回了引号/纯空白：当这次没生成，继续下一候选
+            line = text.splitlines()[0].strip()
             if 0 < len(line) <= 40:
                 return line
         return None

@@ -73,6 +73,33 @@ _HELP_USAGE_RE = re.compile(
     r"^[^？?！!。]*(?:怎么用|怎么玩|怎么使用|怎么操作|用法)[？?！!。]*$"
 )
 
+
+def _is_single_line(text: str) -> bool:
+    """「功能意图词」宽松分支的前置：整段只能有一行。
+
+    该分支的判据是「整段就是一句话」（前置字符类不允许出现句末标点），而多行输入的
+    实际含义是「用户在铺陈问题」（多为从别处粘贴）——此时「我最近失眠 + 换行 + 怎么用」
+    会被误判成帮助页，用户的问题被整个吞掉、拿不到任何解读。漏判的代价只是走正常占卜、
+    用户再打一句「怎么用」就进帮助了。两个方向的错误严重度不对称，故此处偏保守。
+
+    不在正则里排除换行：str.splitlines() 认十种换行（LF / CR / CRLF / VT / FF /
+    文件分隔符 FS-GS-RS / NEL / 行分隔符 / 段分隔符），比列举转义符可靠——只排 LF
+    会漏掉 CRLF，而粘贴场景里最常见的恰恰是它。
+    """
+    return len(text.splitlines()) == 1
+
+
+
+def _is_help_request(text: str) -> bool:
+    """帮助判定唯一入口：两个分支任一命中即算。
+
+    命令入口与语料回归测试共用本函数。不要在别处复刻这段判定——复刻的那份会在
+    调用方收紧（例如多行闸门）时失联：测试继续绿，而生产行为已经变了。
+    """
+    t = (text or "").strip()
+    return bool(_HELP_REQUEST_RE.fullmatch(t)
+                or (_is_single_line(t) and _HELP_USAGE_RE.fullmatch(t)))
+
 # 牌阵定义见 spreads.py（FORMATIONS）
 
 @register("star_feather", "羽落", "星羽塔罗：78张塔罗牌 AI 占卜与深度解读，官方素材渲染牌面图", VERSION)
@@ -133,8 +160,7 @@ class StarFeatherPlugin(Star):
                              err_tpl: str, helpable: bool = False,
                              force_daily: bool = False, fixed_formation: str = "",
                              fail_note: str = "",
-                             empty_fallback: str = "（未提具体问题，请作一般运势解读）",
-                             epilogue: bool = False):
+                             empty_fallback: str = "（未提具体问题，请作一般运势解读）"):
         """命令入口公共流程（/占卜 与 /单抽 共用）：帮助 → 限流 → 抽牌 → 发送。
 
         err_tpl 是完整的用户侧友好文案（不含异常细节——异常只进日志，
@@ -143,15 +169,16 @@ class StarFeatherPlugin(Star):
         这里不再有前缀检查与提示分支——别再把「必须带 /」的旧逻辑加回来。
         """
         # 命令已由本插件处理：禁止默认 LLM 参与本次事件。
+        # 参数名反直觉，别读反：True = 禁止。框架 process_stage 以
+        # `and not event.call_llm` 判定是否走默认 LLM，且默认值是 False。
         # 刻意不用 stop_event()：它在洋葱模型下于响应阶段清空 result 之后才执行，
         # 会 set 出一个空 STOP result → RespondStage 收到空消息（Prepare 空日志）、
-        # 收口/统计类插件可能把它误判为「空回复」入账（见 CHANGELOG 命令入口收尾修复）。
+        # 收口/统计类插件可能把它误判为「空回复」入账（见 changelogs/v0.4.8.md 的命令入口收尾修复）。
         # 这坑踩过了，别再踩。
         event.should_call_llm(True)
         try:
             text_norm = (text or "").strip()
-            if helpable and (_HELP_REQUEST_RE.fullmatch(text_norm)
-                             or _HELP_USAGE_RE.fullmatch(text_norm)):
+            if helpable and _is_help_request(text_norm):
                 yield event.plain_result(self._help())
                 return
             block = await self.gate.check(event, for_command=True)
@@ -165,6 +192,10 @@ class StarFeatherPlugin(Star):
                     event, formation, positions, picks, text,
                     is_daily=is_daily, daily_uid=daily_uid,
                     fail_note=fail_note, empty_fallback=empty_fallback,
+                    # 命令入口恒发收尾句（工具入口不发，由 Agent Loop 的 LLM 回复承担）。
+                    # 这里刻意写死 True 而不是暴露成 _command_entry 的参数：没有「命令
+                    # 入口不发收尾」的场景，暴露只会变成死参数或默认 False 的静默回归。
+                    # 红线：tests/test_core.py::TestCommandEntryEpilogueEndToEnd
                     epilogue=True):
                 yield r
         except Exception as e:
@@ -178,7 +209,7 @@ class StarFeatherPlugin(Star):
                 event, text,
                 err_tpl="哼，这场占卜断了。牌灵今天状态不好，换个时候再来问。",
                 helpable=True,
-                fail_note="📖 解读：\n（AI 今天闹脾气不肯开口，牌义先给你，自己琢磨~）"):
+                fail_note="📖 解读：\n（AI 今天闹脾气不肯开口，牌面先给你，自己琢磨~）"):
             yield r
 
     @command("单抽", desc="随机抽取一张塔罗牌并解读")
@@ -219,8 +250,6 @@ class StarFeatherPlugin(Star):
         或 None —— 否则 runner 判定无返回值并 DONE，respond 空消息跳过，
         收口钩子不触发、群聊防并发门闩死锁（见 _tool_send）。
         """
-        # 收尾引导语（prompts 集中管理，随机一条）：让 LLM 生成一句简短确认（同时保住 respond 非空）
-        note = random.choice(TOOL_EPILOGUE)
         # 打开开关：运行期判断（装饰器静态注册无法卸载，见 __init__ 注释）
         if not self.tarot.llm_tool_enabled:
             await self._tool_send(event, "星羽塔罗的自然语言占卜未开启～ 试试 /占卜 感情 这样的命令。")
@@ -248,6 +277,11 @@ class StarFeatherPlugin(Star):
             await self._tool_send(event, block)
             yield "已提示用户今日次数限制。请自然回应一句，不必再调用工具。"
             return
+        # 收尾引导语（prompts 集中管理，随机一条）：让 LLM 生成一句简短确认（同时保住 respond 非空）。
+        # 放在四条早退分支之后取：早退路径（开关关闭/空文本/节流/每日上限）用不到 note，
+        # 提前抽只会白耗一次全局随机状态（也把「不走的路径别做无用功」钉住）。
+        # 红线：tests/test_core.py::TestDivineToolDirect（早退不消耗随机 + 正常路径必消耗）
+        note = random.choice(TOOL_EPILOGUE)
         try:
             # 统一抽牌 + 统一流程（与 /占卜 同一套逻辑，行为一致）
             is_daily, daily_uid, formation, positions, picks = await self._pick_reading(event, text)
@@ -321,9 +355,12 @@ class StarFeatherPlugin(Star):
         # 统一管发送模式）
         sig_text = ""
         img = None
-        persona_eff = None
+        # 一次占卜只掷一次骰子：牌灵的话与解读正文必须是同一人格。
+        # resolve_persona 在 ai.persona=random 时每次都随机抽——两处各解析一次，
+        # 同一签就会「牌灵傲娇、正文温柔」两副腔调；而 v0.6.0 承诺的是一签固定
+        # 同一人格、next 签才换。所以在这里解析一次，全路径共用同一值。
+        persona_eff = resolve_persona(self.tarot.ai_persona)
         if is_daily and daily_uid and picks:
-            persona_eff = resolve_persona(self.tarot.ai_persona)
             # 开关 output.daily_card 只控海报渲染：关掉回到普通牌面图，牌灵的话照常
             if self.daily_card and self.tarot.send_mode != "text_only":
                 img = await self.daily.render_daily_card(["今日牌运"], picks, daily_uid)
@@ -332,14 +369,14 @@ class StarFeatherPlugin(Star):
         # 牌灵的话：所有占卜路径统一生成（羽签/羽时三刻/羽镜/恋羽十字都有这句
         # 牌灵的开口）——裸句直出，无「牌灵的话：」前缀与引号
         if picks:
-            eff = persona_eff if persona_eff is not None else resolve_persona(self.tarot.ai_persona)
-            sig_text = await self.daily.spirit_cached(event, daily_uid, picks, clean, eff)
+            sig_text = await self.daily.spirit_cached(event, daily_uid, picks, clean, persona_eff)
         if is_daily and daily_uid:
             interp = await self.daily.interp_cached(event, daily_uid, formation, positions,
                                                     picks, clean, persona_eff)
         else:
             interp = await self.tarot._ai_interpret(
-                event, formation, positions, picks, clean or empty_fallback)
+                event, formation, positions, picks, clean or empty_fallback,
+                persona_eff=persona_eff)
         if sig_text:
             # 牌灵的话随 preface 进结果：AI 全失败回退牌义时，牌灵的话一句不丢
             preface = f"{preface}\n{sig_text}" if preface else sig_text
