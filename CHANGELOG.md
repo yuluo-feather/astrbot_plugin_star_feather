@@ -1,6 +1,6 @@
 # 更新日志
 
-> 每个版本一个文件，见 [`changelogs/`](changelogs/)。未发布的变化见 [`changelogs/unreleased.md`](changelogs/unreleased.md)。
+> 每个版本一个文件，见 [`changelogs/`](changelogs/)。
 
 - [v0.6.3](changelogs/v0.6.3.md)
 - [v0.6.2](changelogs/v0.6.2.md)
