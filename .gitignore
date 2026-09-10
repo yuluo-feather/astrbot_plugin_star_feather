@@ -34,3 +34,6 @@ AGENTS.md
 release/
 commit_msg.txt
 *.bak
+
+# 未发布内容（发布时本文件改名为 vX.Y.Z.md，不进仓库）
+changelogs/unreleased.md
