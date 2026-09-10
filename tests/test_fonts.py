@@ -38,3 +38,22 @@ class TestFont:
         # 下一次常用字渲染仍应命中内置字体
         common = fonts._load_font(20, text="权杖王后正位")
         assert "StarFeather" in (getattr(common, "path", "") or "")
+
+    def test_unparsable_result_is_cached_as_negative(self, monkeypatch):
+        """无法解析的字体路径：None 也要入缓存（键存在即已判定），不重复重算。
+
+        旧实现用 `cmap = _FONT_CMAP.get(path)` / `if cmap is None: <重算>`，
+        写入的负结果永远读不回来——每次调用都白跑一遍 fontTools 导入尝试 +
+        静态清单查找（与 kv_utils 记录的「故障与无记录折叠」同类缺陷）。
+        """
+        class _Font:
+            path = os.path.join(fonts._FONT_DIR, "no_such_font.otf")
+
+        calls = []
+        monkeypatch.setattr(fonts, "_load_static_cmap", lambda p: (calls.append(p), None)[1])
+        fonts._FONT_CMAP.clear()
+        assert fonts._font_covers(_Font(), "羽") is False   # 内置子集无法自证：不放行
+        assert fonts._FONT_CMAP.get(_Font.path) is None
+        assert _Font.path in fonts._FONT_CMAP               # 负结果已缓存（键存在）
+        assert fonts._font_covers(_Font(), "羽") is False
+        assert len(calls) == 1                              # 第二次不再重算
