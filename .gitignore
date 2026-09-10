@@ -125,3 +125,7 @@ commit_msg.txt
 *.bak
 *.backup
 *.orig
+
+# 素材只入库 WebP（PNG 原图约 228 MB，留在开发侧）
+# card_render._resolve_asset 按 .png 找、找不到回退 .webp，故纯 WebP 环境可正常运行
+assets/**/*.png
