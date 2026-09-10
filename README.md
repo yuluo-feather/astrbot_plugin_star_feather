@@ -76,6 +76,8 @@
 
 触发流程：智能匹配「恋羽十字」牌阵 → 洗牌提示 → 输出四张牌及正逆位牌义 → AI 深度解读。
 
+![星羽塔罗 · 群聊占卜示例](https://raw.githubusercontent.com/yuluo-feather/astrbot_plugin_star_feather/main/docs/preview_divine.png)
+
 ## 🪶 牌阵说明
 
 | 牌阵 | 张数 | 牌位 | 触发方式 |

@@ -76,6 +76,8 @@ Private chat is safe: it's point-to-point, only the bot you're talking to sees t
 
 Flow: smart match "Lovers' Feather Cross" → shuffle hint → draw four cards with meanings → AI deep reading.
 
+![Star Feather Tarot in action](https://raw.githubusercontent.com/yuluo-feather/astrbot_plugin_star_feather/main/docs/preview_divine.png)
+
 ## 🪶 Spreads
 
 | Spread | Cards | Positions | Trigger |
