@@ -20,10 +20,20 @@ class TestPickSignature:
 
     def test_returns_from_pool(self):
         line = pick_signature(CARD, True, "u1", "20260826")
-        assert line in SIGIL_LINES[(CARD[0], CARD[1])]["up"]
+        assert line in SIGIL_LINES[(CARD["suit"], CARD["num"])]["up"]
+
+    def test_int_num_still_hits_pool(self):
+        """上游若把 num 改成 int，签文也不能丢：取池键前防御性 str 化。
+
+        tarot_data 现在保证 num 是字符串，但这条约束跨模块存在——哪天有人顺手
+        改成 int，当天所有签文会静默退化成兜底句。
+        """
+        card = {"suit": CARD["suit"], "num": int(CARD["num"])}
+        assert (pick_signature(card, True, "u1", "20260826")
+                == pick_signature(CARD, True, "u1", "20260826"))
 
     def test_fallback_for_unknown_card(self):
-        assert pick_signature(("major", "99"), True, "u1", "20260826") == _FALLBACK_SIGNATURE
+        assert pick_signature({"suit": "major", "num": "99"}, True, "u1", "20260826") == _FALLBACK_SIGNATURE
 
 
 class TestDailyCardOrchestration:

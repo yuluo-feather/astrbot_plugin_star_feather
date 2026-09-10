@@ -12,7 +12,7 @@
 """
 import hashlib
 
-# 键 = (suit, id)，与 tarot_data.TAROT_CARDS 六元组前两位一一对应；
+# 键 = (suit, id)，与 tarot_data.TAROT_CARDS 的 suit/num 一一对应；
 # 每张牌正逆位各 2 条，挑选以（用户, 日期）确定性命中其一。
 SIGIL_LINES = {
     # ===== 大阿卡纳 =====
@@ -338,18 +338,19 @@ SIGIL_LINES = {
 _FALLBACK_SIGNATURE = "牌灵今日只留下一句话：顺其自然。"
 
 
-def pick_signature(card: tuple, upright: bool, uid: str, date_str: str) -> str:
+def pick_signature(card: dict, upright: bool, uid: str, date_str: str) -> str:
     """同（用户, 日期, 牌, 正逆）永远同一条签文：md5 种子确定性命中，与全局随机无关。
 
-    card 为 tarot_data.TAROT_CARDS 中的六元组（只用前两位 (suit, id) 定位签文池）；
+    card 为 tarot_data.TAROT_CARDS 中的牌字典（只用 suit/num 定位签文池）；
     uid/date_str 与 daily._daily_pick 同参，保证「牌与话」同源同确定性——
     牌是那张，话也是那句，问一百遍都不变。
     """
-    key = (card[0], card[1])
+    num = str(card["num"])  # 池键是字符串：上游若把 num 改成 int 也不丢签文
+    key = (card["suit"], num)
     entry = SIGIL_LINES.get(key)
     if not entry:
         return _FALLBACK_SIGNATURE
     lines = entry["up" if upright else "down"]
-    seed = f"{date_str}:{uid}:{card[0]}:{card[1]}:{'u' if upright else 'd'}"
+    seed = f"{date_str}:{uid}:{card['suit']}:{num}:{'u' if upright else 'd'}"
     digest = hashlib.md5(seed.encode()).hexdigest()  # nosec B324 非安全用途：仅作签文确定性命中
     return lines[int(digest, 16) % len(lines)]
