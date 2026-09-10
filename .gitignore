@@ -1,7 +1,36 @@
+# Python 字节码与工具缓存
 __pycache__/
 *.pyc
-.DS_Store
+.ruff_cache/
+.mypy_cache/
 .pytest_cache/
+
+# 虚拟环境
+.venv/
+venv/
+
+# 覆盖率产物
+.coverage
+htmlcov/
+
+# IDE / 编辑器
+.idea/
+.vscode/
+
+# 运行日志与临时产物
+logs/
+temp/
+*.tmp
+
+# AI 助手工具
+.claude/
+.codex/
+AGENTS.md
+
+# 操作系统
+**/.DS_Store
+
+# 发版脚本产物（本地）
 release/
 commit_msg.txt
 *.bak
