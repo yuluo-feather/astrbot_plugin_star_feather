@@ -9,6 +9,7 @@
 ——本羽最得意的部分：牌要出得好看，才配得上占卜。
 """
 import asyncio
+import functools
 import logging
 import os
 import random
@@ -19,7 +20,7 @@ import time
 from PIL import Image, ImageDraw
 
 from fonts import _load_font
-from tarot_data import SUIT_CN
+from tarot_data import SUIT_CN, meaning_text
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +103,9 @@ def _wrap_text(draw, text, font, max_w):
     逐字累加直到超过 max_w 就断一行；文字本身不含换行符，
     长牌义词超过两行时由 _draw_card 截断，不会撑破卡片。
     """
+    # 先量整段：放得下就是单行（逐字累加的最后一测量正是整段宽度，放得下即从不越界）
+    if draw.textlength(text, font=font) <= max_w:
+        return [text] if text else []
     lines = []
     cur = ""
     for ch in text:
@@ -130,9 +134,10 @@ def _resolve_asset(path: str) -> str:
 
 
 def _asset_path(card) -> str:
-    """tarot_data 牌元组 -> 素材文件绝对路径。"""
-    suit, num, cn, en, up, down = card
-    n = int(num)
+    """tarot_data 牌字典 -> 素材文件绝对路径。"""
+    suit = card["suit"]
+    n = int(card["num"])
+    cn = card["cn"]
     if suit == "major":
         # 素材文件里 3 号叫「女皇」，tarot_data 叫「皇后」——命名不同但都是她，认出来就行
         cn_fix = "女皇" if cn == "皇后" else cn
@@ -163,14 +168,15 @@ def _draw_capsule(d, cx, cy, text, font, pad_x, pad_y, bg, fg):
 
 # ---------- 画布背景 ----------
 
-def _build_card_background(card, w, h) -> Image.Image:
+@functools.lru_cache(maxsize=4)
+def _background_cached(suit: str, num: str, cn: str, w: int, h: int) -> Image.Image:
     """牌面 cover 做底 + 深藏青遮罩——背景跟牌走（今日牌运卡与普通拼图共用）。
 
     cover 放大前先裁中心带：素材上下缘自带牌名/装饰文字，整图放大会把它们
     放大成底部大字；旧海报背景是纯净花纹+人物剪影，取中心 72% 避开。
     素材缺失抛 FileNotFoundError：渲染层 fail loudly，回退由编排层兜底。
     """
-    path = _asset_path(card)
+    path = _asset_path({"suit": suit, "num": num, "cn": cn})
     if not os.path.exists(path):
         raise FileNotFoundError(f"塔罗素材缺失: {path}")
     src = Image.open(path).convert("RGBA")
@@ -186,9 +192,28 @@ def _build_card_background(card, w, h) -> Image.Image:
     return Image.alpha_composite(canvas, overlay)
 
 
+def _build_card_background(card, w, h) -> Image.Image:
+    """背景成品缓存入口：按「牌 + 尺寸」缓存，返回可画的副本。
+
+    key 含牌面信息（底牌跟本签的牌走，不能改成只按尺寸缓存），所以 maxsize 的含义是
+    「最近 N 个 (牌, 尺寸) 组合」而不是「N 种尺寸」，并且**跨签基本不命中**：每次渲染只挑
+    一张底牌进缓存，要遇到 4 张不同的牌（同尺寸）才填满。真实收益在「同一签反复渲染」
+    （用户连着问几次）与「当天牌固定的海报」上——这是「背景跟牌走」的必然代价。
+    单档实测（本机 RGBA 实算，非估算）：1 张 412×986 = 1.55 / 3 张 1148×986 = 4.32 /
+    4 张 780×1832 = 5.45 / 海报 680×1200 = 3.11 MiB；上界 = 4 × 最大单档 ≈ 21.8 MiB。
+    红线：tests/test_card_render.py::TestBackgroundCacheSizing
+    """
+    return _background_cached(card["suit"], card["num"], card["cn"], w, h).copy()
+
+
+@functools.lru_cache(maxsize=8)
 def _load_card_image(path: str, upright: bool):
     """加载并处理单张牌面：contain 缩放到 INNER_W×INNER_H 内（保持比例，不拉伸）、
-    转 RGBA、逆位旋转 180°。返回 (img, w, h)（缩放后实际尺寸，居中用）。"""
+    转 RGBA、逆位旋转 180°。返回 (img, w, h)（缩放后实际尺寸，居中用）。
+
+    结果按 (路径, 正逆) 缓存（LRU 8，约 6MB）：这一步是高清素材解码 + LANCZOS 缩放，
+    实测本机 50~80ms/张（随负载浮动）——同一张牌再次出现（连续占卜、同群多签）时直接命中。
+    返回的图是缓存本体，调用方只许 paste（不得就地改画）。"""
     img = Image.open(path)
     scale = min(INNER_W / img.width, INNER_H / img.height)
     tw = max(1, int(img.width * scale))
@@ -226,8 +251,8 @@ def _draw_card(canvas, x, y, card, upright) -> int:
     off_y = (INNER_H - th) // 2
     canvas.paste(img, (x + PAD_X + off_x, y + PAD_X + off_y), img)
 
-    # 信息区：正逆位标记 + 牌名 + 牌义关键词
-    suit, num, cn, en, up, down = card
+    # 信息区：正逆位标记 + 牌名 + 牌义关键词（brief：只关键词，两行内）
+    cn = card["cn"]
     info_y = y + PAD_X + INNER_H
     d.line([(x + 20, info_y + 10), (x + CARD_OUT_W - 20, info_y + 10)],
            fill=LINE, width=2)
@@ -237,13 +262,16 @@ def _draw_card(canvas, x, y, card, upright) -> int:
     _text_center(d, x + CARD_OUT_W / 2, info_y + 20, f"{tag} · {cn}",
                  _load_font(25, bold=True, text=f"{tag} · {cn}"), tag_color)
 
-    meaning = up if upright else down
+    meaning = meaning_text(card, upright, brief=True)
     # 信息区高 104 只放得下两行（起始 y+54、行距 25），
     # 第三行起截去——牌义关键词均已控制在两行内，截断只为兜底生僻超长文案
-    lines = _wrap_text(d, meaning, _load_font(22, text=meaning), CARD_OUT_W - 44)
+    # 量宽与逐行绘制共用同一字体对象：分行是 meaning 的子串，字形覆盖必然一致；
+    # 取同一个实例既免去重复加载，也让「量的时候放得下、画的时候溢出」在结构上
+    # 不可能发生（此前两处各自 _load_font，能不能相等是隐式前提而非保证）。
+    mean_font = _load_font(22, text=meaning)
+    lines = _wrap_text(d, meaning, mean_font, CARD_OUT_W - 44)
     for i, line in enumerate(lines[:2]):
-        _text_center(d, x + CARD_OUT_W / 2, info_y + 54 + i * 25, line,
-                     _load_font(22, text=line), BAR_TEXT)
+        _text_center(d, x + CARD_OUT_W / 2, info_y + 54 + i * 25, line, mean_font, BAR_TEXT)
 
     return card_h
 
@@ -300,6 +328,12 @@ def render_cards(positions, picks, formation, save_dir=None) -> str:
 # ---------- 今日牌运卡海报 ----------
 DAILY_CARD_W = 680                       # 海报宽（竖版）
 DAILY_CARD_H = 1200                      # 海报高
+DAILY_CARD_Y = 176                       # 白边卡牌顶端 y（其上为标题胶囊与日期）
+DAILY_QUOTE_GAP = 68                     # 卡底 → 签文引用块顶端（_text_center 的 y 是文字顶边，不是中心）
+# 签文起点由卡片高度推导，勿写死数值：CARD_H 随 PAD_X / INNER_H / INFO_H 变化，
+# 定死会让签文与卡片重叠或拉出大空洞（旧版字面量 992 = 176 + 748 + 68）。
+# 红线：tests/test_card_render.py::TestDailyCardLayoutInvariants
+DAILY_CARD_QUOTE_Y = DAILY_CARD_Y + CARD_H + DAILY_QUOTE_GAP
 _DAILY_SIG_TEXT = (236, 227, 196)        # 签文引用 米金
 _DAILY_DATE_TEXT = (208, 214, 226)       # 日期 灰白
 _DAILY_SIGN_TEXT = (186, 194, 208)       # 署名 灰蓝
@@ -332,6 +366,11 @@ def _split_signature_lines(d, text, font, max_w) -> list[str]:
             cut = 0
             while cut < len(seg) and d.textlength(seg[:cut + 1], font=font) <= max_w:
                 cut += 1
+            if cut == 0:
+                # 单个字形就宽于画布：不兜这一下 cut 会恒为 0、seg 长度不减 → 死循环。
+                # 现网尺寸（max_w=480、字号 24）不可达，但本函数跑在 to_thread 里，
+                # 一旦触发是静默挂死一个线程池槽位，硬切一字保底。
+                cut = 1
             lines.append(seg[:cut])
             seg = seg[cut:]
         line = seg
@@ -359,14 +398,14 @@ def _render_daily_card_img(card, upright, signature, date_text, save_dir=None) -
                  _load_font(26, text=date_text), _DAILY_DATE_TEXT)
 
     card_x = (W - CARD_OUT_W) // 2
-    card_y = 176
+    card_y = DAILY_CARD_Y
     _draw_card(canvas, card_x, card_y, card, upright)
 
     # 签文引用：24px 常规体（秀气，旧卡同款观感），按标点分行最多两行；
     # 署名与底部水印固定留白
     quote = f"『{signature}』"
     q_font = _load_font(24, text=quote)
-    qy = 992
+    qy = DAILY_CARD_QUOTE_Y
     for line in _split_signature_lines(d, quote, q_font, W - 200)[:2]:
         _text_center(d, W / 2, qy, line, q_font, _DAILY_SIG_TEXT)
         qy += 38

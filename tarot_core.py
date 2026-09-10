@@ -26,7 +26,7 @@ from deliver import Deliverer
 from interpret import AiInterpreter
 from settings import TarotSettings
 from spreads import FORMATIONS
-from tarot_data import SUIT_CN, TAROT_CARDS
+from tarot_data import TAROT_CARDS, meaning_text
 
 logger = logging.getLogger(__name__)
 
@@ -70,11 +70,13 @@ class StarTarot:
         """一张牌的展示信息四元组：(花色, 牌名, 正/逆位, 对应牌义)。
 
         牌是正位就读正位释义、逆位读逆位释义——一张牌两个面孔，
-        本羽只递你该看到的那一面。
+        本羽只递你该看到的那一面。牌义走 meaning_text 全量渲染：
+        关键词 + 走向 + 心法/转身，本地兜底与 AI 素材共用这一份。
         """
-        # (花色, 牌名, 正/逆位, 对应牌义)
-        suit, _, cn, _, up, down = pick["card"]
-        return suit, cn, "正位" if pick["upright"] else "逆位", up if pick["upright"] else down
+        card = pick["card"]
+        suit, cn = card["suit"], card["cn"]
+        upright = bool(pick["upright"])
+        return suit, cn, "正位" if upright else "逆位", meaning_text(card, upright)
 
     def _render_text(self, formation: str, positions: list[str], picks: list[dict]) -> str:
         """本地牌义兜底文案：AI 解读拿不到时全靠它撑场面。
@@ -85,7 +87,10 @@ class StarTarot:
         lines = [f"🔮 牌阵：{formation}", "─" * 28]
         for i, (pos, pick) in enumerate(zip(positions, picks), 1):
             suit, cn, state, meaning = self._pick_info(pick)
-            lines.append(f"🃏 第{i}张 ·【{pos}】\n「{cn}」（{SUIT_CN[suit]}）{state}\n   {meaning}")
+            # 牌名已自带花色：56 张小阿卡纳全是「权杖首牌」这类写法，22 张大阿卡纳
+        # 牌名独一无二。再标一遍就是同词重复（旧版实际输出过「圣杯首牌」（圣杯）逆位）。
+        # 别再补回来——红线 tests/test_core.py::TestRenderTextNoSuitDuplicate 会拦。
+        lines.append(f"🃏 第{i}张 ·【{pos}】\n「{cn}」{state}\n   {meaning}")
         return "\n".join(lines)
 
     def _render_image(self, formation: str, positions: list[str], picks: list[dict]) -> str | None:
