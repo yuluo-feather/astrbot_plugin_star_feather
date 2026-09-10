@@ -4,7 +4,9 @@
 test_spreads（选阵与清洗）/ test_hardening（Prompt 防护）/ test_identity（身份标识）/
 test_gating（限流闸门）/ test_log_setup（运行日志）/ test_card_render（渲染与清理）/
 test_fonts（字体子系统）/ test_deliver（分段与分发）/ test_limiter / test_config /
-test_dailylines（每日签文池与确定性挑选）/ test_judgement_corpus（判定语料回归），
+test_dailylines（每日签文池与确定性挑选）/ test_integrity（数据完整性域）/
+test_kv_utils（KV 读写降级）/ test_judgement_corpus（判定语料回归）/
+test_stub_signatures（打桩与真实签名一致性）/ test_docs_consistency（测试清单对账），
 共享桩（FakeProvider / FakeContext / 牌常量）在 stubs.py。
 
 【导入约定】测试文件一律用插件根相对导入（from daily import ...），
@@ -31,11 +33,22 @@ if _PLUGIN_DIR not in sys.path:
 
 @pytest.fixture(autouse=True)
 def _isolate_font_cache():
-    """每个用例前后清空字体缓存，避免覆盖检测用例间互相污染。"""
+    """每个用例前后清空字体缓存，避免覆盖检测用例间互相污染。
+
+    三处都清：_FONT_CACHE（size,bold → 字体）、_FONT_CMAP（path → cmap|None，
+    含「无法解析」的负结果缓存）、_load_static_cmap 的 functools 缓存
+    （charsets.json 查找结果）。
+    _font_candidates 不清：它只依赖 bold 参数、内容是平台路径常量，
+    不随用例变化（清了对结果无影响，属无意义操作）。
+    """
     import fonts
     fonts._FONT_CACHE.clear()
+    fonts._FONT_CMAP.clear()
+    fonts._load_static_cmap.cache_clear()
     yield
     fonts._FONT_CACHE.clear()
+    fonts._FONT_CMAP.clear()
+    fonts._load_static_cmap.cache_clear()
 
 
 def _mk_module(name: str, **attrs) -> types.ModuleType:

@@ -44,7 +44,9 @@ class FakeContext:
         return self.others
 
 
-CARD = ("major", "0", "愚者", "The Fool", "新的开始", "冲动冒险")
+from tarot_data import TAROT_CARDS
+
+CARD = TAROT_CARDS[0]  # 愚者（字典结构，与真实牌库同源）
 PICK = {"card": CARD, "upright": True}
 EVENT = types.SimpleNamespace(unified_msg_origin="test_umo")
 # 结构合格的标准 AI 解读样本（【第N张·位置】+【总结】），供需要「正常产出」的用例复用
