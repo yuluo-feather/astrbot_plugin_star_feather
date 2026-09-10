@@ -1,39 +1,127 @@
-# Python 字节码与工具缓存
+# Python 字节码 / 编译产物
 __pycache__/
+__pycache__
+*.py[cod]
+*$py.class
 *.pyc
-.ruff_cache/
-.mypy_cache/
+*.pyo
+*.pyd
+*.so
+
+# 发布 / 打包
+build/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+*.manifest
+*.spec
+.Python
+
+# 测试 / 覆盖率
 .pytest_cache/
+.pytest_cache
+.ruff_cache/
+.ruff_cache
+.pytest_tmp*/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+cover/
+test-results/
+.test/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
 
 # 虚拟环境
-.venv/
+.env
+.venv
 venv/
-
-# 覆盖率产物
-.coverage
-htmlcov/
+env/
+ENV/
+env.bak/
+venv.bak/
+__pypackages__/
+.uv/
+.python-version
 
 # IDE / 编辑器
 .idea/
 .vscode/
-
-# 运行日志与临时产物
-logs/
-temp/
-*.tmp
-
-# AI 助手工具
-.claude/
-.codex/
-AGENTS.md
+*.swp
+*.swo
+*~
+.spyderproject
+.spyproject
+.ropeproject
+.ipynb_checkpoints
 
 # 操作系统
-**/.DS_Store
+.DS_Store
+Thumbs.db
 
-# 发版脚本产物（本地）
+# 日志 / 运行时数据
+*.log
+logs/
+storage/
+data/
+temp/
+tmp/
+*.tmp
+*.temp
+*.cache
+
+# 本地配置（含密钥风险）
+config.local.yaml
+config.yaml
+config.yml
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# AI 助手 / 代理工具
+.claude/
+.claude-code-router/
+.iflow/
+.research/
+.trae/
+.codex/
+CLAUDE.md
+GEMINI.md
+AGENT.md
+AGENTS.md
+
+# 前端 / WebUI（如引入）
+webui/node_modules/
+webui/dist/
+node_modules/
+
+# 星羽塔罗专有：发版脚本产物与发布归档
 release/
 commit_msg.txt
-*.bak
 
-# 未发布内容（发布时本文件改名为 vX.Y.Z.md，不进仓库）
-changelogs/unreleased.md
+# 备份文件
+*.bak
+*.backup
+*.orig
