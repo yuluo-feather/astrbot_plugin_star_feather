@@ -13,6 +13,7 @@
 改文案只动这一个文件；逻辑（剥除/校验/发送）仍在各自模块。
 （文案归文案，逻辑归逻辑，别把两者搅在一起——本羽不喜欢乱。）
 """
+import hashlib
 import random
 import re
 
@@ -105,8 +106,27 @@ def build_system_prompt(persona: str) -> str:
     return SYSTEM_PROMPT_DIVINE + PERSONA_PROFILES[p]["system_extra"]
 
 
-# 牌灵的话 prompt 版本号：文案迭代时 +1，当日缓存自动失效（旧句不复活）
-SPIRIT_PROMPT_V = 2
+# 牌灵 prompt 的静态模板：动态部分（牌面、主题）用 format 填入。抽成常量是为了让
+# 「内容指纹」可算——模板改一笔，版本号自动变，当日缓存自动失效。
+_SPIRIT_TEMPLATE = (
+    "你是星羽塔罗的牌灵。今天抽到的牌是【{shown}】{topic_part}"
+    "。请说一句牌灵的话（25 字以内）：贴合牌面与主题，温柔有画面感。"
+    "一句话说人话——比喻必须一读就懂，不玩需要反应的意象；"
+    "只输出这句话本身：不加引号、不加解释、不换行。"
+)
+# 中立语气收尾（persona=off 时用）；同样参与内容指纹
+_SPIRIT_NEUTRAL_TAIL = "语气中正平和，不刻意搞怪或吓人。"
+
+
+def _spirit_prompt_fingerprint() -> str:
+    """牌灵 prompt 的内容指纹：模板或任一人设卡的签名风格一改，指纹就变，当日
+    缓存自动失效——不必再靠人记着手工递增版本号（隐性契约迟早漏改）。"""
+    parts = [_SPIRIT_TEMPLATE, _SPIRIT_NEUTRAL_TAIL]
+    parts += [profile["signature_style"] for profile in PERSONA_PROFILES.values()]
+    return hashlib.md5("|".join(parts).encode()).hexdigest()[:8]  # nosec B324 非安全用途：内容指纹
+
+
+SPIRIT_PROMPT_V = _spirit_prompt_fingerprint()
 
 
 def build_spirit_line_prompt(cards: list, topic: str, persona_eff) -> str:
@@ -119,14 +139,11 @@ def build_spirit_line_prompt(cards: list, topic: str, persona_eff) -> str:
     输出约定：只输出那句话本身（引号剥除/截断在 interpret.spirit_line）。
     """
     shown = "、".join(f"{cn}·{'正位' if upright else '逆位'}" for cn, upright in cards)
-    base = (f"你是星羽塔罗的牌灵。今天抽到的牌是【{shown}】"
-            + (f"，主题是「{topic}」" if topic else "")
-            + "。请说一句牌灵的话（25 字以内）：贴合牌面与主题，温柔有画面感。"  # 门槛说明：prompt 要求 25 字内，interpret.spirit_line 实际接受 ≤40 字（宽容策略，避免过度丢弃）——此处不改代码门槛
-              "一句话说人话——比喻必须一读就懂，不玩需要反应的意象；"
-              "只输出这句话本身：不加引号、不加解释、不换行。")
+    topic_part = f"，主题是「{topic}」" if topic else ""
+    base = _SPIRIT_TEMPLATE.format(shown=shown, topic_part=topic_part)
     if persona_eff:
         return base + PERSONA_PROFILES[persona_eff]["signature_style"]
-    return base + "语气中正平和，不刻意搞怪或吓人。"
+    return base + _SPIRIT_NEUTRAL_TAIL
 
 # ---- AI 解读：输出格式协议 ----
 # 【第N张·位置】/【总结】标记切分正则：解读输出模板（下方 build_reading_prompt）
