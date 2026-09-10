@@ -51,7 +51,10 @@ class LimitGate:
             return 0
         async with self._kv_lock:  # 读-判-写原子化，防并发读旧值绕过冷却（渗透实测）
             last_ts, _ok = await kv_get(self.kv_store, key, 0, "会话节流")
-            last_ts = float(last_ts or 0)
+            try:
+                last_ts = float(last_ts or 0)
+            except (TypeError, ValueError):
+                last_ts = 0.0  # 坏数据当「没有记录」：放行，别把入口拦成「这场断了」
             remain = cooldown_remaining(last_ts, time.time(), cooldown)
             if remain > 0:
                 return remain

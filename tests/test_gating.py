@@ -84,6 +84,17 @@ class TestSessionThrottle:
         assert asyncio.run(g.session_throttle("k", 10)) == 0  # 写失败：放行
 
 
+    def test_bad_timestamp_treated_as_no_record(self):
+        """KV 里是坏时间戳（字符串/对象）时当「没有记录」放行。
+
+        float() 直接抛出去的话，命令入口会落进「这场占卜断了」的兜底文案、工具
+        入口会走「这卦起得有点乱」，把用户的正常请求误伤成故障。
+        """
+        kv = FakeKV()
+        kv.store["k"] = "not-a-timestamp"
+        g = _gate(kv, cmd=100)
+        assert asyncio.run(g.session_throttle("k", 100)) == 0
+
 class TestGateCheck:
     def test_command_throttle_block_message(self):
         g = _gate(FakeKV(), cmd=100)
