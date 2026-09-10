@@ -74,3 +74,26 @@ class TestToolQuestion:
 
     def test_multi_request_words(self):
         assert clean_tool_question("请帮我算一卦 我的运势") == "我的运势"
+
+
+class TestRelationWordsDerived:
+    """RELATION_WORDS 必须**引用** KEYWORD_MAP 感情组，不能抄一份字面量。
+
+    抄过的那份漏了「情感」：当时间线词 ≥2 且句中没有他/她/我们时（「情感过去未来」），
+    情感组得分落后于时间线组 → best=羽时三刻 → select_formation 第 71 行的升级判定
+    因「情感」不在 RELATION_WORDS 而失效 → 关系问题被当成纯时间线问题（"感情过去未来"
+    却是对的，同一个语义、两条路径不一致）。
+    """
+
+    def test_relation_words_covers_keyword_map_emotion_group(self):
+        from spreads import KEYWORD_MAP, RELATION_WORDS
+        missing = [w for w in KEYWORD_MAP[0][0] if w not in RELATION_WORDS]
+        assert not missing, f"KEYWORD_MAP 情感组有词没进 RELATION_WORDS：{missing}"
+
+    def test_emotion_plus_timeline_upgrades_to_relation_spread(self):
+        from spreads import select_formation
+        # 唯一能暴露漏词的形状：时间线词 2 个 > 情感词 1 个，且不含「他/她/我们」
+        assert select_formation("情感过去未来") == "恋羽十字"
+        assert select_formation("情感未来时间线") == "恋羽十字"
+        # 对照：同一语义的另一条路径，改前就对，改后必须不变
+        assert select_formation("感情过去未来") == "恋羽十字"
