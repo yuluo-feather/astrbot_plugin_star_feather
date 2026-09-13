@@ -135,3 +135,6 @@ tools/
 
 # 未发布段只活在开发侧（发布时改名 vX.Y.Z.md 才入库）；repos 侧同样忽略
 changelogs/unreleased.md
+
+# 开发侧核对/审查报告（判据留档；不进 repos 与市场包）
+audits/
