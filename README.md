@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-  <img src="https://img.shields.io/badge/version-v0.6.3-f8a5c2" alt="v0.6.3"/>
+  <img src="https://img.shields.io/badge/version-v0.7.0-f8a5c2" alt="v0.7.0"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -251,7 +251,7 @@
 
 ## 📜 更新记录
 
-#### Unreleased
+#### v0.7.0
 
 - 新增：78 张牌义分层升级——全部 78 张牌拆为「关键词 + 事件走向 + 心法建议」（逆位「关键词 + 能量状态 + 能量卡点 + 转身建议」），AI 解读素材更丰富、本地牌义更有引导性；内置字体子集同步扩展至全部渲染文案（含标题、牌名行、署名与水印里的空格与品牌字样），牌面不再出现方块
 - 修复：人设随机（`ai.persona = random`）时同一签的「牌灵的话」与解读可能落到不同人格，现改为一次占卜只抽一次人设；会话冷却里的异常数据、模型只回引号或空白的情况不再中断占卜
