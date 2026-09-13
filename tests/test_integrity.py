@@ -4,6 +4,7 @@
 import importlib.util
 import os
 
+import pytest
 from PIL import ImageFont
 
 import fonts
@@ -88,9 +89,13 @@ def _load_subset_builder():
     """按文件路径加载子集生成脚本，复用它的字符集口径。
 
     字形的真相源只该有一处：测试不再自己手抄一份字符集（上一版就是这么把
-    空格漏出子集的）。脚本在 tools/ 下，不在插件运行路径里，按路径加载即可。"""
+    空格漏出子集的）。脚本在 tools/ 下，不在插件运行路径里，按路径加载即可；
+    tools/ 属开发侧资产、不进发布物（仓库里没有它），此时本条对账跳过——
+    发布物的字体是从开发侧同步出去的同一份文件，覆盖口径已在开发侧校验过。"""
     path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         "tools", "build_font_subset.py")
+    if not os.path.isfile(path):
+        pytest.skip("生成脚本 tools/ 不在发布物里：本条仅在开发侧生效")
     spec = importlib.util.spec_from_file_location("build_font_subset", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
