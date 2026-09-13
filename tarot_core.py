@@ -86,11 +86,11 @@ class StarTarot:
         """
         lines = [f"🔮 牌阵：{formation}", "─" * 28]
         for i, (pos, pick) in enumerate(zip(positions, picks), 1):
-            suit, cn, state, meaning = self._pick_info(pick)
+            _, cn, state, meaning = self._pick_info(pick)
             # 牌名已自带花色：56 张小阿卡纳全是「权杖首牌」这类写法，22 张大阿卡纳
-        # 牌名独一无二。再标一遍就是同词重复（旧版实际输出过「圣杯首牌」（圣杯）逆位）。
-        # 别再补回来——红线 tests/test_core.py::TestRenderTextNoSuitDuplicate 会拦。
-        lines.append(f"🃏 第{i}张 ·【{pos}】\n「{cn}」{state}\n   {meaning}")
+            # 牌名独一无二。再标一遍就是同词重复（旧版实际输出过「圣杯首牌」（圣杯）逆位）。
+            # 别再补回来——红线 tests/test_core.py::TestRenderTextNoSuitDuplicate 会拦。
+            lines.append(f"🃏 第{i}张 ·【{pos}】\n「{cn}」{state}\n   {meaning}")
         return "\n".join(lines)
 
     def _render_image(self, formation: str, positions: list[str], picks: list[dict]) -> str | None:

@@ -57,3 +57,55 @@ class TestFont:
         assert _Font.path in fonts._FONT_CMAP               # 负结果已缓存（键存在）
         assert fonts._font_covers(_Font(), "羽") is False
         assert len(calls) == 1                              # 第二次不再重算
+
+
+class TestFontEmptyCmap:
+    """fontTools 解析成功但 cmap 为空：空集不能当「全覆盖」放行。
+
+    同一函数里两种「无数据」原本口径不一——静态清单支 `set(chars) if chars else None`
+    （空 → None → 内置字体不放行），fontTools 动态支却把空 set 入缓存，
+    而 all(... over 空集) 恒真，等于给「无字形字体」开绿灯。
+    """
+
+    @staticmethod
+    def _fake_ttlib(monkeypatch):
+        import sys
+        import types as _types
+
+        class _NonUnicodeTable:
+            @staticmethod
+            def isUnicode():
+                return False
+
+        class _EmptyTTFont:
+            def __init__(self, path, lazy=True):
+                self._tables = [_NonUnicodeTable()]
+
+            def __getitem__(self, key):
+                return _types.SimpleNamespace(tables=self._tables)
+
+            def close(self):
+                pass
+
+        fake = _types.ModuleType("fontTools.ttLib")
+        fake.TTFont = _EmptyTTFont
+        monkeypatch.setitem(sys.modules, "fontTools.ttLib", fake)
+
+    def test_empty_cmap_is_not_treated_as_full_coverage(self, monkeypatch):
+        class _Font:
+            path = os.path.join(fonts._FONT_DIR, "StarFeather-Regular.otf")
+
+        self._fake_ttlib(monkeypatch)
+        monkeypatch.setattr(fonts, "_load_static_cmap", lambda p: None)  # 清单也没有
+        fonts._FONT_CMAP.clear()
+        assert fonts._font_covers(_Font(), "羽") is False   # 内置子集：空集不自证覆盖，不放行
+
+    def test_empty_cmap_still_passes_system_fonts(self, monkeypatch):
+        """对照：系统字体在「无覆盖数据」时依旧放行（回退到它已是最后防线）。"""
+        class _SysFont:
+            path = os.path.join(r"C:\Windows\Fonts", "msyh.ttc")
+
+        self._fake_ttlib(monkeypatch)
+        monkeypatch.setattr(fonts, "_load_static_cmap", lambda p: None)
+        fonts._FONT_CMAP.clear()
+        assert fonts._font_covers(_SysFont(), "羽") is True

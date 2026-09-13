@@ -3,6 +3,8 @@
 说人话：牌灵的话一句都不能少，同一天问一百遍也不能换词。"""
 import asyncio
 import os
+import time
+import types
 
 import daily
 from dailylines import _FALLBACK_SIGNATURE, SIGIL_LINES, pick_signature
@@ -74,3 +76,59 @@ class TestDailyCardOrchestration:
         out = asyncio.run(self._fortune().render_daily_card(["今日牌运"], picks, "u1"))
         assert out.endswith(".png")
         assert calls and calls[0][1] == 300
+
+
+class TestDailyCardRenderSlot:
+    """海报卡渲染必须占住核心那把渲染锁。
+
+    它与普通牌面图同是 Pillow 全尺寸合成（高清素材 + cover 放大），正是那把信号量
+    注释里「防多人同时占卜时暴涨」要拦的负载；绕开它等于把最重的一条路径漏在锁外
+    （每日次数限制默认关闭，没有替代闸门）。
+    """
+
+    def test_render_holds_the_shared_render_lock(self, monkeypatch, tmp_path):
+        peak = 0
+        live = 0
+
+        def slow_render(card, upright, signature, date_text, save_dir=None):
+            nonlocal peak, live
+            live += 1
+            peak = max(peak, live)      # 无锁时两条协程都在函数体内 → 峰值 2
+            time.sleep(0.05)
+            live -= 1
+            path = os.path.join(str(tmp_path), "daily_slot.png")
+            open(path, "wb").write(b"PNG")
+            return path
+
+        monkeypatch.setattr(daily, "_render_daily_card_img", slow_render)
+        monkeypatch.setattr(daily, "_schedule_image_cleanup", lambda img, delay=30: None)
+        df = daily.DailyFortune.__new__(daily.DailyFortune)
+        df.tarot = types.SimpleNamespace(_render_lock=asyncio.Semaphore(1))
+        picks = [{"card": TAROT_CARDS[0], "upright": True}]
+
+        async def twice():
+            return await asyncio.gather(
+                df.render_daily_card(["今日牌运"], picks, "u1"),
+                df.render_daily_card(["今日牌运"], picks, "u2"))
+
+        outs = asyncio.run(twice())
+        assert all(o and o.endswith(".png") for o in outs)
+        assert peak == 1                # 同一时刻只有一次渲染在锁内
+
+    def test_missing_lock_still_renders(self, monkeypatch, tmp_path):
+        """桩对象没有 tarot / 没有锁时退化为不限并发——不得把渲染路径崩掉。
+
+        getattr 链写错的话这条立刻红：缺属性会被 render_daily_card 的 except 吞成
+        「渲染失败，回退普通牌面图」，返回 None。
+        """
+        def fake_render(card, upright, signature, date_text, save_dir=None):
+            path = os.path.join(str(tmp_path), "daily_nolock.png")
+            open(path, "wb").write(b"PNG")
+            return path
+
+        monkeypatch.setattr(daily, "_render_daily_card_img", fake_render)
+        monkeypatch.setattr(daily, "_schedule_image_cleanup", lambda img, delay=30: None)
+        picks = [{"card": TAROT_CARDS[0], "upright": True}]
+        df = daily.DailyFortune.__new__(daily.DailyFortune)      # 连 tarot 都没有
+        out = asyncio.run(df.render_daily_card(["今日牌运"], picks, "u1"))
+        assert out and out.endswith(".png")

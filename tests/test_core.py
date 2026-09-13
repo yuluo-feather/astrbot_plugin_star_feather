@@ -998,6 +998,25 @@ class TestDivineToolDirect:
         assert len(evt.sent) == 1
         assert evt.sent[0].chain[0].text == "按规矩洗牌"
 
+    def test_result_object_is_sent_as_is(self):
+        """直发的是结果对象本身，不是拆包重装的 MessageChain。
+
+        结果对象是 MessageChain 的子类，另带 use_t2i_ / result_content_type 这些
+        框架侧读取的字段；拆出 chain 再套一层会静默把它们丢回默认值。
+        桩给结果对象打上标记属性：直发保真才留得住，重装必丢。
+        """
+        from main import MessageChain
+        p = self._plugin()
+        evt = self._evt()
+        result = MessageChain(chain=[Plain("按规矩洗牌")])
+        result.use_t2i_ = True
+        evt.chain_result = lambda chain: result
+        out = self._collect(p.divine_tool(evt))
+        assert all(isinstance(x, str) for x in out)
+        assert evt.sent and evt.sent[0] is result
+        assert evt.sent[0].use_t2i_ is True
+
+
     def test_throttle_hint_sent_direct_and_yield_str(self):
         p = self._plugin(throttle_remain=25)
         evt = self._evt()
@@ -1208,6 +1227,68 @@ class TestDailyCacheMerge:
         assert cached["date"] == _time.strftime("%Y%m%d")
         assert "interps" not in cached      # 跨天作废：旧分桶不得跟着新日期复活
         assert cached["card"] in TAROT_CARDS
+class TestDailyCachedCardAnchor:
+    """缓存里的牌按 id 锚点回查牌库，而不是整字典值相等。
+
+    值相等的代价：把「存储层序列化/反序列化必须逐字段等值」写成隐式契约——
+    字段类型只要漂移一次（如 num 从 str 变 int），命中就全部失配、当天缓存静默失效。
+    id 是牌库明面声明的唯一锚点；命中后回查牌库对象，顺带避免旧副本的字面量
+    被当成当前牌义。
+    """
+
+    @staticmethod
+    def _fortune(kv_store):
+        from daily import DailyFortune
+
+        class _Ctx:
+            async def get_kv_data(self, key, default=None):
+                return kv_store.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                kv_store[key] = value
+
+        return DailyFortune(_Ctx(), T)
+
+    def test_type_drifted_copy_still_hits(self):
+        """字段类型漂移后仍须命中：只有牌库里真的没有这个 id 才算缓存不可用。"""
+        import copy
+        import time as _time
+        today = _time.strftime("%Y%m%d")
+        det_card, _det_upright = _daily_pick("u1", today)
+        cached_card = next(c for c in TAROT_CARDS if c is not det_card)
+        drifted = copy.deepcopy(cached_card)
+        drifted["num"] = int(drifted["num"])        # 类型漂移：整字典值相等不再成立
+        assert drifted not in TAROT_CARDS           # 前提：旧判据在这份副本上确实失配
+        kv = {"sf_daily_u1": {"date": today, "card": drifted, "upright": True}}
+        _formation, _positions, picks = asyncio.run(self._fortune(kv).pick_cached("u1"))
+        # 比牌 id 而不是对象身份：main.py 的「重载防御」会在导入时把 daily / tarot_data
+        # 等子模块 pop 出 sys.modules，同一进程内同名模块可能分裂成两份（谁先导入决定），
+        # 跨模块的对象身份断言于是不可靠——牌 id 才是这里真正要断言的东西
+        assert picks[0]["card"]["id"] == cached_card["id"]   # 命中缓存：返回的是缓存那张牌
+        assert picks[0]["card"]["id"] != det_card["id"]      # 而不是「落回重算」出的确定性牌
+        assert isinstance(picks[0]["card"]["num"], str)       # 返回的是牌库权威对象：num 仍是 str，
+                                                              # 不是缓存里那份被我改了类型的副本
+        assert picks[0]["upright"] is True
+
+    def test_unknown_id_falls_back_to_deterministic_pick(self):
+        """牌库里没有的 id 一律不信任：按确定性函数出牌，当天牌不会变。"""
+        import time as _time
+        today = _time.strftime("%Y%m%d")
+        det_card, det_upright = _daily_pick("u1", today)
+        kv = {"sf_daily_u1": {"date": today, "card": {"id": "no_such_card"}, "upright": True}}
+        _formation, _positions, picks = asyncio.run(self._fortune(kv).pick_cached("u1"))
+        assert picks[0]["card"]["id"] == det_card["id"]
+        assert picks[0]["upright"] == det_upright
+
+    def test_non_dict_card_value_degrades_quietly(self):
+        """缓存里放 list / 字符串这类非字典时照常降级，不把占卜入口带崩。"""
+        import time as _time
+        today = _time.strftime("%Y%m%d")
+        for bad in (["不是字典"], "不是字典", 12345):
+            kv = {"sf_daily_u1": {"date": today, "card": bad, "upright": True}}
+            out = asyncio.run(self._fortune(kv).pick_cached("u1"))
+            assert out is not None and out[0] == "羽签"
+
 
 
 class TestDailyInterpTopic:
@@ -1753,6 +1834,26 @@ class TestRenderTextNoSuitDuplicate:
             txt = stub._render_text("羽签", ["你的当下"], [{"card": card, "upright": True}])
             assert f"（{SUIT_CN[suit]}）" not in txt, f"{suit} 又标了花色：{txt!r}"
             assert f"「{card['cn']}」正位" in txt, txt
+
+    def test_multi_card_spread_renders_every_card(self):
+        """每张牌都要出一行：三张阵只剩最后一张是真实发生过的回归。
+
+        上位那条花色断言全部用单张牌入参——循环只跑一次，append 掉出循环也照旧绿，
+        对缩进回归是盲的。这段兜底文案只在「无图 + AI 失败」时露出（deliver 的
+        not img 分支），text_only 用户拿到的就是它，少一张就是少一张的牌义。
+        """
+        import tarot_core
+        from tarot_data import TAROT_CARDS
+        stub = tarot_core.StarTarot.__new__(tarot_core.StarTarot)
+        positions = ["过去", "现在", "未来"]
+        picks = [{"card": TAROT_CARDS[i], "upright": i % 2 == 0} for i in (0, 8, 21)]
+        txt = stub._render_text("羽时三刻", positions, picks)
+        card_lines = [line for line in txt.splitlines() if line.startswith("🃏 ")]
+        assert len(card_lines) == len(picks)
+        for idx, pick in enumerate(picks, 1):
+            assert f"第{idx}张 ·【{positions[idx - 1]}】" in txt
+            assert f"「{pick['card']['cn']}」" in txt
+
 
 
 class TestCommandEntryEpilogueEndToEnd:

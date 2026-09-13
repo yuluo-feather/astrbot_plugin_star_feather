@@ -3,6 +3,7 @@
 import asyncio
 import os
 import tempfile
+import types
 
 import pytest
 
@@ -72,7 +73,9 @@ class TestRenderSmoke:
             return Image.new("RGB", (w, h), (40, 40, 60))
 
         monkeypatch.setattr(card_render, "_build_card_background", fake_bg)
-        monkeypatch.setattr(card_render.random, "choice", lambda seq: seq[1])
+        # 背景选牌走模块私有 RNG（不消耗全局随机状态），打桩点随之落在它身上
+        monkeypatch.setattr(card_render, "_RNG",
+                            types.SimpleNamespace(choice=lambda seq: seq[1]))
         positions = ["过去", "现在", "未来"]
         picks = [
             {"card": _mk("major", "13", "死神", "Death", "结束新生", "停滞不前"), "upright": True},
@@ -284,3 +287,26 @@ class TestBackgroundCacheSizing:
         card_render._background_cached(*args)
         i2 = card_render._background_cached.cache_info()
         assert i2.hits == i1.hits + 1 and i2.misses == i1.misses, f"同 key 未命中：{i1} → {i2}"
+
+
+# ---------- 随机卫生：渲染不掺和全局随机序 ----------
+class TestBackgroundRandomHygiene:
+    def test_background_pick_leaves_global_random_untouched(self, tmp_path):
+        """背景选牌走模块私有 RNG：渲染不消耗全局随机状态。
+
+        全局那位有明确用处（牌灵的话、收尾句这些「抽到谁都行」的调用方），
+        渲染掺进去会让「同输入同 md5」的确定性对比失去可复现性——那是本项目
+        常用的验收手段（纯表达重构只认渲染逐位不变）。
+        """
+        import random
+        positions = ["过去", "现在", "未来"]
+        picks = [
+            {"card": _mk("wands", "13", "权杖王后", "Queen of Wands", "自信魅力", "嫉妒占有"), "upright": True},
+            {"card": _mk("cups", "2", "圣杯二", "Two of Cups", "两情相悦", "关系失衡"), "upright": False},
+            {"card": _mk("major", "19", "太阳", "The Sun", "成功喜悦", "乌云遮日"), "upright": True},
+        ]
+        random.seed(20260913)
+        before = random.getstate()
+        path = card_render.render_cards(positions, picks, "羽时三刻", save_dir=str(tmp_path))
+        assert os.path.isfile(path)
+        assert random.getstate() == before      # 全局随机序一模一样：一次都没被消耗

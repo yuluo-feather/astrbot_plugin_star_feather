@@ -287,9 +287,10 @@ class StarFeatherPlugin(Star):
             is_daily, daily_uid, formation, positions, picks = await self._pick_reading(event, text)
             async for r in self._run_reading(event, formation, positions, picks, text,
                                              is_daily=is_daily, daily_uid=daily_uid):
-                chain = getattr(r, "chain", None)
-                if chain:
-                    await event.send(MessageChain(chain=list(chain)))
+                # 直发原结果对象而非拆包重装：它是 MessageChain 的子类（另带 use_t2i_ /
+                # result_content_type），拆出 chain 再套一层会把这些字段静默丢回默认值；
+                # 日后 _run_reading 换产出形态也不会有「探不到 chain 就悄悄不发」的哑路径。
+                await event.send(r)
             yield note
         except Exception as e:
             logger.error(f"自然语言占卜失败: {e}")

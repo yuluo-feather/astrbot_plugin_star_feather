@@ -79,6 +79,12 @@ def _font_covers(font, text: str) -> bool:
             tf.close()
         except Exception:
             cmap = _load_static_cmap(path)  # fontTools 解析失败：读打包清单兜底
+        if cmap is not None and not cmap:
+            # 空 cmap 与「解析不出」同义：一个字都覆盖不了，而 all(... over 空集) 恒真——
+            # 放行等于给「无字形字体」开绿灯。与静态清单支（set(chars) if chars else None）
+            # 口径统一：退回清单判定，内置子集不放行、系统字体放行。
+            # 判 None 而非 falsy：None 表示清单已经问过，重问会破坏「负结果只算一次」。
+            cmap = _load_static_cmap(path)
         # 以「键是否存在」区分「未缓存」与「已缓存为无法解析」：None 也是合法缓存值
         # （见 _FONT_CMAP 声明），否则负结果永远读不回来，每次调用都白跑一遍
         # fontTools 导入尝试 + 静态清单查找

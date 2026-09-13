@@ -24,6 +24,12 @@ from tarot_data import SUIT_CN, meaning_text
 
 logger = logging.getLogger(__name__)
 
+# 背景选牌用模块私有 RNG：不消耗全局随机状态（全局那位留给「谁先谁后无所谓」的调用方，
+# 与 daily._daily_pick 的独立 RNG 同一口径），渲染也因此不扰动全局随机序——
+# 「同输入同 md5」的确定性渲染对比不会被它搅乱。
+# 不用 secrets：这里要的是「每次不同」而非「不可预测」，私有 Random 语义更贴。
+_RNG = random.Random()
+
 
 # ---------- 产物生命周期：渲染出的临时图片由本模块统一管理 ----------
 async def _delayed_remove(path: str, delay: int = 30) -> None:
@@ -302,7 +308,7 @@ def render_cards(positions, picks, formation, save_dir=None) -> str:
 
     # 背景从本签抽出的牌里随机挑一张做底（3 张阵 3 选 1、十字阵 4 选 1）——
     # 每签背景都可能是本签任意一张的牌面，跟今日牌运卡同为「本签的牌」定基调
-    canvas = _build_card_background(random.choice(picks)["card"], W, H)
+    canvas = _build_card_background(_RNG.choice(picks)["card"], W, H)
     d = ImageDraw.Draw(canvas)
 
     _draw_capsule(d, W / 2, 52, f"牌阵 · {formation}", _load_font(38, bold=True, text=f"牌阵 · {formation}"),

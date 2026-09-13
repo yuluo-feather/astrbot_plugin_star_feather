@@ -15,6 +15,7 @@ import logging
 import random
 import re
 import time
+from contextlib import nullcontext
 from datetime import datetime
 
 from card_render import _render_daily_card_img, _schedule_image_cleanup
@@ -70,7 +71,7 @@ CAUSE_WORDS = ("是因为", "是不是因为", "难道是因为", "就是因为"
 # b) 签文类——「每日塔罗 / 今天来一签」语义就是当日牌运；
 # c) 其余（事件/日程/状态描述：最近总是失眠、今天下午开会吗、今天真的好累）
 #    → 自由随机，出针对性解读——旧规则「时间词 + 无主题词即牌运」全把它们吞了。
-_GENERIC_ASK_RE = re.compile(r"(怎么样|如何|还好吗|咋样|怎样|如何了)")
+_GENERIC_ASK_RE = re.compile(r"(怎么样|如何|还好吗|咋样|怎样)")
 _SIGN_WORDS = ("塔罗", "一签", "签文")
 
 
@@ -132,6 +133,23 @@ def _daily_result(card, upright: bool) -> tuple:
     return ("羽签", ["你的当下"], [{"card": card, "upright": upright}])
 
 
+_CARDS_BY_ID = {c["id"]: c for c in TAROT_CARDS}
+
+
+def _cached_card(raw) -> dict | None:
+    """缓存里的牌 → 牌库里的权威对象：按 id 锚点回查，查不到即视为缓存不可用。
+
+    不用 `raw in TAROT_CARDS`：那是整字典值相等，等于把「存储层的序列化/反序列化必须
+    逐字段等值」写成隐式契约——字段类型只要有一次漂移（如 num 从 str 变 int）就全部
+    失配，缓存静默失效。id 是牌库明面声明的唯一锚点；命中后回查牌库对象，
+    顺带避免旧版本的字面量被当成当前牌义。
+    """
+    if not isinstance(raw, dict):
+        return None
+    card_id = raw.get("id")
+    return _CARDS_BY_ID.get(card_id) if isinstance(card_id, str) else None
+
+
 _GENERIC_TOPIC = "（今日牌运）"
 
 
@@ -151,6 +169,17 @@ def _norm_topic(clean: str) -> str:
     if not raw or not any(w in raw for w in TOPIC_WORDS):
         return _GENERIC_TOPIC
     return raw
+
+
+def _render_slot(fortune) -> object:
+    """渲染并发位：与核心 _render_image 共用同一把渲染锁（防多人同时占卜时内存暴涨）。
+
+    海报卡与普通牌面图同是 Pillow 全尺寸合成（高清素材 + cover 放大），正是那把信号量
+    要拦的负载——绕开它等于把最重的一条路径漏在锁外。
+    运行时取而非构造期装配：桩对象（__new__ / SimpleNamespace 装配，没有 tarot、更没有
+    锁）退化成不限并发，而不是让渲染路径 AttributeError 崩掉。
+    """
+    return getattr(getattr(fortune, "tarot", None), "_render_lock", None) or nullcontext()
 
 
 class DailyFortune:
@@ -183,8 +212,9 @@ class DailyFortune:
             date_text = (f"{int(time.strftime('%m'))}月{int(time.strftime('%d'))}日"
                          f"·周{'一二三四五六日'[datetime.now().weekday()]}")
             signature = pick_signature(card, upright, uid, time.strftime("%Y%m%d"))
-            img = await asyncio.to_thread(_render_daily_card_img, card, upright, signature,
-                                          date_text)
+            async with _render_slot(self):
+                img = await asyncio.to_thread(_render_daily_card_img, card, upright, signature,
+                                              date_text)
             if not img or not isinstance(img, str) or not img.strip():
                 return None
             _schedule_image_cleanup(img, delay=300)
@@ -205,8 +235,8 @@ class DailyFortune:
         async with self._kv_lock:
             data, ok = await kv_get(self.kv_store, key, None, "每日牌运缓存")
             if ok and isinstance(data, dict) and data.get("date") == today:
-                card, upright = data.get("card"), data.get("upright")
-                if card in TAROT_CARDS and isinstance(upright, bool):
+                card, upright = _cached_card(data.get("card")), data.get("upright")
+                if card is not None and isinstance(upright, bool):
                     return _daily_result(card, upright)
             # 缓存坏掉不丢固定：_daily_pick 是确定性纯函数，同（用户,日期）必然同牌
             card, upright = _daily_pick(uid, today)
@@ -325,6 +355,10 @@ class DailyFortune:
                 and data.get("date") == today and data.get("sign") == sig \
                 and data.get("line"):
             return data["line"]
+        # topic 传的是 _norm_topic 的指纹而非用户原话：泛问归一为「（今日牌运）」，
+        # 它非空、会整段拼进 prompt（build_spirit_line_prompt 的 topic_part 只判空串）。
+        # 有意为之——本缓存的命中键不含 topic，同牌组当天本就该是同一句，
+        # 传原话只会让这个定型值随用户措辞漂移。
         line = await self.tarot.interpreter.spirit_line(
             event, [(p["card"], p["upright"]) for p in picks],
             _norm_topic(clean), persona_eff)
