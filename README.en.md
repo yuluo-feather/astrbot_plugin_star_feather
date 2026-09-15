@@ -37,36 +37,36 @@
 
 ## 🌸 Features
 
-- 🔮 **All 78 cards built in**: I packed all 22 Major Arcana + 56 Minor Arcana (Wands / Cups / Swords / Pentacles) in — not one missing, each with Chinese & English names and layered meanings — uprights: keywords + what's unfolding + how to act; reversals: keywords + energy state + where the energy jams + how to turn around
-- 🃏 **Four spreads**: Feather Sign, Feather Hour Three, Feather Mirror, Lovers' Feather Cross — classic names (Single Question / Time Flow / Three-Card Timeline / Three-Card Spread / Lovers' Cross) also recognized
-- 🧠 **Smart spread selection**: I scan your question's keywords and pick the best spread for you — one less thing to worry about
-- 🤖 **AI deep interpretation**: LLM-based deep reading (optionally pinned to a dedicated model via `ai.ai_provider`), one paragraph per card plus a summary; falls back to built-in meanings automatically so a reading never stalls — this is the part I watch closest: a reading may take its time, but it must never stop halfway
-- 🗣️ **Spirit persona**: AI readings are spoken by the deck's spirit in three voices — tsundere / gentle / mystic (switch via `ai.persona`; `off` = neutral), each with hard tone rules (at least two persona tells throughout the reading) and a signature-style sample (which also shapes the spirit's words); `random` picks one persona per reading and keeps it through the whole reading; tone only — content & structure unchanged
-- 💬 **Talk to divine**: just say "帮我算一卦" or "看看我今天的运势" to trigger (natural-language entry, when `llm_tool_enabled` is on) — no commands to memorize
-- 🗓️ **Fixed daily reading**: `/单抽` and requests containing fortune words (运势 / 运气 / 牌运…) return the same card & reading for the same user all day, refreshed at midnight — no way to reroll
-- 🎴 **Official card art**: all 78 card faces + official card back included in `assets/` (WebP format, auto-compatible with .png), unified white-border card style, reversed readings rotate only the card art 180° (frame and info bar stay upright) — cards that look good are half the reading
-- 🛡️ **Double fallback**: AI failure falls back to built-in meanings; image rendering failure falls back to plain text
+- 🔮 **All 78 cards, built in**: 22 Major Arcana and 56 Minor Arcana (Wands, Cups, Swords and Pentacles). Every card has a Chinese and an English name and a layered meaning: upright readings give keywords, what's unfolding and what to do about it; reversed readings give keywords, the state you're in, where the energy sticks and how to turn it around.
+- 🃏 **Four spreads**: Feather Sign, Feather Hour Three, Feather Mirror and Lovers' Feather Cross. The classic names work just as well — Single Question, Time Flow, Three-Card Timeline, Three-Card Spread, Lovers' Cross.
+- 🧠 **It picks the spread for you**: Star Feather reads the keywords in your question and draws on the spread that fits. One less decision to make.
+- 🤖 **AI deep reading**: the draw goes to an LLM (pin a dedicated model with `ai.ai_provider`) and comes back as one paragraph per card plus a summary. If the call fails, the built-in meanings take over, so a reading never stalls halfway. This is the part I watch closest.
+- 🗣️ **A spirit with a personality**: the reading is spoken by the deck's spirit in one of three voices — tsundere, gentle or mystic (`ai.persona`; `off` restores the neutral tone). Each voice comes with its own tone rules and a sample of its signature style, which also shapes the spirit's opening line. `random` locks one voice per reading. Tone only: content and structure stay as they are.
+- 💬 **Ask in plain words**: "帮我算一卦" or "看看我今天的运势" is enough to start a reading (natural-language entry, on when `llm_tool_enabled` is set). Nothing to memorise.
+- 🗓️ **One fixed reading a day**: `/单抽` and requests carrying fortune words (运势 / 运气 / 牌运 …) return the same card and the same reading for the same person, until midnight resets it. Asking again won't reroll it.
+- 🎴 **Official card art**: all 78 faces and the official card back ship inside `assets/` (WebP, with a .png fallback). A white border keeps the look consistent, and a reversed card rotates only the artwork — the frame and the info bar stay upright. Cards that look good are half the reading.
+- 🛡️ **Two layers of fallback**: if the AI fails, the built-in meanings take over; if rendering fails, plain text does. Whichever part misbehaves, I won't let you go home empty-handed.
 
 ## 🃏 Commands
 
 | Feature | Command | Description |
 |---------|---------|-------------|
-| 🎴 Smart reading | `/占卜 [question]` | Picks the best spread by keywords, draws cards and sends card art; requests containing fortune words (运势 / 运气…) use the fixed daily reading instead (event-attribution questions — "is it because my luck is bad?" — excepted, they go to the free draw) |
-| 🃏 Quick draw | `/单抽` | Today's fixed fortune: one card per user per day, refreshed at midnight; readings are partitioned by topic, staying fixed within the day; output is a dedicated poster card (card art + date + the spirit's words + sign-off) |
-| ❓ Help | `/占卜 帮助` / `/占卜 help` | Show usage |
+| 🎴 Reading | `/占卜 [question]` | Reads the question, picks the spread, draws the cards and sends the art. Fortune words (运势 / 运气 …) route to the fixed daily reading instead — except event-attribution asks such as "is it because my luck is bad?", which get a free draw. |
+| 🃏 Quick draw | `/单抽` | Today's fixed fortune: one card per person per day, reset at midnight. The reading is per topic and holds for the day. You get a poster card — card art, date, the spirit's line, sign-off. |
+| ❓ Help | `/占卜 帮助` / `/占卜 help` | Show usage. |
 
-> 💡 **Trigger rules**: in private chat just say `占卜 问题` (`/占卜 问题` works too); in groups, `@bot 占卜 …` triggers directly; with wake words configured (WebUI → Settings → Wake Words), `wake-word 占卜 问题` also works. Bare text without a wake word or @ does not trigger—the gate belongs to the framework, the feather just reads the cards.
+> 💡 **How to trigger it**: in private chat, `占卜 问题` is enough (`/占卜 问题` works as well). In a group, @ the bot. Set a wake word under WebUI → Settings → Wake Words and `wake-word 占卜 问题` will do it. Bare text with neither wake word nor @ stays quiet — the framework owns the gate; reading the cards is my job.
 
 ### 🧩 Multiple bots
 
-If you run several bots at once (multiple accounts / instances), keep this in mind: group messages are broadcast to every bot in the group, and each bot decides independently — so, plain words first:
+Group messages reach every bot in the group, and each bot decides for itself whether to answer. If you run more than one (several accounts or instances), plan for it:
 
-- **One divination bot per group**: don't install Star Feather on the other bots, or turn off `tool.llm_tool_enabled` (the natural-language entry) — one "占卜" can otherwise be answered by several bots at once
-- **Give each bot its own wake word**: bot A wakes on 「羽毛」, bot B on 「星羽」; never share a single wake word across bots
-- **@ is the safest trigger in groups**: only the bot you @ responds
-- **Don't register "占卜" itself as a wake word**: the framework strips the wake word first, so the command no longer matches — and several bots may each fall back to the natural-language entry. Double chaos, don't try it
+- **One divination bot per group**: leave Star Feather off the others, or turn off `tool.llm_tool_enabled` (the natural-language entry) on them — otherwise a single "占卜" can get several answers at once.
+- **Give each bot its own wake word**: bot A on 「羽毛」, bot B on 「星羽」 — never share one.
+- **In groups, @ is the safest trigger**: only the bot you @ answers.
+- **Don't register "占卜" itself as a wake word**: the framework strips the wake word first, so what's left no longer matches the command — and several bots may each fall back to the natural-language entry.
 
-Private chat is safe: it's point-to-point, only the bot you're talking to sees the message.
+Private chat is safe either way: it's point-to-point, so only the bot you're talking to sees the message.
 
 ### Example
 
@@ -74,7 +74,7 @@ Private chat is safe: it's point-to-point, only the bot you're talking to sees t
 /占卜 How will my relationship develop?
 ```
 
-Flow: smart match "Lovers' Feather Cross" → shuffle hint → draw four cards with meanings → AI deep reading.
+What happens: the keyword match picks Lovers' Feather Cross → shuffle hint → four cards with their meanings → AI deep reading.
 
 ![Star Feather Tarot in action](https://raw.githubusercontent.com/yuluo-feather/astrbot_plugin_star_feather/main/docs/preview_divine.png)
 
@@ -91,69 +91,74 @@ Flow: smart match "Lovers' Feather Cross" → shuffle hint → draw four cards w
 
 ## ⚙️ How It Works
 
-From your request to the final result, Star Feather runs this pipeline internally — here it is, laid out; understand it and troubleshooting gets easy.
-> The module names in brackets show where each step lives (see [Technical Details](#technical-details)): what the pipeline does is here, where the logic lives is in the module name.
+Here is what happens between your question and the finished reading. Know the path and troubleshooting gets easy.
+> Module names in brackets point to where each step lives (see [Technical Details](#technical-details)) — this section is the flow, those are the files.
 
 ```
-User request (any of three entry points)【main.py orchestration】
+User request (any one of three entry points)【main.py orchestration】
    │
    ├─ ① Command entry: 占卜 [question] or /占卜 [question]
-   │     └─ The gate is the framework's (wake words / @ bot / private-chat direct); CommandFilter must match first
+   │     └─ The framework owns the gate (wake word / @ the bot / private chat); the command filter must match first
    │
-   └─ ② Natural-language entry: just say "帮我算一卦" etc. (llm_tool, toggleable)
-         └─ Tool description only fires on explicit requests; complaints / casual remarks won't trigger
-   │
-   ▼
-② Rate-limit gate (shared by all three entries)【gating.py · limiter.py】
-   ├─ Command: per-session throttle (cmd_rate_limit, anti double-click)
-   ├─ Natural language: per-session throttle (llm_tool_cooldown, anti spam)
-   └─ Daily quota: per-user counter (daily_count, resets at midnight) → over limit gets a "come back tomorrow" hint
+   └─ ② Natural-language entry: ask in chat, e.g. "帮我算一卦" (llm_tool, switchable)
+         └─ The tool description only fires on an explicit request, so complaints and small talk don't trigger it
    │
    ▼
-③ Draw routing (_pick_reading)【spreads.py selection · daily.py fixed daily】
-   ├─ Fortune words (运势/运气/牌运) or /单抽 → fixed daily reading
-   │     (same user + same day = same card; reading per topic, fixed for the day,
-   │      refreshed at midnight, no rerolls; event-attribution questions —
-   │      "I caught my finger, is it because my luck is bad?" — don't count as
-   │      a fortune query, they go to the free draw; time-word questions are a
-   │      positive whitelist — "how have I been lately" (generic ask-forms) and
-   │      "daily tarot / one card today" (signature phrases) stay daily, while
-   │      "I keep losing sleep lately" / "is there a meeting this afternoon"
-   │      go to the free draw)
-   └─ Specific questions (love / career / event attribution / agenda etc.) → free random
+② Rate-limit gate (one gate, three entries)【gating.py · limiter.py】
+   ├─ Command: per-session throttle (cmd_rate_limit, stops double-taps)
+   ├─ Natural language: per-session throttle (llm_tool_cooldown, stops spam)
+   └─ Daily quota: per-user counter (daily_count, resets at midnight) → over the limit gets "come back tomorrow"
+   │
+   ▼
+③ Draw routing (_pick_reading)【spreads.py picks the spread · daily.py handles the fixed daily draw】
+   ├─ Fortune words (运势 / 运气 / 牌运) or /单抽 → today's fixed reading
+   │     (one person, one day = the same card and the same reading, reset at midnight,
+   │      no rerolls. Event-attribution asks — "I pinched my finger, is it because my
+   │      luck is bad?" — are not fortune queries and go to a free draw. Time words go
+   │      by a positive whitelist: generic ask-forms like "how have I been lately" and
+   │      signature phrases like "daily tarot / one card today" stay daily, while
+   │      "I keep losing sleep lately" or "is there a meeting this afternoon" do not.)
+   └─ Everything else (love, career, event attribution, appointments) → free random draw
          ├─ Explicit spread name (/占卜 圣三角 考研如何) > keyword match > content inference
-         │     (timeline words + relationship semantics — "our future",
-         │      "will she love me" — pick the Lovers' Cross; pure timeline
-         │      questions like "my future" stay with Feather Hour Three)
-         └─ No match → default "Feather Hour Three"
+         │     (timeline words plus relationship semantics — "our future", "will she love me" —
+         │      pick the relationship spread; pure timeline questions like "my future" don't)
+         └─ No match → Feather Hour Three
    │
    ▼
-④ Run the reading (_run_reading)【tarot_core.py draw & render · interpret.py + hardening.py reading】
-   ├─ Shuffle hint: multi-card spreads send a random "✨ 洗牌中……" (shuffle_lines toggleable)
-   ├─ Render card image: official assets + upright/reversed (thread pool, temp image auto-cleaned in 30s; daily poster card 300s); collage backgrounds now use one card randomly picked from *this* reading (cover-fill + deep-navy overlay), and /单抽 and daily fortunes render a dedicated poster card (card art + date + the pool's fixed signature for the day + sign-off — `output.daily_card` toggle, falls back to a normal card image when off or on failure)
-   ├─ Spirit's words: every reading opens with one spirit line — AI-generated in the persona's voice (fitted to this reading's cards and topic; fixed per person / day / card set, renewed the next day), falling back to the pool's daily line when the AI is unavailable; sent as a naked line (no “spirit's words:” label, no quotes), right after the card image and before the reading
-   └─ Generate interpretation:
-         ├─ Fixed daily → cached reading for the day (stays fixed all day)
-         └─ Free random → AI reading on the fly
-               ├─ Provider chain: specified model → session model → global default → all loaded (30s timeout each)
-               ├─ Question cleaned first: clipped to 200 chars (head + tail kept) + injection phrases stripped (hardening)
-               └─ All failed → fall back to built-in meanings (+ 60s fail cooldown)
+④ Run the reading (_run_reading)【tarot_core.py draws and renders · interpret.py + hardening.py read】
+   ├─ Shuffle hint: a random "✨ 洗牌中……" before multi-card spreads (shuffle_lines can turn it off)
+   ├─ Render the card art: official assets, upright or reversed (thread pool; temp images are cleaned up after 30s,
+   │  a daily poster after 300s). A collage background is built from one card picked at random out of *this*
+   │  reading — cover-fill plus a deep-navy overlay — and /单抽 and the daily reading get their own poster card
+   │  (art, date, the day's line from the pool, sign-off; `output.daily_card` switches it off, and a failure falls
+   │  back to a plain card image)
+   ├─ The spirit's line: every spread opens with one, generated by the AI in the persona's voice and fitted to this
+   │  reading's cards and topic — fixed for the same person, day and card set, renewed the next day. When the AI is
+   │  unavailable it falls back to the day's line from the pool. It arrives bare (no "spirit's words:" label, no
+   │  quotes), right after the card art and before the reading
+   └─ Generate the reading:
+         ├─ Fixed daily → the day's cached reading (stays put all day)
+         └─ Free random → the AI reads it live
+               ├─ Provider chain: pinned model → session model → global default → every loaded provider (30s each)
+               ├─ The question is cleaned first: clipped to 200 characters (head and tail kept) + injection phrases stripped (hardening)
+               └─ All providers failed → built-in meanings (+ a 60s cooldown, so nothing waits in vain)
    │
    ▼
-⑤ Deliver result (_deliver)【deliver.py delivery · settings.py config applied】
-   ├─ Presentation order: card image → spirit's words → reading paragraphs → summary → disclaimer (same node order in merged forward)
-   ├─ Split by structure: one paragraph per card + summary (80–140 chars per prompt convention; overlong segments re-split at `segment_size`)
-   ├─ send_mode decides form: forward merged (default) / plain single chain / text_only
-   └─ Disclaimer appended at the end (disclaimer, can be empty)
+⑤ Send it (_deliver)【deliver.py orchestrates the send · settings.py decides what takes effect】
+   ├─ Order: card art → the spirit's line → the reading paragraphs → disclaimer (the merged forward keeps that order)
+   ├─ Split by structure: one paragraph per card plus a summary (the prompt asks for 80–140 characters each;
+   │  overlong ones get cut down to `segment_size`)
+   ├─ send_mode decides the shape: forward merged message (default) / plain single chain / text_only
+   └─ The disclaimer goes last (disclaimer; may be empty)
    │
    ▼
-⑥ Closing【prompts.py copy pool · main.py direct send】
-   ├─ Command entries: a closing line is sent directly right after the result (random line from the shared 7-line RESULT_EPILOGUE pool)
-   └─ Natural-language entry: content is sent via event.send, then a closing guidance is yielded to the model →
-        the model echoes one random line from the same pool, e.g. "✨ 牌灵已把答案交到你手上了，祝好运～"
+⑥ Wrap up【prompts.py holds the copy · main.py sends it directly】
+   ├─ Command entry: a closing line goes out on its own after the result (one of the seven in RESULT_EPILOGUE)
+   └─ Natural-language entry: the result goes out through event.send, then a closing hint is yielded to the model →
+        the model repeats one random line from the same pool, e.g. "✨ 牌灵已把答案交到你手上了，祝好运～"
 ```
 
-**All three entries share the same steps ②~⑤**, so draw rules, rate limits, delivery and fallbacks behave identically regardless of entry point; the only differences are the trigger itself and where the closing line comes from — command entries have me send a fixed line directly, the natural-language entry has the model echo it (same copy pool, same style).
+**All three entries share steps ②~⑤**, so draw rules, rate limits, delivery and fallbacks behave the same however the reading started. The differences are the trigger itself and where the closing line comes from: the command entry gets a fixed line sent by me, the natural-language entry has the model repeat one. Same copy pool either way.
 
 ## 🎛️ Configuration
 
@@ -164,7 +169,7 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `ai.enable_ai` | bool | `true` | Enable AI deep interpretation. When off, only built-in meanings are used. |
-| `ai.ai_provider` | string | `（empty）` | Provider used for AI interpretation (dropdown). Empty = current session model; when set, the reading prefers this model (falls back to others if unavailable) without affecting the chat model. |
+| `ai.ai_provider` | string | `(empty)` | Provider used for AI interpretation (dropdown). Empty = current session model; when set, the reading prefers this model (falls back to others if unavailable) without affecting the chat model. |
 | `ai.ai_timeout` | int | `30` | Per-provider timeout for AI interpretation (seconds). On timeout the plugin tries the next available provider; if all fail it falls back to built-in meanings. Min 5. |
 | `ai.ai_fail_cooldown` | int | `60` | Cooldown after an AI provider failure (seconds), **per provider**: a dead model only cools itself down, others keep serving; set 0 to disable. |
 | `ai.persona` | select | `random` | Spirit persona for AI readings: `off`-neutral (same as before) / `tsundere`-tsundere / `gentle`-gentle / `mystic`-mystic / `random`-one persona fixed per reading (never changes mid-reading; next reading may differ). Tone only — reading content and output structure unchanged. |
@@ -232,46 +237,204 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 
 ## 🤍 Technical Details
 
-- **Code structure (19 modules, one-way dependencies)**: `main.py` entry orchestration; `settings.py` config semantics (defaults + legacy migration); `config.py` config-read primitives (grouped-first / flat fallback / type coercion); `identity.py` event identity (2-level user-id fallback, shared by daily & rate limits); `spreads.py` formation selection & question cleaning; `tarot_core.py` draw & card presentation; `interpret.py` + `hardening.py` AI reading & prompt hardening; `log_setup.py` runtime log to disk; `deliver.py` delivery orchestration; `gating.py` + `limiter.py` rate-limit gate (KV glue) & pure logic; `kv_utils.py` KV read/write primitives (unified silent degradation); `daily.py` fixed daily reading; `dailylines.py` daily sigil pool & deterministic pick; `card_render.py` + `fonts.py` card rendering & font subsystem (incl. image lifecycle); `prompts.py` centralized copy (incl. help text); `tarot_data.py` card database — each module has a one-line responsibility, pure logic independently testable
+- **Code structure (19 modules, one-way dependencies)**: `main.py` entry orchestration; `settings.py` config semantics (defaults + legacy migration); `config.py` config-read primitives (grouped-first / flat fallback / type coercion); `identity.py` event identity (2-level user-id fallback, shared by daily & rate limits); `spreads.py` formation selection & question cleaning; `tarot_core.py` draw & card presentation; `interpret.py` + `hardening.py` AI reading & prompt hardening; `log_setup.py` runtime log to disk; `deliver.py` delivery orchestration; `gating.py` + `limiter.py` rate-limit gate (KV glue) & pure logic; `kv_utils.py` KV read/write primitives (unified silent degradation); `daily.py` fixed daily reading; `dailylines.py` daily line pool & deterministic pick; `card_render.py` + `fonts.py` card rendering & font subsystem (incl. image lifecycle); `prompts.py` centralized copy (incl. help text); `tarot_data.py` card database — each module has a one-line responsibility, pure logic independently testable
 - **Module layering (one-way dependencies, no cycles)**:
   - Entry orchestration: `main.py` (three entries, routing only)
   - Glue layer: `tarot_core` / `daily` / `gating` / `deliver` / `interpret` / `card_render` (KV, rate limits, delivery, rendering, AI reading — reads, writes and fallback decisions)
   - Pure logic layer: `limiter` / `spreads` / `identity` / `hardening` / `kv_utils` / `dailylines` / `tarot_data` / `prompts` / `fonts` / `config` / `settings` / `log_setup` (zero or near-zero framework dependencies, independently testable — the criterion is "can it be unit-tested standalone", not "where it lives")
-- **Design principles (the three rules I set for myself)**: ① Storage/render/model failures never block the main flow (kv_utils swallows exceptions, rendering falls back to text, AI falls back to built-in meanings — progressive degradation); ② Deterministic by default — the same user on the same day gets the same fixed card, reading, and sigil; the surprise lives in the AI persona's tone, not in the draw; ③ The reading format protocol (【第N张·位置】 markers) has a single source in prompts — deliver splits and hardening validates with the same regex
-- Card database fully embedded in `tarot_data.py`; card art in `assets/` (78 official card faces + official card back `Extra/背景.png`; stored as WebP, loader auto-compatible with .png)
+- **Design principles (the three rules I set for myself)**: (1) A failure anywhere — storage, rendering or model — never blocks the reading: kv_utils swallows the exception, rendering falls back to text, the AI falls back to the built-in meanings. (2) Deterministic by default — the same person on the same day gets the same card, the same reading and the same daily line; the surprise belongs to the persona's tone, not to the draw. (3) The reading format protocol (【第N张·位置】 markers) has one source of truth in prompts, and deliver splits on exactly the regex hardening validates.
+- The card database lives inside `tarot_data.py`; the art lives in `assets/` — 78 official faces plus the card back at `Extra/背景.png`, stored as WebP with a .png fallback in the loader.
 - `card_render.py` composes the image: the background is a randomly picked card from *this* reading — its face cover-fills the canvas under a deep-navy overlay (same feel as the daily fortune card); unified white-border card style, reversed readings rotate only the card art 180° (frame and info bar stay upright) — the part I'm most proud of: a tarot reading deserves to look good
-- Titles & positions use dark navy capsule labels; info bars show orientation (gold/red) + card name + meaning keywords
-- Fonts: bundled Noto Sans SC subset (`fonts/`, SIL OFL 1.1; branded as `StarFeather-*.otf`, covers all fixed card texts; bold uses the separate `StarFeather-Bold` subset) preferred, then system fonts (Windows / macOS / Linux), consistent cross-platform rendering
-- Before rendering, glyph coverage is verified: if the bundled subset lacks characters, it auto-falls back to a system font covering that text — the check ships a static glyph index as a fallback, so it still works without `fonttools` (still listed in requirements as the preferred dynamic checker). Current card texts are fully covered; this guards future rare-character additions
-- Cards drawn without replacement from 78, upright/reversed 50/50
-- Commands no longer require a `/` prefix: the gate belongs to the framework (wake words / group @ / direct private-chat text), so bare `占卜 问题` works in private chat (`_require_prefix` now trusts the framework instead of re-checking and fighting the WebUI wake-word config; regression covered by `tests/`)
-- AI reading tries providers in order (pinned model `ai.ai_provider` → current session → global default → all loaded, deduped by id), each with a timeout (`ai_timeout`, default 30s); if all fail it falls back to local meanings; failures cool down **per provider** (`ai_fail_cooldown`, default 60s) — a dead model only cools itself, others keep serving, so repeated reads don't wait on it
-- **Natural-language entry**: just ask for a reading in chat (`star_feather_divine` LLM tool); the tool description only fires on explicit requests, and a per-session throttle (`llm_tool_cooldown`, default 60s) prevents spamming
-- **Fixed daily reading**: `/单抽` and fortune-word requests draw deterministically per (user, date) — md5-seeded independent RNG (global random untouched); user id resolved by a 2-level fallback (sender id → raw `sender.user_id`, int-compatible; no session-id fallback in groups, so members don't share one reading); KV single-key overwrite cache with the card guaranteed by the pure function even if KV fails; `output.daily_fixed` can disable it
-- **"Fixed card + topic-aware reading" design choice**: AI readings free card meanings from the classic "one card = one canned text" dictionary mapping — traditional tarot pairs a card with fixed wording, while AI reading feeds both the card and your question into the model, so the same card yields tailored readings per topic (love / career / study). StarFeather doesn't let it change every time; the variation is locked into a deterministic frame: the draw is fixed per (user, date) — ask a hundred times, same card — and readings are partitioned by topic, staying stable within the day (same topic → same reading). For divination, the more unstable the answer, the faker it feels.
-- **Unified flow**: all three entries share `_pick_reading` (draw routing) + `_run_reading` (delivery), so toggle settings (shuffle hint / card image / disclaimer) take effect in one place; the shuffle hint is produced for multi-card spreads only — `/单抽` and 羽签 (single-card) stay quiet, keeping the old behavior
-- **Image lifecycle**: cleanup is registered at the image's *point of creation* — delayed delete (normal card images 30s, daily poster card 300s) (all send paths covered: AI success / fallback / aborts), plus a startup sweep of leftovers from the previous run
-- Questions sent to AI are **clipped to 200 chars** (head + tail kept: opening context and closing intent both survive, head ends at a sentence boundary); the system prompt restricts the model to tarot interpretation only
+- Titles and positions sit in dark navy capsule labels; the info bar carries the orientation (gold for upright, red for reversed), the card name and its meaning keywords.
+- Fonts: the bundled Noto Sans SC subset comes first (`fonts/`, SIL OFL 1.1, branded `StarFeather-*.otf`, covering every fixed string on a card; bold has its own `StarFeather-Bold` subset), with system fonts (Windows / macOS / Linux) behind it — so Chinese renders the same everywhere.
+- Before anything is drawn, the text is checked for glyph coverage. If the bundled subset is missing characters, the renderer falls back to a system font that has them. The check ships a static glyph index of its own, so it still works without `fonttools` (which stays in requirements as the preferred dynamic checker). Today's card texts are fully covered — this is here for the rare character someone adds later.
+- Cards are drawn from the 78 without replacement, and upright or reversed is a straight 50/50.
+- Commands no longer need a `/` prefix. The framework owns the gate (wake words, group @, plain text in private chat), so `占卜 问题` on its own works in private chat. `_require_prefix` trusts that gate instead of second-guessing the WebUI wake-word config, and a regression test covers it.
+- AI readings walk the provider chain in order: the pinned model (`ai.ai_provider`), the current session's provider, the global default, then every loaded provider (deduped by id). Each attempt gets `ai_timeout` (30s by default), and if they all fail the built-in meanings take over. A failure cools down **per provider** (`ai_fail_cooldown`, 60s by default): a dead model sits out while the rest keep serving, so nothing waits on it twice.
+- **Natural-language entry**: ask for a reading in chat and the `star_feather_divine` tool picks it up. The tool description only fires on an explicit request, and `llm_tool_cooldown` (60s per session by default) keeps it from being spammed.
+- **Fixed daily reading**: `/单抽` and fortune-word requests draw deterministically per person and per day — an md5-seeded RNG of their own that never touches the global random. The user id comes from a two-level fallback (the sender id, then `sender.user_id` read raw so int ids work; no session-id fallback in groups, so members never share a reading). The cache is a single KV key overwritten in place, and the card is guaranteed by the pure function even if KV is down. `output.daily_fixed` turns it off.
+- **"Fixed card, topic-aware reading": why it works this way**: an AI reading frees card meanings from the old dictionary mapping in which one card equals one canned text. Traditional tarot pairs a card with fixed wording; here the card and your question both go into the model, so the same card yields a reading fitted to the topic — love, career, study. StarFeather doesn't let that freedom turn into a different answer every time. The variation is fenced in by determinism: the draw is fixed per person and per day, so asking a hundred times gives the same card, and the reading is per topic and holds for the day. With divination, the shakier the answer, the less real it feels.
+- **One flow, three doors**: every entry runs through the same `_pick_reading` (routing the draw) and `_run_reading` (running the reading), so settings like the shuffle hint, the card image and the disclaimer take effect in one place. The shuffle hint only appears for multi-card spreads — `/单抽` and 羽签 (single card) stay quiet.
+- **Image lifecycle**: cleanup is scheduled where the image is *created*, not where it might be sent — a delayed delete (30s for a plain card image, 300s for a daily poster) that covers every way out (AI reading, fallback, abort), plus a sweep of the previous run's leftovers at startup.
+- Questions reach the AI **clipped to 200 characters**, head and tail kept: the opening context and the closing intent both survive, and the head ends on a sentence boundary. The system prompt keeps the model on tarot and nothing else.
 - Keyword → spread matching by priority: explicit spread names (new + classic aliases: Single Question / Time Flow / Three-Card Timeline / Three-Card Spread (圣三角) / Lovers' Cross, plus 羽签 / 羽时三刻 / 羽镜 / 恋羽十字) → semantic keyword weight (love → Lovers' Cross, career/study → Feather Mirror, past/future/timeline → Feather Hour Three; fortune words are handled first by the fixed-daily layer) → content inference ("he / she / us / does he love me") → defaulting to "Feather Hour Three"
-- Pure-logic unit tests in `tests/` (pytest, organized by module; case count grows with development): `test_core` (draw, render gating, interpreter integration, three-entry orchestration, daily fallbacks), `test_settings` (defaults & legacy migration), `test_spreads` (selection / alias / question cleaning), `test_hardening` (injection stripping / clipping / structure validation), `test_identity` (user-id fallback chain), `test_gating` (rate-limit gate), `test_log_setup` (log path candidates & idempotent install), `test_card_render` (render smoke, image cleanup), `test_fonts` (font fallback/cache regression), `test_deliver` (splitting & delivery), `test_limiter`, `test_config` (config primitives), `test_dailylines` (daily sigil pool & deterministic pick), `test_integrity` (data integrity domain: card pool / sigil pool / glyph coverage / config schema), `test_judgement_corpus` (judgement-corpus regression: help / daily-reading boundary phrasings locked), `test_kv_utils` (KV read/write fallbacks: store failure vs no record), `test_stub_signatures` (monkeypatch stub vs real signature), `test_docs_consistency` (test list vs actual files); `pip install pytest` first, then run `python -m pytest tests`. **Test import convention: always use plugin-root relative imports (`from daily import ...`), never `data.plugins.astrbot_plugin_star_feather.xxx` full paths** — that's the AstrBot runtime package path and breaks test collection when run standalone
+- Pure-logic unit tests in `tests/` (pytest, organized by module; case count grows with development): `test_core` (draw, render gating, interpreter integration, three-entry orchestration, daily fallbacks), `test_settings` (defaults & legacy migration), `test_spreads` (selection / alias / question cleaning), `test_hardening` (injection stripping / clipping / structure validation), `test_identity` (user-id fallback chain), `test_gating` (rate-limit gate), `test_log_setup` (log path candidates & idempotent install), `test_card_render` (render smoke, image cleanup), `test_fonts` (font fallback/cache regression), `test_deliver` (splitting & delivery), `test_limiter`, `test_config` (config primitives), `test_dailylines` (daily line pool & deterministic pick), `test_integrity` (data integrity domain: card pool / daily line pool / glyph coverage / config schema), `test_judgement_corpus` (judgement-corpus regression: help / daily-reading boundary phrasings locked), `test_kv_utils` (KV read/write fallbacks: store failure vs no record), `test_stub_signatures` (monkeypatch stub vs real signature), `test_docs_consistency` (test list vs actual files); `pip install pytest` first, then run `python -m pytest tests`. **Test import convention: always use plugin-root relative imports (`from daily import ...`), never `data.plugins.astrbot_plugin_star_feather.xxx` full paths** — that's the AstrBot runtime package path and breaks test collection when run standalone
 
 ## 📜 Changelog
 
-Latest release (v0.7.0): Layered readings for all 78 cards — every card now carries more than keyword strings (uprights split into keywords + what's unfolding + how to act; reversals into keywords + energy state + where the energy jams + how to turn around), giving the AI richer material and the built-in fallback more guidance; the bundled Noto Sans SC font subset (Regular & Bold, static charset manifest included) was extended to cover every rendered string — the new meaning texts plus the spaces and brand characters in titles, card labels, the signature and the watermark, so cards no longer show tofu boxes. Fixes: with `ai.persona` set to random, the spirit's line and the reading body could land on different personas — a reading now draws its persona once; corrupt cooldown data and quote-only or blank model replies no longer abort a reading. In text-only mode the built-in card-by-card meanings no longer collapse to the last card alone — every card now gets its own block.
+#### v0.7.0
 
-v0.6.3: AstrBot 4.28 ready — the AI reading now picks its model through the framework's recommended async path, so readings keep working after upgrading to AstrBot 4.28 (the deprecated sync interface is no longer relied upon). v0.6.2: card meanings are no longer dropped when the AI is unavailable — in text-only mode with the AI off or a reading failure, the built-in meanings for every card are now always delivered. v0.6.1: concurrency no longer bypasses the cooldown and daily cap when several people trigger a reading almost at once (storage failures still fail open); jailbreak stripping now covers more bypass spellings (English identity overrides, multi-modifier instruction overrides, subject-less persona fakes, separator-padded and dotted role-name variants) before they reach the AI reading request; the spirit's line now gets the same anti-injection cleaning as the main reading paths. v0.6.0: — the spirit persona (three voices — tsundere / gentle / mystic — or a random pick per reading via `ai.persona`; `off` restores the neutral voice; each persona card ships tone rules (at least two tells, no generic fortune-teller phrasing) and a signature-style sample, tone only, content & structure unchanged; the "word from the spirit" is part of the same persona — every reading (Feather Sign / Feather Hour Three / Feather Mirror / Lovers' Feather Cross and the daily fortune) opens with one, AI-generated in the persona's voice, fitted to this reading's cards and question, fixed per person / day / card set and renewed daily, falling back to the pool line when the AI is unavailable, sent as a naked line with no "spirit's words: " label or quotation marks, in plain words with metaphors that are instantly clear, right after the card image and before the reading); and the daily fortune card (`/单抽` and daily fortunes now render a dedicated poster card — card art, date, sign-off and a watermark, with the pool's fixed signature printed on the card face, falls back to a normal card image on render failure, ships with a switch `output.daily_card`, default on) whose visual language also reached every collage (spread images now use a randomly picked card from *this* reading as the canvas background — cover-fill plus deep-navy overlay, 3 choices in Feather Hour Three, 4 in Lovers' Feather Cross, same feel as the daily fortune poster; fixed: card font fallback hardened — card images no longer show tofu boxes when the font-checking dependency isn't ready (e.g. mid-install), missing glyphs always fall back to a system font); See [CHANGELOG.md](https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/CHANGELOG.md) for the full version history. v0.5.6: the group cooldown hint was reworded (it no longer tells the asker they were just read for when someone else in the group triggered the cooldown); help detection now covers casual phrasings like "怎么用 / 怎么玩 / help 一下"; and event-attribution questions ("I got my finger pinched — is it because my luck is bad?") now get a free draw with a targeted reading instead of the fixed daily one. v0.5.5: jailbreak bypass protection, continued — newlines inside a jailbreak phrase can no longer slip through; a few more time words ("这个月 / 这两天 / 这段时间") now route topic-less generic questions to the fixed daily reading; and the judgement boundary is tightened — time-word questions are now a positive whitelist (only generic ask-forms like "how have I been lately" and signature phrases like "daily tarot" stay daily; event/agenda/state descriptions such as "I keep losing sleep lately" or "is there a meeting this afternoon" get a free draw), while timeline words with relationship semantics ("our future", "will she love me") now pick the Lovers' Cross instead of the time-line spread. v0.5.4: AI failure cooldown is now per provider — a failing model only cools itself down while others keep serving; jailbreak bypass protection strengthened — full-width / zero-width / bidi control characters can no longer evade injection stripping. v0.5.3: daily-reading detection fixed — "最近 / 近期 / 每日" no longer counts as a fortune word alone, questions with a specific topic now get a normal spread draw instead of the same fixed card & reading all day; daily readings are now cached per topic (each topic gets its own reading instead of sharing the first one; generic fortune questions stay fixed all day); AI readings are anchored to the meaning keywords given in the draw result; help detection tightened — only a standalone help request ("帮助 / help / 使用帮助 / 看下说明" etc.) shows the usage guide, the word "帮助" inside a question body no longer trips the help page. v0.5.2: security fixes — command errors no longer show exception details to users (log only); Pillow floor raised to `>=10.0.0` (known CVEs in 9.x). v0.5.1: the tool's non-reading branches (disabled / throttled / daily-quota / empty question) no longer echo a "reading sent" wrap-up that didn't happen. v0.5.0: natural-language entry (just ask in chat, throttled); fixed daily reading (same card & reading all day per user, independent per member in groups); AI provider chain with per-call timeout and fail cooldown + selectable reading model (`ai.ai_provider`); entry rate limits (command per-session throttle + per-user daily counter); send mode, three choices — a single `send_mode` dropdown (plain / forward / text_only, legacy configs auto-migrated, now defaulting to merged forward); new options: question length cap, disclaimer, shuffle hint, daily-fixed toggle (upright/reversed stays pure random 50/50 — no toggle); unified draw & delivery flow across all three entries; security hardening (jailbreak-sentence stripping, AI output structure validation, 200-char head + tail clipping); better concurrency (simultaneous readings don't block each other); runtime requirements declared (Python 3.12+ & AstrBot 4.16+ <5 — lower environments can't load); relaxed trigger gate — no more mandatory `/` prefix, bare 占卜 问题 works in private chat, and AstrBot wake words + command are supported.
+- Added: layered meanings for all 78 cards — instead of a string of keywords, an upright reading now gives keywords, what's unfolding and what to do about it, and a reversed reading gives keywords, the state you're in, where the energy sticks and how to turn it around. Richer material for the AI, and more guidance in the built-in fallback. The bundled font subset was extended to cover every rendered string — the new meaning texts plus the spaces and brand characters in titles, card labels, the signature and the watermark — so cards no longer show tofu boxes.
+- Fixed: with `ai.persona = random`, the spirit's line and the reading body could land on different personas — a reading now draws its persona once. Corrupt cooldown data, or a model replying with nothing but quotes or whitespace, no longer aborts a reading.
+- Fixed: in text-only mode the per-card meanings no longer collapse to the last card — the built-in fallback used to print only the spread's last card, and every card now gets its own block.
+
+#### v0.6.3
+
+- Changed: AstrBot 4.28 ready — the model behind an AI reading is now chosen through the framework's recommended async path, so readings keep working after upgrading to 4.28 instead of relying on a deprecated sync interface.
+
+#### v0.6.2
+
+- Fixed: card meanings are no longer lost when the AI is unavailable — in text mode, with the AI off or the reading failed, you used to get the spirit's line alone with every per-card meaning missing; the built-in meanings are now delivered as before.
+
+#### v0.6.1
+
+- Fixed: concurrent triggers no longer slip past the cooldown and the daily cap — when several people ask almost at once, both limits hold (storage failures still fail open).
+- Fixed: jailbreak stripping covers more spellings — English identity overrides, multi-modifier instruction overrides, subject-less persona fakes, separator-padded and dotted role-name variants no longer reach the AI request.
+- Fixed: the spirit's line now goes through the same adversarial cleaning as the main reading path; the question text is cleaned before either is generated.
+
+#### v0.6.0
+
+- Added: spirit personas — an AI reading speaks in one of three voices (tsundere / gentle / mystic) or draws one at random per reading (`ai.persona`; `off` restores the neutral tone). Each persona card carries tone rules and a sample of its signature style; content and structure are unchanged. The spirit's line joins in: every spread (Feather Sign / Feather Hour Three / Feather Mirror / Lovers' Feather Cross / the daily reading) opens with one, AI-generated in the persona's voice and fixed for the same person, day and card set, falling back to the pool when the AI is unavailable. It is sent bare — no label, no quotes, one plain sentence with an instantly readable image — right after the card art and before the reading.
+- Added: the daily fortune poster — `/单抽` and the daily reading get their own poster card (art, date, the day's line, sign-off), with the pool's fixed line for that day printed on the card face; a render failure falls back to the plain card image. Ships with `output.daily_card` (on by default). The visual language carried over too: collage backgrounds for Feather Hour Three and Lovers' Feather Cross now use one card out of the reading as the base (a 3-way or 4-way pick, the same feel as the poster).
+- Fixed: card font fallback hardened — with the font-checking component not yet ready (mid-install, say), card images and posters no longer show tofu boxes; missing glyphs always fall back to a system font.
+
+#### v0.5.6
+
+- Fixed: the group throttle message now says the spirit has just finished a reading, instead of counting someone else's cooldown against the asker.
+- Fixed: help detection widened — casual phrasings like "怎么用 / 怎么玩 / help 一下" open the usage guide too.
+- Fixed: event-attribution asks such as "is it because my luck is bad?" now get a free draw instead of being swallowed by the daily reading.
+
+#### v0.5.5
+
+- Fixed: jailbreak protection, continued — a newline tucked inside a jailbreak phrase can no longer slip past the stripping.
+- Fixed: the daily reading recognises more generic time words — "这个月 / 这两天 / 这段时间" with no topic now counts as a daily reading.
+- Fixed: the judgement boundary tightened — time words are now a positive whitelist ("how have I been lately / daily tarot" stay daily; "I keep losing sleep lately / is there a meeting this afternoon" get a concrete reading), and asks that combine relationship semantics with timeline words ("our future / will she love me") now pick the relationship spread, while pure timeline asks are unchanged.
+
+#### v0.5.4
+
+- Fixed: the AI failure cooldown is per provider — one failing model cools only itself while the others keep reading.
+- Fixed: jailbreak protection strengthened — full-width, zero-width and bidi control characters can no longer dodge the injection stripping.
+
+#### v0.5.3
+
+- Fixed: daily reading detection tightened — "最近 / 近期 / 每日" no longer count as fortune words on their own, so a question with a specific topic gets a proper spread instead of the same fixed card all day.
+- Fixed: daily readings are cached per topic — asking about two topics on the same day gives each one its own reading instead of sharing the first.
+- Fixed: AI readings stay anchored to the meaning keywords in the draw instead of drifting away from them or inventing meanings.
+- Fixed: help detection tightened — the word "帮助" inside a question no longer opens the help page; the whole sentence has to be a help request ("帮助 / help / 使用帮助 / 看下说明").
+
+#### v0.5.2
+
+- Fixed: command errors no longer leak exception details — server paths and internals go to the log, the user gets a friendly line.
+- Dependency: Pillow floor raised to >=10.0.0 (known CVEs in 9.x; upgraded automatically on install).
+
+#### v0.5.1
+
+- Fixed: the natural-language entry no longer repeats "the reading has been sent" where it hasn't (entry off / throttled / daily cap reached / empty question) — it gives the matching hint instead.
+
+#### v0.5.0
+
+> Full history: [CHANGELOG.md](https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/CHANGELOG.md) (Chinese first, English after).
+> The release in one breath: the natural-language entry (ask in chat, throttled per session), the fixed daily reading (same card and reading per person per day, reset at midnight), the AI provider chain (timeout switching + failure cooldown) and a model picked just for readings, three output modes (`send_mode`: one image-and-text chain / merged forward / text only, legacy configs migrating automatically, merged forward by default), new options (question length cap, disclaimer, shuffle hint, daily cap; upright/reversed stays pure random), rate limits on the entries (command throttle + daily counting), security hardening (injection stripping, AI output structure validation, questions clipped to 200 characters), concurrency (simultaneous readings don't block each other), the runtime requirement (Python 3.12+ / AstrBot 4.16+, below which it won't load), and a relaxed trigger gate (no forced `/` prefix — "占卜 问题" works in private chat, and AstrBot wake words and commands both work).
+
+#### v0.4.10
+
+- Fixed: the merged-forward node uin no longer depends on the adapter's `raw_message` (missing or shaped differently on some platforms, where it fell back to `'0'`) — it uses the framework's `event.get_self_id()`, the same lookup the framework uses for @-wake detection, and still falls back to `'0'` when it comes up empty.
+
+#### v0.4.9
+
+- Fixed: a `commit_msg.txt` committed by mistake is out of the repository and into `.gitignore`; four duplicate Queen assets (the same images filed under a second Chinese name) were removed, trimming about 0.47 MB from the package.
+- Fixed: the `/占卜 帮助` branch now behaves like every other command path — no string of default replies after the help page.
+- Font coverage fallback: texts are checked with fonttools before rendering, and a missing glyph falls back to a system font that covers it (new dependency `fonttools>=4.0`). The main font is a bundled Noto Sans SC subset (branded `StarFeather-*.otf`, covering all card copy), with rare characters outside GB2312 falling back to a system font.
+- Added: `tests/` (pytest, 27 cases) — spread selection, alias stripping, splitting, drawing, glyph coverage and a rendering smoke test.
+- Docs: the branded font naming (`StarFeather-*.otf`, in fact a Noto Sans SC subset) and the glyph fallback are written up.
+
+#### v0.4.8
+
+- A new plugin icon: pink feather, Sun tarot card and Venus (Pastel Feather Tarot).
+- README reworked: logo and title side by side, pink badges (license / AstrBot / version), a table of contents, and every asset linked through absolute GitHub URLs, so GitHub, the AstrBot dashboard and the plugin market all render the same.
+
+#### v0.4.7
+
+- Bundled Noto Sans SC subset font (OFL): Chinese renders consistently across platforms, no more tofu boxes on Linux or macOS.
+- Fixed: `@register` reported a version that disagreed with `VERSION` (0.4.5 → 0.4.7).
+- The code passes ruff (import order, one statement per line, and the like).
+- Added: the `logo.png` icon, plus `short_desc` and tags in metadata.
+- Added: `requirements.txt` (Pillow), the AGPL-3.0 license, and this English README.
+
+#### v0.4.6
+
+- The shuffle hint now draws from a **pool of lines** instead of always saying the same thing.
+
+#### v0.4.5
+
+- The spread name is stripped from the question before the AI sees it: `/占卜 圣三角 考研如何` reads only "考研如何", with no "圣三角" muddying the meaning.
+- @-everyone detection handles both shapes: `At(qq="all")` (OneBot adapters such as NapCat) and `AtAll` (a subclass). Platforms without the component never produce it, so nothing is rejected and nothing spams.
+
+#### v0.4.4
+
+- Spread selection became a **three-step decision**: explicit spread name > keyword weight accumulation (no more first-match-wins) > content inference > default.
+- `/占卜 圣三角 考研如何` style explicit naming works, with both the new names and the classic ones (Time Flow / Three-Card Timeline / Lovers' Cross / Single Question …).
+- Keywords score by how many of them hit and the highest score wins; ties break by priority order — "工作面试和我感情" correctly lands on Feather Mirror.
+- The whole selection path is constant-time string scanning (around 30 `in` checks, microseconds), so it costs nothing.
+
+#### v0.4.3
+
+- Trigger rules aligned with the docs: in a group the bot must be **@-ed** (an At component matching its own QQ) to respond; messages with neither @ nor `/` no longer trigger, which keeps the spam down.
+- Structured segments get a second cut at `segment_size`, so an overlong paragraph still sends when a model ignores the limit.
+- `_render_image` validates what it returns: an empty or non-string result falls back to the text version.
+- Type hints added to `_interpret_results` / `_deliver` / `_require_prefix`.
+
+#### v0.4.2
+
+- Robustness: structured splitting no longer depends on newlines — a model emitting "【第1张】…【第2张】…" in one run still splits correctly.
+- The AI prompt is built with an f-string, so `%` or `{}` in a question can't break the formatting.
+- `segment_size` falls back explicitly: unset, `None` or invalid all return to 300.
+- Send interval and default segment length became module constants (`SEND_INTERVAL` / `DEFAULT_SEGMENT_SIZE` / `MIN_SEGMENT_SIZE`).
+- Type hints added to `_draw` / `_render_text` / `_render_image` / `_ai_interpret` / `_pick_info`.
+- The registered version was synced to v0.4.2.
+
+#### v0.4.1
+
+- Spreads renamed: Single Question → **Feather Sign**, Time Flow (Three-Card Timeline) → **Feather Hour Three**, Three-Card Spread → **Feather Mirror**, Lovers' Cross → **Lovers' Feather Cross**.
+- The classic names all remain as keywords, so you can still ask for spread by the name you know.
+
+#### v0.4.0
+
+- The display name is now **Star Feather Tarot**, with `display_name` added to metadata.
+- AI readings became **structured**: one paragraph per card (marked 【第N张·位置】) and a closing 【总结】 paragraph that states the result plainly.
+- Splitting follows the structure marks rather than a character count; `segment_size` only serves unstructured text.
+- **Images inside merged forwards**: with `forward_result` on, the card art rides as the first node of the same forwarded message as the reading paragraphs.
+- Plain mode (forward off): the image goes out on its own, then the paragraphs one by one, 0.3s apart.
+
+#### v0.3.1
+
+- New `forward_result` option: readings are sent as a **merged forward message chain** — paragraphs packed into one forwarded message you open to read — saying goodbye to a wall of consecutive texts.
+- AI readings are sent in segments by default: split at `segment_size` (300 characters) and sent one by one, 0.3s apart, in plain mode.
+- Segmenting prefers paragraph breaks and falls back to length, hard-cutting overlong paragraphs.
+- Merged forward nodes are signed "星羽塔罗", with the node uin taken from the bot's own QQ.
+
+#### v0.3.0
+
+- Renamed to **Star Feather Tarot** (formerly Cyber Tarot), plugin name `star_feather`.
+- Official 幻星集 assets: all 78 card faces and the card back bundled into `assets/`.
+- A unified white-border card style, with the official card back darkened as the collage background.
+- Titles and positions became dark navy capsule labels — readable at a glance.
+- **Command prefix required**: in private chat only `/`-prefixed commands respond (`/占卜`, `/单抽`) and bare text does nothing; in groups, @-ing the bot works.
+- Hand-drawn leftovers and unused dependencies removed, rendering simplified.
+
+#### v0.2.0
+
+- Card images: Pillow draws the tarot cards locally and assembles the collage, so `占卜` and `单抽` send images.
+- If rendering fails, the plain-text card faces go out instead — the reading still arrives.
+
+#### v0.1.0
+
+- All 78 cards built in (Major and Minor Arcana), with bilingual names and upright/reversed meanings.
+- Four spreads with keyword matching.
+- AI deep reading with the local meanings as an automatic fallback.
+- No image dependencies — plain text output.
 
 ---
 
 ## 🌙 Notes
 
 - AI reading follows a **provider chain**: pinned model (`ai.ai_provider`) → current session provider → global default → all loaded; if all fail or none is configured, built-in meanings are used automatically so the reading never stalls
-- Readings are for entertainment only — take them with a grain of salt 🍀 The cards point a direction; the walking is yours — I just lay them out clearly
+- Readings are for entertainment only — take them with a grain of salt 🍀 The cards point at a direction; the walking is yours. Laying them out clearly is my part.
 
 ---
 
 ## ⭐ Support & Thanks
 
-- Like it? A ⭐ on [GitHub](https://github.com/yuluo-feather/astrbot_plugin_star_feather) keeps me motivated
-- Found a bug or want a feature? [Issues](https://github.com/yuluo-feather/astrbot_plugin_star_feather/issues) and Pull Requests are always welcome — I read every one of them
-- **Thanks**: to 幻星集 (official card art), to the AstrBot framework, and to everyone who filed an issue or left a star — the spirit remembers you
+- Like it? A ⭐ on [GitHub](https://github.com/yuluo-feather/astrbot_plugin_star_feather) is all the motivation I need
+- Found a bug or want a feature? [Issues](https://github.com/yuluo-feather/astrbot_plugin_star_feather/issues) and pull requests are always welcome — I read every one of them.
+- **Thanks**: to 幻星集 for the official card art, to the AstrBot framework, and to everyone who filed an issue or left a star. The spirit remembers you.
