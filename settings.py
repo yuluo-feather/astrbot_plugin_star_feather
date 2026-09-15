@@ -4,7 +4,7 @@ config.py 只提供读取原语（分组优先 / 扁平回退 / 类型转换）�
 「默认值是什么、旧字段怎么迁移、解析成什么样子」全在这一层。
 StarTarot / AiInterpreter / Deliverer 只消费解析后的数值，不碰配置结构。
 
-——默认值、迁移规则都只在这里维护，别的地方本羽不许自作主张。
+——默认值、迁移规则都只在这里维护，其他地方别自作主张。
 """
 from config import _cfg_bool, _cfg_get, _cfg_int
 

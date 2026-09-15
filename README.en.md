@@ -40,7 +40,7 @@
 - 🔮 **All 78 cards, built in**: 22 Major Arcana and 56 Minor Arcana (Wands, Cups, Swords and Pentacles). Every card has a Chinese and an English name and a layered meaning: upright readings give keywords, what's unfolding and what to do about it; reversed readings give keywords, the state you're in, where the energy sticks and how to turn it around.
 - 🃏 **Four spreads**: Feather Sign, Feather Hour Three, Feather Mirror and Lovers' Feather Cross. The classic names work just as well — Single Question, Time Flow, Three-Card Timeline, Three-Card Spread, Lovers' Cross.
 - 🧠 **It picks the spread for you**: Star Feather reads the keywords in your question and draws on the spread that fits. One less decision to make.
-- 🤖 **AI deep reading**: the draw goes to an LLM (pin a dedicated model with `ai.ai_provider`) and comes back as one paragraph per card plus a summary. If the call fails, the built-in meanings take over, so a reading never stalls halfway. This is the part I watch closest.
+- 🤖 **AI deep reading**: the draw goes to an LLM (pin a dedicated model with `ai.ai_provider`) and comes back as one paragraph per card plus a summary. If the call fails, the built-in meanings take over, so a reading never stalls halfway.
 - 🗣️ **A spirit with a personality**: the reading is spoken by the deck's spirit in one of three voices — tsundere, gentle or mystic (`ai.persona`; `off` restores the neutral tone). Each voice comes with its own tone rules and a sample of its signature style, which also shapes the spirit's opening line. `random` locks one voice per reading. Tone only: content and structure stay as they are.
 - 💬 **Ask in plain words**: "帮我算一卦" or "看看我今天的运势" is enough to start a reading (natural-language entry, on when `llm_tool_enabled` is set). Nothing to memorise.
 - 🗓️ **One fixed reading a day**: `/单抽` and requests carrying fortune words (运势 / 运气 / 牌运 …) return the same card and the same reading for the same person, until midnight resets it. Asking again won't reroll it.
@@ -158,7 +158,7 @@ User request (any one of three entry points)【main.py orchestration】
         the model repeats one random line from the same pool, e.g. "✨ 牌灵已把答案交到你手上了，祝好运～"
 ```
 
-**All three entries share steps ②~⑤**, so draw rules, rate limits, delivery and fallbacks behave the same however the reading started. The differences are the trigger itself and where the closing line comes from: the command entry gets a fixed line sent by me, the natural-language entry has the model repeat one. Same copy pool either way.
+**All three entries share steps ②~⑤**, so draw rules, rate limits, delivery and fallbacks behave the same however the reading started. The differences are the trigger itself and where the closing line comes from: the command entry gets a fixed line sent by the plugin, the natural-language entry has the model repeat one. Same copy pool either way.
 
 ## 🎛️ Configuration
 

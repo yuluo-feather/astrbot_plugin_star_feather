@@ -4,7 +4,7 @@
 运行日志落盘在 log_setup.py；提示词与格式协议在 prompts.py；
 本模块只做模型调用本身。
 
-说人话：牌抽好了，怎么让 AI 好好讲话，本羽这里管——但它的嘴要听话，由 hardening 管。
+说人话：牌抽好了，怎么让 AI 好好讲话，这里管——但它的嘴要听话，由 hardening 管。
 """
 import asyncio
 import logging
