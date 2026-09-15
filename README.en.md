@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  "The name is mine, and so is the reading. Hmph, not bad, right?" — Little Feather
+  "The name is mine, and so is the reading. Hmph, not bad, right?" — Yuluo
 </p>
 
 <p align="center">
@@ -33,18 +33,18 @@
 
 ---
 
-🎀 An AstrBot tarot reading plugin — written by me, Little Feather. All 78 cards built in, official card art rendering, AI deep interpretation with local meanings as fallback — no external image resources needed. Got a question? Ask the deck. Hmph, but read the docs first. Don't make me repeat myself.
+🎀 An AstrBot tarot reading plugin — written by me. All 78 cards built in, official card art rendering, AI deep interpretation with local meanings as fallback — no external image resources needed. Got a question? Ask the deck. Hmph, but read the docs first. Don't make me repeat myself.
 
 ## 🌸 Features
 
-- 🔮 **All 78 cards built in**: 22 Major Arcana + 56 Minor Arcana (Wands / Cups / Swords / Pentacles), each with Chinese & English names and layered meanings — uprights: keywords + what's unfolding + how to act; reversals: keywords + energy state + where the energy jams + how to turn around
+- 🔮 **All 78 cards built in**: I packed all 22 Major Arcana + 56 Minor Arcana (Wands / Cups / Swords / Pentacles) in — not one missing, each with Chinese & English names and layered meanings — uprights: keywords + what's unfolding + how to act; reversals: keywords + energy state + where the energy jams + how to turn around
 - 🃏 **Four spreads**: Feather Sign, Feather Hour Three, Feather Mirror, Lovers' Feather Cross — classic names (Single Question / Time Flow / Three-Card Timeline / Three-Card Spread / Lovers' Cross) also recognized
-- 🧠 **Smart spread selection**: scans the question keywords and picks the best spread automatically
-- 🤖 **AI deep interpretation**: LLM-based deep reading (optionally pinned to a dedicated model via `ai.ai_provider`), one paragraph per card plus a summary; falls back to built-in meanings automatically so a reading never stalls
+- 🧠 **Smart spread selection**: I scan your question's keywords and pick the best spread for you — one less thing to worry about
+- 🤖 **AI deep interpretation**: LLM-based deep reading (optionally pinned to a dedicated model via `ai.ai_provider`), one paragraph per card plus a summary; falls back to built-in meanings automatically so a reading never stalls — this is the part I watch closest: a reading may take its time, but it must never stop halfway
 - 🗣️ **Spirit persona**: AI readings are spoken by the deck's spirit in three voices — tsundere / gentle / mystic (switch via `ai.persona`; `off` = neutral), each with hard tone rules (at least two persona tells throughout the reading) and a signature-style sample (which also shapes the spirit's words); `random` picks one persona per reading and keeps it through the whole reading; tone only — content & structure unchanged
 - 💬 **Talk to divine**: just say "帮我算一卦" or "看看我今天的运势" to trigger (natural-language entry, when `llm_tool_enabled` is on) — no commands to memorize
 - 🗓️ **Fixed daily reading**: `/单抽` and requests containing fortune words (运势 / 运气 / 牌运…) return the same card & reading for the same user all day, refreshed at midnight — no way to reroll
-- 🎴 **Official card art**: all 78 card faces + official card back included in `assets/` (WebP format, auto-compatible with .png), unified white-border card style, reversed readings rotate only the card art 180° (frame and info bar stay upright)
+- 🎴 **Official card art**: all 78 card faces + official card back included in `assets/` (WebP format, auto-compatible with .png), unified white-border card style, reversed readings rotate only the card art 180° (frame and info bar stay upright) — cards that look good are half the reading
 - 🛡️ **Double fallback**: AI failure falls back to built-in meanings; image rendering failure falls back to plain text
 
 ## 🃏 Commands
@@ -59,7 +59,7 @@
 
 ### 🧩 Multiple bots
 
-If you run several bots at once (multiple accounts / instances), keep this in mind: group messages are broadcast to every bot in the group, and each bot decides independently — so:
+If you run several bots at once (multiple accounts / instances), keep this in mind: group messages are broadcast to every bot in the group, and each bot decides independently — so, plain words first:
 
 - **One divination bot per group**: don't install Star Feather on the other bots, or turn off `tool.llm_tool_enabled` (the natural-language entry) — one "占卜" can otherwise be answered by several bots at once
 - **Give each bot its own wake word**: bot A wakes on 「羽毛」, bot B on 「星羽」; never share a single wake word across bots
@@ -87,11 +87,11 @@ Flow: smart match "Lovers' Feather Cross" → shuffle hint → draw four cards w
 | Feather Mirror | 3 | Situation / Obstacle / Advice | Keywords like "career / work / interview / study / exam / promotion / three-card spread" |
 | Lovers' Feather Cross | 4 | You / Them / Relationship now / Outcome | Keywords like "love / relationship / breakup / reunion / lovers' cross", or "he / she / us / does he love me" |
 
-> 💫 Classic names (Single Question / Time Flow / Three-Card Timeline / Three-Card Spread / Lovers' Cross) are still recognized.
+> 💫 Classic names (Single Question / Time Flow / Three-Card Timeline / Three-Card Spread / Lovers' Cross) are all still recognized — call them whatever you're used to.
 
 ## ⚙️ How It Works
 
-From your request to the final result, Star Feather runs this pipeline internally — understand it and troubleshooting gets easy.
+From your request to the final result, Star Feather runs this pipeline internally — here it is, laid out; understand it and troubleshooting gets easy.
 > The module names in brackets show where each step lives (see [Technical Details](#technical-details)): what the pipeline does is here, where the logic lives is in the module name.
 
 ```
@@ -153,11 +153,11 @@ User request (any of three entry points)【main.py orchestration】
         the model echoes one random line from the same pool, e.g. "✨ 牌灵已把答案交到你手上了，祝好运～"
 ```
 
-**All three entries share the same steps ②~⑤**, so draw rules, rate limits, delivery and fallbacks behave identically regardless of entry point; the only differences are the trigger itself and where the closing line comes from — command entries have the plugin send a fixed line directly, the natural-language entry has the model echo it (same copy pool, same style).
+**All three entries share the same steps ②~⑤**, so draw rules, rate limits, delivery and fallbacks behave identically regardless of entry point; the only differences are the trigger itself and where the closing line comes from — command entries have me send a fixed line directly, the natural-language entry has the model echo it (same copy pool, same style).
 
 ## 🎛️ Configuration
 
-Configure in the AstrBot plugin management UI (grouped sections):
+I grouped the options by purpose — configure them in the AstrBot plugin management UI:
 
 ### [AI Interpretation] Model calls, timeout & fallback
 
@@ -228,7 +228,7 @@ Configure in the AstrBot plugin management UI (grouped sections):
 2. Restart AstrBot, the plugin loads automatically
 3. Send `/占卜 your question` in chat to begin
 
-**Dependency**: card rendering needs [Pillow](https://pypi.org/project/pillow/) (usually bundled with AstrBot; otherwise `pip install -r requirements.txt`). Glyph-coverage fallback verification needs [fonttools](https://pypi.org/project/fonttools/), also listed in `requirements.txt`.
+**Dependency**: card rendering needs [Pillow](https://pypi.org/project/pillow/) (usually bundled with AstrBot; otherwise `pip install -r requirements.txt`). Glyph-coverage fallback verification needs [fonttools](https://pypi.org/project/fonttools/), also listed in `requirements.txt` — those two, and nothing more.
 
 ## 🤍 Technical Details
 
@@ -237,9 +237,9 @@ Configure in the AstrBot plugin management UI (grouped sections):
   - Entry orchestration: `main.py` (three entries, routing only)
   - Glue layer: `tarot_core` / `daily` / `gating` / `deliver` / `interpret` / `card_render` (KV, rate limits, delivery, rendering, AI reading — reads, writes and fallback decisions)
   - Pure logic layer: `limiter` / `spreads` / `identity` / `hardening` / `kv_utils` / `dailylines` / `tarot_data` / `prompts` / `fonts` / `config` / `settings` / `log_setup` (zero or near-zero framework dependencies, independently testable — the criterion is "can it be unit-tested standalone", not "where it lives")
-- **Design principles**: ① Storage/render/model failures never block the main flow (kv_utils swallows exceptions, rendering falls back to text, AI falls back to built-in meanings — progressive degradation); ② Deterministic by default — the same user on the same day gets the same fixed card, reading, and sigil; the surprise lives in the AI persona's tone, not in the draw; ③ The reading format protocol (【第N张·位置】 markers) has a single source in prompts — deliver splits and hardening validates with the same regex
+- **Design principles (the three rules I set for myself)**: ① Storage/render/model failures never block the main flow (kv_utils swallows exceptions, rendering falls back to text, AI falls back to built-in meanings — progressive degradation); ② Deterministic by default — the same user on the same day gets the same fixed card, reading, and sigil; the surprise lives in the AI persona's tone, not in the draw; ③ The reading format protocol (【第N张·位置】 markers) has a single source in prompts — deliver splits and hardening validates with the same regex
 - Card database fully embedded in `tarot_data.py`; card art in `assets/` (78 official card faces + official card back `Extra/背景.png`; stored as WebP, loader auto-compatible with .png)
-- `card_render.py` composes the image: the background is a randomly picked card from *this* reading — its face cover-fills the canvas under a deep-navy overlay (same feel as the daily fortune card); unified white-border card style, reversed readings rotate only the card art 180° (frame and info bar stay upright)
+- `card_render.py` composes the image: the background is a randomly picked card from *this* reading — its face cover-fills the canvas under a deep-navy overlay (same feel as the daily fortune card); unified white-border card style, reversed readings rotate only the card art 180° (frame and info bar stay upright) — the part I'm most proud of: a tarot reading deserves to look good
 - Titles & positions use dark navy capsule labels; info bars show orientation (gold/red) + card name + meaning keywords
 - Fonts: bundled Noto Sans SC subset (`fonts/`, SIL OFL 1.1; branded as `StarFeather-*.otf`, covers all fixed card texts; bold uses the separate `StarFeather-Bold` subset) preferred, then system fonts (Windows / macOS / Linux), consistent cross-platform rendering
 - Before rendering, glyph coverage is verified: if the bundled subset lacks characters, it auto-falls back to a system font covering that text — the check ships a static glyph index as a fallback, so it still works without `fonttools` (still listed in requirements as the preferred dynamic checker). Current card texts are fully covered; this guards future rare-character additions
@@ -266,12 +266,12 @@ v0.6.3: AstrBot 4.28 ready — the AI reading now picks its model through the fr
 ## 🌙 Notes
 
 - AI reading follows a **provider chain**: pinned model (`ai.ai_provider`) → current session provider → global default → all loaded; if all fail or none is configured, built-in meanings are used automatically so the reading never stalls
-- Readings are for entertainment only — take them with a grain of salt 🍀
+- Readings are for entertainment only — take them with a grain of salt 🍀 The cards point a direction; the walking is yours — I just lay them out clearly
 
 ---
 
 ## ⭐ Support & Thanks
 
-- Like it? A ⭐ on [GitHub](https://github.com/yuluo-feather/astrbot_plugin_star_feather) keeps the little feather motivated
-- Found a bug or want a feature? [Issues](https://github.com/yuluo-feather/astrbot_plugin_star_feather/issues) and Pull Requests are always welcome — every one gets read
+- Like it? A ⭐ on [GitHub](https://github.com/yuluo-feather/astrbot_plugin_star_feather) keeps me motivated
+- Found a bug or want a feature? [Issues](https://github.com/yuluo-feather/astrbot_plugin_star_feather/issues) and Pull Requests are always welcome — I read every one of them
 - **Thanks**: to 幻星集 (official card art), to the AstrBot framework, and to everyone who filed an issue or left a star — the spirit remembers you
