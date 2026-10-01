@@ -4,6 +4,7 @@
 # 口径分流（别在这里另写检查逻辑）：
 #   - 发布红线（版本四件套一致、市场包体 ≤16MB）写在 tests/test_release_gates.py，
 #     本地 pytest 与 CI 共用一把尺子——YAML 里再抄一套正则是第二处口径，早晚漂移；
+#   - pytest 的参数（测试目录 / 超时 / 标记）收在仓库根 pytest.ini，这里不写第二份；
 #   - 私密昵称扫描不进这里：它是发布体检 preflight 的职责，且本文件自身也在扫描范围内。
 #
 # 兼容性矩阵（为什么是这些格，别照着抄数字）：
@@ -89,8 +90,9 @@ jobs:
         run: python -m compileall -q .
       - name: ruff
         run: python -m ruff check .
+      # 参数都在 pytest.ini：本地同一条命令，尺子只有一把
       - name: pytest
-        run: python -m pytest tests -q --timeout=120
+        run: python -m pytest
 
   contract:
     # AstrBot 契约守卫：我们依赖的框架面（main.py 的导入 ∪ conftest 的桩名单）在真实
@@ -120,7 +122,7 @@ jobs:
       - name: 框架自报版本
         run: python -c "import astrbot; print('astrbot', getattr(astrbot, '__version__', '?'))"
       - name: 契约检查
-        run: python -m pytest tests/test_astrbot_contract.py -q -s --timeout=120
+        run: python -m pytest tests/test_astrbot_contract.py -s
 
   package:
     name: 打包市场 zip
