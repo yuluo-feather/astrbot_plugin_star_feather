@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-  <img src="https://img.shields.io/badge/version-v0.7.0-f8a5c2" alt="v0.7.0"/>
+  <img src="https://img.shields.io/badge/version-v0.7.1-f8a5c2" alt="v0.7.1"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -262,9 +262,10 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 
 ## 📜 Changelog
 
-#### Unreleased
+#### v0.7.1
 
 - Fixed: AI errors no longer swallow a whole reading — when the AI service failed, the whole reading collapsed into one apologetic line and you lost the cards, their meanings and the line with it; now only the two AI-written passages are lost, the reading falls back to the built-in meanings and the spirit's line to the one drawn for that day, and the cards still come through
+- Fixed: a missing card image no longer costs you the reading — the image is checked right before sending and redrawn on the spot if it is gone, so the worst case is a reading without a picture instead of no reading at all
 
 #### v0.7.0
 

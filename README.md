@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-  <img src="https://img.shields.io/badge/version-v0.7.0-f8a5c2" alt="v0.7.0"/>
+  <img src="https://img.shields.io/badge/version-v0.7.1-f8a5c2" alt="v0.7.1"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -251,9 +251,10 @@
 
 ## 📜 更新记录
 
-#### Unreleased
+#### v0.7.1
 
 - 修复：AI 报错不再吞掉整卦——AI 服务出错（超时、限流、接口报错）时，整次占卜会塌成一句「这卦起得有点乱」，牌面、牌义、签文全拿不到；现在丢的只是那两句 AI 文案，解读回退本地牌义、「牌灵的话」回退当日池内签文，牌照常算给你
+- 修复：牌面图不会再让整卦丢掉——图在发出前会先核验一次，不在了就当场补画，最坏只是没有图，解读一定到手
 
 #### v0.7.0
 
