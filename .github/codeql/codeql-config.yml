@@ -1,0 +1,18 @@
+# CodeQL 扫描配置（2026-10-01 立）：只做一件事——按规则精确排除，不动其余查询面。
+#
+# 为什么要这个文件：首扫（PR #9 那轮）开的三条告警里，两条 py/weak-sensitive-data-hashing
+# 判错了用途。规则的判据是「敏感值（变量名像 uid / password 的东西）被弱算法摘要」，
+# 而本仓那两处 md5 是**确定性种子**：同一天同一用户必须永远得到同一张牌、同一条签文
+# （daily.py 的 _daily_pick / dailylines.py 的 pick_signature），跨进程、跨重启都要一样——
+# 它要的是稳定，不是强度。换 sha256 会掀掉映射（当天所有用户的牌与签文当场全变），
+# 那是产品行为变更、得先问人；规则本身也没错，只是判据和这里的用途不是一回事。
+#
+# 排除粒度 = 这一条规则 id：CodeQL 的默认查询套件一条不动，本仓其余代码照扫。
+# 代价写明：将来若真出现安全用途的弱哈希，这条规则在这仓已经不看哈希了——那种情况走人工
+# review，或者届时撤掉这条 filter。
+#
+# 同轮另一条 py/redos（main.py 的帮助判定正则）是**真阳性**，走代码修复、不在此排除：
+# 根因与验收写在 main.py 的注释里，计时红线在 tests/test_judgement_corpus.py。
+query-filters:
+  - exclude:
+      id: py/weak-sensitive-data-hashing

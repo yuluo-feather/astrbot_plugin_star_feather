@@ -8,6 +8,8 @@
 期望值以「用户视角正确」为准（不是以现有代码为准）：语料先定期望，
 实现不符合期望即为 bug，修实现而不是改期望。
 """
+import time
+
 import pytest
 
 from daily import _is_daily_request
@@ -223,3 +225,40 @@ class TestHelpMultilineGuard:
     @pytest.mark.parametrize("q", ["怎么用", "占卜 怎么用", "这个功能怎么玩"])
     def test_single_line_still_help(self, q):
         assert is_help(q), f"单行功能问法应仍判为帮助: {q!r}"
+
+class TestHelpDegenerateInput:
+    """退化输入计时红线（2026-10-01 立）：CodeQL `py/redos`（`main.py:67`）那笔的防回归。
+
+    前缀分支里的「说说」「讲讲」与单字分支重叠时，「说」×n 有 Fib(n) 种切法，尾词不匹配
+    就要遍历整棵回溯树——本机实测（3.12.10）n = 10/16/20/24/28/32 → 0.05/0.6/4/29/224/1799 ms，
+    每加两字翻一倍，40 字起永远别想返回。指数级在这里的表现是「不返回」，所以这条红线量的是
+    「必须在阈值内返回」；真回归了先被 pytest-timeout 掐掉，而不是被断言抓到。
+    修好后每例实测 < 1 ms（4000 字级输入），阈值留三个数量级余量，防 CI 抖动误报。
+    """
+
+    BUDGET_S = 0.5
+
+    @pytest.mark.parametrize("text,expect", [
+        ("说" * 4000 + "帮助", True),        # 命中：前缀要先吃掉一长串「说」
+        ("说" * 4000 + "帮助的事", False),    # 失败尾：旧式爆炸的就是这一支
+        ("说下" * 2000 + "？的事", False),
+        ("说一下" * 1400 + "x", False),
+        ("看看" * 2000 + "x", False),
+        ("查查" * 2000 + "x", False),
+        ("讲" * 2000 + "下" * 2000, False),
+        ("说明" + " " * 8000, True),
+        ("帮助" + "？" * 8000, True),
+    ], ids=[
+        "说×4000+帮助(命中)", "说×4000+帮助的事(失败尾)", "说下×2000+失败",
+        "说一下×1400+失败", "看看×2000+失败", "查查×2000+失败",
+        "讲×2000+下×2000", "说明+空格×8000", "帮助+？×8000",
+    ])
+    def test_degenerate_input_returns_within_budget(self, text, expect):
+        t0 = time.perf_counter()
+        got = is_help(text)
+        cost = time.perf_counter() - t0
+        assert cost < self.BUDGET_S, (
+            f"退化输入耗时 {cost:.3f}s，超上限 {self.BUDGET_S}s（{text[:12]!r}… 长 {len(text)}）"
+            "——判定又回到指数回溯了"
+        )
+        assert got is expect, f"退化输入判定错：期望 {expect}、得到 {got}"

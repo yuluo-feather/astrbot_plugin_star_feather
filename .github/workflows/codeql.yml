@@ -14,6 +14,10 @@
 # 语言只写 python。这个仓还有一份 actions 面可扫（workflow 自身的表达式注入之类），
 # 等 python 这一路站稳再加，一次只开一路。
 #
+# config-file 指到 .github/codeql/codeql-config.yml：那里只放一条按规则 id 的排除
+# （py/weak-sensitive-data-hashing 判错了本仓 md5 的用途），默认查询套件一条不动。
+# 不填这个字段就是「全规则开火」，两条误报会一直挂在 Security 页签上把真阳性淹掉。
+#
 # 这一格不装依赖：CodeQL 只静态抽取，不执行本仓代码，装了反而多一个会红的来源。
 name: CodeQL
 
@@ -41,4 +45,5 @@ jobs:
       - uses: github/codeql-action/init@v4
         with:
           languages: python
+          config-file: ./.github/codeql/codeql-config.yml
       - uses: github/codeql-action/analyze@v4
