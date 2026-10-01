@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-  <img src="https://img.shields.io/badge/version-v0.7.4-f8a5c2" alt="v0.7.4"/>
+  <img src="https://img.shields.io/badge/version-v0.7.5-f8a5c2" alt="v0.7.5"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -250,6 +250,10 @@
 - 纯逻辑单测位于 `tests/`（pytest，按域分文件，用例数随开发变化）：`test_core`（抽牌、渲染门控、解读器集成、三入口编排、每日牌运降级）、`test_settings`（默认值与旧配置迁移）、`test_spreads`（选阵/别名/问题清洗）、`test_hardening`（注入剥除/截断/结构校验）、`test_identity`（用户标识降级链）、`test_gating`（限流闸门）、`test_card_render`（渲染冒烟、图片清理）、`test_fonts`（字体回退/缓存回归）、`test_deliver`（分段与分发）、`test_limiter`、`test_config`（配置读取原语）、`test_dailylines`（每日签文池与确定性挑选）、`test_integrity`（数据完整性域：牌库/签文池/字形覆盖/配置枚举校验）、`test_judgement_corpus`（判定语料回归：帮助/每日牌运边界问法锁定）、`test_kv_utils`（KV 读写降级：存储故障与无记录不折叠）、`test_fault_injection`（故障注入矩阵：存储故障 × 各自消费者的降级契约，含 AI 异常不拆整卦）、`test_stub_signatures`（打桩与真实签名一致性）、`test_docs_consistency`（测试清单与实际文件对账）、`test_release_gates`（发布红线：版本六项一致、市场包体上限、运行时代码全部入库）、`test_config_freshness`（配置新鲜度自证：两入口进门读数行与陈旧实例告警）、`test_astrbot_contract`（AstrBot 契约守卫：我们依赖的框架面在真实 AstrBot 里还活着，没装框架时跳过）；先 `pip install pytest`，再运行 `python -m pytest tests` 即可验证。**测试文件导入约定：一律插件根相对导入（`from daily import ...`），禁用 `data.plugins.astrbot_plugin_star_feather.xxx` 全路径**（那是 AstrBot 运行时包路径，独立跑测试时会收集失败）
 
 ## 📜 更新记录
+
+#### v0.7.5
+
+- 修复：日志统一走 AstrBot 自己的日志，插件不再往 `data/logs/` 里另开一份文件——从前那份自建日志文件（`star_feather.log`）删掉了，排障信息照旧一条不少地进 AstrBot 主日志（控制台、WebUI 日志台，以及开了文件日志时的 `logs/astrbot.log`）
 
 #### v0.7.4
 
