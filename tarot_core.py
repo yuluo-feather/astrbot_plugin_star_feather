@@ -120,7 +120,9 @@ class StarTarot:
         并用信号量限制并发（×2）：单次渲染内存峰值不小，防多人同时占卜时暴涨。
 
         清理在 card_render 的图片产生点（渲染成功后）注册而非发送出口：
-        任何入口、任何路径（AI 成功/兜底/异常中断）都无需关心删除。"""
+        任何入口、任何路径（AI 成功/兜底/异常中断）都无需关心删除。
+        但清理只是防堆积的保险丝——渲染与平台读文件之间隔着两次 AI 调用，
+        窗口没有上界，「图还在不在」由发送前的核验兜底（main._ensure_image）。"""
         if self.send_mode == "text_only":
             return None
         async with self._render_lock:

@@ -32,9 +32,23 @@ _RNG = random.Random()
 
 
 # ---------- 产物生命周期：渲染出的临时图片由本模块统一管理 ----------
-async def _delayed_remove(path: str, delay: int = 30) -> None:
-    """延迟删除牌面图：框架取图发送要几秒，立刻删会发出坏图；
-    等 delay 秒再删，既不耽误发送，也防临时目录无限堆积。"""
+IMAGE_TTL_SECONDS = 600
+"""临时图存活上限（秒）。定位是**防堆积的保险丝**，不是正确性机制。
+
+判据从来不是「渲染后过了几秒」，而是**发送那一刻文件还在不在**——平台是在发送
+那一刻才读文件的（2026-09-29 实机日志里 WebChat 就在那一步 convert_to_base64），
+而渲染发生在两次 AI 调用之前（牌灵的话 + 解读），窗口由 ai_timeout × 候选数 × 2 段
+决定，没有上界：那次一句「牌灵的话」的 AI 请求实测跑了 63 秒，图早就被删掉了，
+平台读到空，整条消息链（图 + 解读 + 牌灵的话）一起被打回（Issue #2）。
+
+所以本常量只管「最坏情况下临时目录里堆多少」——一次占卜一张 2~3MB、600 秒的量级
+在容器里无压力，插件启动时还会整目录清扫；真正的兜底在发送前：main._ensure_image。
+别把它调小去省磁盘，省下的那点空间换不来一次丢消息。
+"""
+
+
+async def _delayed_remove(path: str, delay: int = IMAGE_TTL_SECONDS) -> None:
+    """到点删图（保险丝，见 IMAGE_TTL_SECONDS）：既不耽误发送，也不让临时目录无限堆积。"""
     await asyncio.sleep(delay)
     try:
         os.remove(path)
@@ -42,11 +56,14 @@ async def _delayed_remove(path: str, delay: int = 30) -> None:
         pass  # 已被启动清理/其他路径处理，无需管
 
 
-def _schedule_image_cleanup(img: str, delay: int = 30) -> None:
+def _schedule_image_cleanup(img: str, delay: int = IMAGE_TTL_SECONDS) -> None:
     """图片产生点即绑定清理（而不是绑定发送出口）：无论后续走 AI 成功、
     文字兜底还是异常中断，任务都已在渲染成功后注册完毕；
     不在事件循环（如测试）或进程被杀时，由启动清理兜底。
-    delay 默认 30 秒；今日牌运卡海报按 300 秒（卡片是给人存图转发的）。"""
+
+    delay 统一用 IMAGE_TTL_SECONDS：普通牌面图与今日牌运海报卡曾各写一个
+    （30 / 300 秒），其实是同一件事——内容在发送那一刻就被平台取走了，本地
+    文件之后活多久与用户无关，两个数字只会多一个会过时的点。"""
     if not isinstance(img, str) or not img:
         return
     try:

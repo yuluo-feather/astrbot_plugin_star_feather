@@ -16,11 +16,12 @@ test_kv_utils 管「无记录 vs 存储故障」、test_gating 管 KV 挂掉放�
 零随机：期望值全部由 daily._daily_pick（md5 种子纯函数）现算，不写字面量。
 """
 import asyncio
+import os
 import time
 import types
 
 import pytest
-from stubs import PICK
+from stubs import PICK, FakeContext
 
 import daily as daily_mod
 from dailylines import pick_signature
@@ -358,15 +359,20 @@ def test_poster_render_failure_returns_none(monkeypatch, outcome):
 
 
 def test_poster_render_success_is_scheduled_for_cleanup(monkeypatch):
-    """对照组：成功路径要真的登记清理（否则 300 秒后没人删，图片目录只会涨）。"""
+    """对照组：成功路径要真的登记清理（否则图只会堆在临时目录里没人删）。
+
+    延迟不进调用点：注册时只传路径，时长由 card_render.IMAGE_TTL_SECONDS 统一给
+    （此处断言 fake 收到的 delay 是 None＝调用点没自带数字）——曾出现普通牌面图
+    30 秒、海报 300 秒两个数字维护同一件事。
+    """
     seen = {}
     monkeypatch.setattr(daily_mod, "_render_daily_card_img",
                         lambda card, upright, sig, date_text, save_dir=None: "C:/tmp/x.png")
     monkeypatch.setattr(daily_mod, "_schedule_image_cleanup",
-                        lambda img, delay=30: seen.update(img=img, delay=delay))
+                        lambda img, delay=None: seen.update(img=img, delay=delay))
     got = _run(_fortune(KvSpy()).render_daily_card(["今日牌运"], [PICK], UID))
     assert got == "C:/tmp/x.png"
-    assert seen == {"img": "C:/tmp/x.png", "delay": 300}
+    assert seen == {"img": "C:/tmp/x.png", "delay": None}
 
 
 def test_poster_uses_lock_from_tarot(monkeypatch):
@@ -385,3 +391,170 @@ def test_render_slot_degrades_when_no_lock():
     """桩对象（没有 tarot / 没有锁）退化成不限并发，而不是 AttributeError 崩掉。"""
     with daily_mod._render_slot(types.SimpleNamespace()):
         pass
+
+
+# ================= ⑥ 图片生命周期故障：发送前图没了，不能把整条消息带走 =================
+class TestImageGoneBeforeSend:
+    """Issue #2：牌面图在**发送之前**就没了，平台在发送那一刻读文件读到空，
+    整条消息链（图 + 解读 + 牌灵的话）一起被打回——用户什么都没收到。
+
+    真实故障链（2026-09-29 实机日志）：14:23:57 渲染 → 登记 30 秒清理 →
+    14:24:27 定时器删图 → 牌灵的话那次 AI 请求自己跑了 63 秒 → 14:25:03 发送 →
+    FileNotFoundError。窗口由 ai_timeout × 候选数 × 2 段决定，**没有上界**，
+    所以「删干净」和「发得出去」是两件独立的事，得各管各的。
+
+    注入方式刻意与真实一致：图正常渲染出来，让它在「渲染 → 发送」中间被删掉，
+    再走真 _run_reading → 真 _deliver，只看对外可观测的结果（链里 Image 指的文件
+    此刻到底存不存在、消息还发不发得出去）。非转发模式断言链首那张图——与线上
+    那条 [Image, Plain, Plain, Plain] 的失败链同形。
+    """
+
+    FORMATION = "羽签"
+    POSITIONS = ["你的当下"]
+
+    @staticmethod
+    def _collect(agen):
+        async def run():
+            return [x async for x in agen]
+        return asyncio.run(run())
+
+    @staticmethod
+    def _evt():
+        evt = types.SimpleNamespace()
+        evt.result = None
+        evt.sent = []
+        evt.get_self_id = lambda: "12345"
+
+        def chain_result(chain):
+            evt.result = chain
+            return chain
+        evt.chain_result = chain_result
+
+        async def send(chain):
+            evt.sent.append(chain)
+        evt.send = send
+        return evt
+
+    @staticmethod
+    def _plugin(render, on_spirit=None):
+        """真入口 + 真核心 + 真分发，只把「渲染」和「AI 那两段」换成可控的桩。"""
+        from main import StarFeatherPlugin
+        from tarot_core import StarTarot
+        t = StarTarot(FakeContext(None), None)
+        # 非转发：结果合并成一条链，链首即牌面图。注意 Deliverer 在构造期就把
+        # send_mode 解析成 forward_result 了，改字段得连它一起改，否则断言看的是别的分支
+        t.send_mode = "plain"
+        t.deliverer.forward_result = False
+        t.enable_ai = False  # 走本地牌义兜底，本用例不碰 provider
+        calls = []
+
+        async def fake_render(formation, positions, picks, *a):
+            calls.append(formation)
+            return render()
+
+        t._maybe_render_image = fake_render
+        p = StarFeatherPlugin.__new__(StarFeatherPlugin)
+        p.tarot = t
+        p.daily_card = False
+        p._shuffle_hint = lambda: None
+
+        async def fake_spirit(event, uid, picks, clean, persona_eff):
+            if on_spirit:
+                on_spirit()  # 就夹在渲染与发送之间：真实窗口正是「牌灵的话」那次请求
+            return "牌灵今天懒得开口"
+        p.daily = types.SimpleNamespace(spirit_cached=fake_spirit)
+        return p, calls
+
+    @staticmethod
+    def _images(chain):
+        return [c for c in chain if type(c).__name__ == "Image"]
+
+    def test_image_deleted_mid_window_is_rerendered_before_send(self, tmp_path):
+        """图在 AI 窗口里被删 → 发送前补渲染一张，交出去的是**存在的**文件。"""
+        first = str(tmp_path / "tarot_first.png")
+        fresh = str(tmp_path / "tarot_fresh.png")
+        rendered = []
+
+        def render():
+            path = fresh if rendered else first  # 第一次给 first（稍后被清理），补渲染给 fresh
+            rendered.append(path)
+            open(path, "wb").write(b"PNG")
+            return path
+
+        def kill_the_image():
+            os.remove(first)  # 清理定时器到点，把已被 AI 拖出去的那张删了
+
+        p, calls = self._plugin(render, on_spirit=kill_the_image)
+        evt = self._evt()
+        self._collect(p._run_reading(evt, self.FORMATION, self.POSITIONS, [PICK], "问感情"))
+        assert evt.result, "图补回来了，消息必须照发"
+        imgs = self._images(evt.result)
+        assert len(imgs) == 1
+        assert imgs[0].file == fresh, "交出去的仍是被删掉的旧路径＝平台还是会读到空"
+        assert os.path.exists(imgs[0].file), "发送那一刻文件必须真实存在"
+        assert calls == [self.FORMATION, self.FORMATION], "正好补渲染一次"
+
+    def test_rerender_failure_degrades_to_text_and_still_sends(self, tmp_path):
+        """图没了而且重渲染也失败 → 降级为无图，但解读照发（不能为了张图把结果扣下）。"""
+        path = str(tmp_path / "tarot_only.png")
+        rendered = []
+
+        def render():
+            rendered.append(path)
+            if len(rendered) > 1:
+                return None  # 第二次：渲染资源也没了
+            open(path, "wb").write(b"PNG")
+            return path
+
+        p, calls = self._plugin(render, on_spirit=lambda: os.remove(path))
+        evt = self._evt()
+        self._collect(p._run_reading(evt, self.FORMATION, self.POSITIONS, [PICK], "问感情"))
+        assert evt.result, "无图也必须把解读发出去"
+        assert not self._images(evt.result), "图已不存在，就不该再把 Image 交出去"
+        texts = [getattr(c, "text", "") for c in evt.result]
+        assert any(texts), "无图时补逐牌牌义（既有退路）"
+        assert calls == [self.FORMATION, self.FORMATION]
+
+    def test_image_alive_adds_no_extra_render(self, tmp_path):
+        """对照组：图还在 → 一次都不多渲染（核验不能变成每签多烧一张图）。"""
+        path = str(tmp_path / "tarot_ok.png")
+
+        def render():
+            open(path, "wb").write(b"PNG")
+            return path
+
+        p, calls = self._plugin(render)
+        evt = self._evt()
+        self._collect(p._run_reading(evt, self.FORMATION, self.POSITIONS, [PICK], "问感情"))
+        assert [c.file for c in self._images(evt.result)] == [path]
+        assert calls == [self.FORMATION], "图在就不该重渲染"
+
+    def test_no_image_skips_verification(self):
+        """本来就无图（text_only / 渲染失败）：不核验、不重渲染，消息照发。"""
+        p, calls = self._plugin(lambda: None)
+        evt = self._evt()
+        self._collect(p._run_reading(evt, self.FORMATION, self.POSITIONS, [PICK], "问感情"))
+        assert evt.result
+        assert calls == [self.FORMATION]
+        assert not self._images(evt.result)
+
+    def test_verify_image_returns_as_is_on_healthy_path(self, tmp_path):
+        """核验函数自身的契约：存在→原样返回；空/None→原样返回（不额外渲染）。"""
+        p, calls = self._plugin(lambda: None)
+        path = str(tmp_path / "tarot_v.png")
+        open(path, "wb").write(b"PNG")
+        assert _run(p._ensure_image(path, self.FORMATION, self.POSITIONS, [PICK])) == path
+        assert _run(p._ensure_image(None, self.FORMATION, self.POSITIONS, [PICK])) is None
+        assert _run(p._ensure_image("", self.FORMATION, self.POSITIONS, [PICK])) == ""
+        assert calls == [], "这三种情形都不该触发渲染"
+
+    def test_verify_image_failure_paths_return_none(self, tmp_path):
+        """核验函数：图不在 → 重渲染；重渲染再失败（None / 抛异常）→ 无图，不把异常带给发送侧。"""
+        async def boom(*a):
+            raise RuntimeError("pillow down")
+
+        p, _ = self._plugin(lambda: None)
+        missing = str(tmp_path / "never_there.png")
+        assert _run(p._ensure_image(missing, self.FORMATION, self.POSITIONS, [PICK])) is None
+        p.tarot._maybe_render_image = boom
+        assert _run(p._ensure_image(missing, self.FORMATION, self.POSITIONS, [PICK])) is None
