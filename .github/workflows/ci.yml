@@ -66,8 +66,8 @@ jobs:
             pillow: "11.0.0"
             label: Pillow 11.0.0 下限
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -110,8 +110,8 @@ jobs:
           - label: 上游最新
             spec: "" # 上游最新稳定版：先知道它动了我们哪一面
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: 装插件依赖与真框架
@@ -131,7 +131,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: 读版本号
         id: version
         run: |
@@ -144,7 +144,7 @@ jobs:
           git archive --format=zip --prefix=astrbot_plugin_star_feather-main/ \
             -o "astrbot_plugin_star_feather-${{ steps.version.outputs.value }}.zip" HEAD
           ls -lh astrbot_plugin_star_feather-*.zip
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: astrbot_plugin_star_feather-${{ steps.version.outputs.value }}
           path: astrbot_plugin_star_feather-*.zip
