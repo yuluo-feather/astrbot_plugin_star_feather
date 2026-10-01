@@ -6,6 +6,9 @@ from settings import (
     resolve_send_mode,
 )
 
+# 字段对齐用例要拿 StarTarot 的注解表做对照（配置字段在插件侧的落点）
+from tarot_core import StarTarot
+
 
 class TestResolveSendMode:
     """send_mode：新 key 优先，旧 forward_result / show_image 自动迁移。"""
@@ -69,6 +72,17 @@ class TestAiPersona:
 
 
 class TestTarotSettings:
+    def test_field_table_matches_settings(self):
+        """配置字段三处口径同集合：settings 解析出的 = tarot_core 的注解表 = 实例上真有的。
+
+        插件侧字段靠 tarot_core.__init__ 的 setattr 循环装配，静态分析看不见循环，
+        所以那里另有一份注解表给静态检查用（mypy 格）。两份一旦漂开：轻则静态检查
+        报「没有这个属性」，重则运行期 AttributeError——这条就是拦住它俩的。
+        """
+        fields = set(vars(TarotSettings(None)))
+        assert set(StarTarot.__annotations__) == fields, "tarot_core 的字段注解表与 settings 漂了"
+        assert fields <= set(vars(StarTarot(None, None))), "setattr 循环漏字段：实例上少了属性"
+
     def test_grouped_values(self):
         cfg = {"ai": {"ai_timeout": 7, "enable_ai": False, "question_max_len": 0},
                "output": {"send_mode": "plain", "disclaimer": "x", "daily_fixed": False},

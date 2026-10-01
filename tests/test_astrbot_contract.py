@@ -28,6 +28,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from typing import Any
 
 import pytest
 
@@ -40,7 +41,7 @@ def _imports_from_framework(path: str) -> dict:
 
     星导入（`import *`）没有名字可列，跳过——那份面由 conftest 桩名单兜（见文件头）。
     """
-    want = {}
+    want: dict[str, set[str]] = {}
     with open(path, encoding="utf-8") as f:
         tree = ast.parse(f.read(), filename=path)
     for node in ast.walk(tree):
@@ -58,7 +59,7 @@ def _stubbed_surface(path: str) -> dict:
     建了模块却一个名字没挂（`_mk_module("astrbot.api")`）的也收进来：模块路径本身
     就是我们要求框架提供的面（桩能 import，真框架也得能）。
     """
-    want = {}
+    want: dict[str, set[str]] = {}
     with open(path, encoding="utf-8") as f:
         tree = ast.parse(f.read(), filename=path)
     for node in ast.walk(tree):
@@ -76,7 +77,7 @@ def _stubbed_surface(path: str) -> dict:
 
 def required_surface() -> dict:
     """守全面：插件根所有 .py 的框架导入 ∪ conftest 的桩名单。"""
-    want = {}
+    want: dict[str, set[str]] = {}
     for name in sorted(os.listdir(_PLUGIN_ROOT)):
         if name.endswith(".py"):
             for mod, names in _imports_from_framework(
@@ -153,7 +154,7 @@ def _in_declared_range(version: str, declared: str):
 def probe() -> dict:
     """探针：只在子进程（或手跑）里执行——本进程的 astrbot 是桩，别信。"""
     want = required_surface()
-    report = {"surface_modules": len(want),
+    report: dict[str, Any] = {"surface_modules": len(want),
               "surface_names": sum(len(v) for v in want.values()),
               "declared": declared_range(),
               "checked": 0, "missing": []}

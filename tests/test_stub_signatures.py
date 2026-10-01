@@ -116,7 +116,7 @@ def _resolve_target(target, attr, binds):
 
 def _func_defs(tree) -> dict:
     """本文件里的函数定义：{名字: (ast.arguments, 是否方法)}（同名取第一个）。"""
-    out = {}
+    out: dict = {}
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             out.setdefault(node.name, (node.args, False))
