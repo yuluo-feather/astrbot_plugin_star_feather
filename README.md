@@ -10,7 +10,6 @@
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
   <img src="https://img.shields.io/badge/version-v0.7.0-f8a5c2" alt="v0.7.0"/>
-  <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/actions/workflows/ci.yml"><img src="https://github.com/yuluo-feather/astrbot_plugin_star_feather/actions/workflows/ci.yml/badge.svg" alt="CI"/></a>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
