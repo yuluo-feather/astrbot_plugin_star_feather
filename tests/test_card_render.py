@@ -127,19 +127,31 @@ class TestRenderSmoke:
 
         import fonts
         d = ImageDraw.Draw(Image.new("RGB", (10, 10)))
-        font = fonts._load_font(24, text="测")
+        # 取字不带 text：必中内置子集，字宽因此与平台无关。
+        # 第一版本羽写的是 `_load_font(24, text="测")`，「测」不在内置子集里 ——
+        # 本机于是回退微软雅黑（宽），CI 的 Linux 上无中文字体、落到 load_default（窄），
+        # 同一段 18 字量出 430 与 120 两种宽度，写死的 300px 只在 Windows 上量得够窄。
+        # 教训：字宽随「选了哪颗字体」变，凡是拿宽度断言的用例都得当场实测、不许写死像素。
+        font = fonts._load_font(24)
         text = "别把一时心情当决定，睡一觉再说。"
-        lines = card_render._split_signature_lines(d, text, font, 480)
+        w_full = d.textlength(text, font=font)
+        # 生产实参：_render_daily_card_img 传的是「卡宽 - 200」
+        max_w_card = card_render.DAILY_CARD_W - 200
+        lines = card_render._split_signature_lines(d, text, font, max_w_card)
         assert "".join(lines) == text
-        assert len(lines) == 1  # 短签文（约 18 字）：足够宽度时保持单行（旧卡观感）
-        # 宽度变窄：在逗号处断、标点收尾
-        lines_narrow = card_render._split_signature_lines(d, text, font, 300)
+        assert len(lines) == 1  # 短签文（约 18 字）：卡宽内保持单行（旧卡观感）
+        # 宽度收在「首段宽 … 整句宽」之间：首段放得下、整句放不下 → 必在逗号后断、标点收尾
+        w_seg = d.textlength("别把一时心情当决定，", font=font)
+        lines_narrow = card_render._split_signature_lines(
+            d, text, font, int((w_seg + w_full) / 2))
         assert "".join(lines_narrow) == text
         assert len(lines_narrow) >= 2 and lines_narrow[0].endswith("，")
-        # 单句超宽：逐字回落且不丢字
+        # 单句超宽：逐字回落且不丢字（这句无标点，取半句宽必逼出多行）
         long_sig = "这是一句特别长的牌灵的话用来确认换行不丢字也不截断。"
-        lines2 = card_render._split_signature_lines(d, long_sig, font, 300)
+        lines2 = card_render._split_signature_lines(
+            d, long_sig, font, int(d.textlength(long_sig, font=font) / 2))
         assert "".join(lines2) == long_sig
+        assert len(lines2) >= 2
         # 短签文（18 字内）足够宽松时一行放下（旧卡同款观感）
         lines3 = card_render._split_signature_lines(d, text, font, 1000)
         assert len(lines3) == 1
