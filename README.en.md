@@ -262,6 +262,10 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 
 ## 📜 Changelog
 
+#### Unreleased
+
+- Fixed: a reading that lands right on a reload or shutdown is no longer lost whole — the card image had been drawn and the text written, yet a closing step that did not go through dragged everything down with it; that step now absorbs its own failure and the reading reaches you as usual
+
 #### v0.7.1
 
 - Fixed: AI errors no longer swallow a whole reading — when the AI service failed, the whole reading collapsed into one apologetic line and you lost the cards, their meanings and the line with it; now only the two AI-written passages are lost, the reading falls back to the built-in meanings and the spirit's line to the one drawn for that day, and the cards still come through
