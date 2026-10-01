@@ -1,0 +1,75 @@
+# 星羽塔罗 CI/CD：每次 push / PR 在 GitHub 侧过一遍 lint + 编译 + 测试；
+# main 上再产一个市场可直接用的整包 zip 作为 Actions 产物。
+#
+# 口径分流（别在这里另写检查逻辑）：
+#   - 发布红线（版本四件套一致、市场包体 ≤16MB）写在 tests/test_release_gates.py，
+#     本地 pytest 与 CI 共用一把尺子——YAML 里再抄一套正则是第二处口径，早晚漂移；
+#   - 私密昵称扫描不进这里：它是发布体检 preflight 的职责，且本文件自身也在扫描范围内。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: lint & test (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: 装依赖
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest pytest-timeout ruff
+      - name: 编译检查
+        run: python -m compileall -q .
+      - name: ruff
+        run: python -m ruff check .
+      - name: pytest
+        run: python -m pytest tests -q --timeout=120
+
+  package:
+    name: 打包市场 zip
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: 读版本号
+        id: version
+        run: |
+          echo "value=$(sed -n 's/^version: *//p' metadata.yaml | head -1)" >> "$GITHUB_OUTPUT"
+      # 布局对齐 AstrBot 安装器真正拉的那份：core/repository.py 拼的
+      # https://github.com/<owner>/<name>/archive/refs/heads/<branch>.zip → 顶层目录
+      # astrbot_plugin_star_feather-main/。产物仅供人工下载/留档，不是市场投递物。
+      - name: 打包（只含仓库已跟踪文件，等价市场拉取的 zip）
+        run: |
+          git archive --format=zip --prefix=astrbot_plugin_star_feather-main/ \
+            -o "astrbot_plugin_star_feather-${{ steps.version.outputs.value }}.zip" HEAD
+          ls -lh astrbot_plugin_star_feather-*.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: astrbot_plugin_star_feather-${{ steps.version.outputs.value }}
+          path: astrbot_plugin_star_feather-*.zip
+          retention-days: 30
