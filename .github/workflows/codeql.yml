@@ -1,0 +1,44 @@
+# CodeQL：GitHub 原生的代码扫描。公开仓免费，不点任何第三方授权，代码不出本仓。
+#
+# 跟 ci.yml 的分工，别把两件事混成一件事：
+#   - ci.yml 管「我们自己想到要查的东西」：lint、编译、矩阵、契约、发布红线、打包；
+#   - 这一格管「我们没想到要写的那种缺陷」：查询库是 CodeQL 自己维护的，规则不由我们背，
+#     它追的是数据流——哪个输入能一路走到哪个危险操作，是肉眼看 diff 看不见的那类。
+# 只报不拦：分析结果落 Security 页签，分析本身失败才算红，出了告警不挡合并，处置权在人手上。
+#
+# 触发面是刻意分开的三条：
+#   - pull_request：新代码一进 PR 就能看见它带来的告警，不用等落 main；
+#   - push main：给 main 留一份基线，Security 页签认的是这一份；
+#   - 每周定时错开整点跑一次：CodeQL 的查询库会更新，老代码也会被新规则扫出新东西。
+#
+# 语言只写 python。这个仓还有一份 actions 面可扫（workflow 自身的表达式注入之类），
+# 等 python 这一路站稳再加，一次只开一路。
+#
+# 这一格不装依赖：CodeQL 只静态抽取，不执行本仓代码，装了反而多一个会红的来源。
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 3 * * 1" # 每周一 11:17 北京时间。错开整点：那是 GitHub 最挤的时段
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: 分析 (python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      security-events: write # 把 SARIF 传上 code scanning，缺这条上传会 403
+      actions: read # 官方模板口径，读运行元数据，公仓上给不给都不影响
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: python
+      - uses: github/codeql-action/analyze@v4
