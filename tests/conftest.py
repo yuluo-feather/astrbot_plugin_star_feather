@@ -9,6 +9,7 @@ test_kv_utils（KV 读写降级）/ test_fault_injection（故障注入矩阵：
 test_judgement_corpus（判定语料回归）/
 test_stub_signatures（打桩与真实签名一致性）/ test_docs_consistency（测试清单对账）/
 test_release_gates（发布红线：版本四件套与市场包体）/
+test_config_freshness（配置新鲜度自证：进门读数与陈旧实例告警）/
 test_astrbot_contract（AstrBot 契约守卫：真框架面存活，没有框架时跳过），
 共享桩（FakeProvider / FakeContext / 牌常量）在 stubs.py。
 

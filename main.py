@@ -54,6 +54,45 @@ logger = logging.getLogger(__name__)
 
 VERSION = "0.7.1"
 
+# —— 配置新鲜度自证：那条「工具入口吃旧配置」孤例的止损手段（2026-10-01）——
+#
+# 现象：面板改配置 + 热重载后，命令入口吃新值，而自然语言入口（star_feather_divine）
+# 疑似仍走旧实例。R7~R12 把三条机制（`filter.llm_tool` 的 callable 未随重载重绑 /
+# 绑了但闭包持旧 self / config 与 tarot 对象跨重载被复用）逐条受控验倒，现象此后再没
+# 复现——**代码侧没有靶子可修**。于是把判据从「输出文案里有没有某句话」换成「每次
+# 进门时当场读到的值」，焊在下面这三处：
+#
+#   1. `initialize()` 把「当前代实例」登记到 context 上，并打一行 [cfg] LOAD。
+#      不用模块级全局：热重载会重置模块字典，而旧实例调用的正是旧模块里的那份全局，
+#      两边永远对得上、什么都报不出来。context 跨重载是同一个对象，才当得了这把尺子。
+#   2. 两个入口进门各打一行 [cfg] ENTRY 读数。
+#   3. 进门时若发现自己不是当前代登记的那个实例，直接 warning。
+#
+# 为什么「跑在旧实例上」必然等于「读到旧值」：本插件的配置全在 __init__ 那一刻从
+# settings.TarotSettings 快照到实例与子组件上（见 tarot_core.StarTarot），实例不换代，
+# 快照就不会更新。所以那一行 warning 就是铁证——不必再去翻会被覆盖的
+# platform_message_history（20:06 那次正是栽在这上面）。
+#
+# 日志走本模块 logger（AstrBot 主日志控制台/WebUI 与 astrbot.log），不进
+# star_feather.log（那份只收 AI 解读域的排障底账，见 log_setup 的 docstring）。
+_ACTIVE_INSTANCE_ATTR = "_sf_active_plugin_instance"
+
+# 读数里报哪几个开关：挑「面板上一改、用户侧立刻看得见」的四项——
+# shuffle_lines 判有没有洗牌句、enable_ai 判发不发 AI 请求、ai_timeout 判降级阈值、
+# llm_tool_enabled 判自然语言入口开没开。不塞全量配置：读数要能一眼比对。
+_CFG_FIELD_NAMES = ("shuffle_lines", "enable_ai", "ai_timeout", "llm_tool_enabled")
+
+
+def _cfg_fingerprint(plugin) -> str:
+    """一行配置读数：两个对象 id 取十六进制（够比对，又不至于长得读不下去）+ 四个开关值。
+
+    取字段一律 getattr 兜底：这是诊断行，任何字段缺失都不该让它抛——为一行日志把一次
+    占卜一起带走，比不打这行严重得多。
+    """
+    tarot = getattr(plugin, "tarot", None)
+    fields = " ".join(f"{n}={getattr(tarot, n, '?')!r}" for n in _CFG_FIELD_NAMES)
+    return f"inst={id(plugin):#x} tarot={id(tarot):#x} {fields}"
+
 # 帮助请求判定：整句剥掉祈使词后只剩「帮助 / help / 说明」才算。
 # 旧版用 "帮助" in text，问题正文里带「帮助」（如「帮助我做出决定」）
 # 会误触发帮助页——踩过：占卜长问题里写「帮助我做出更清醒的决定」，
@@ -143,6 +182,27 @@ class StarFeatherPlugin(Star):
 |____/ \__\__,_|_|    |_|  \___|\__,_|\__|_| |_|\___|_|
 星羽塔罗 v{VERSION} · 78张牌已就位，牌灵在等你来问。
 """)
+        # 登记本代实例 + 打一行快照：热重载每来一次，这里就多一行 [cfg] LOAD，
+        # 与入口那行 [cfg] ENTRY 对照就能看出「谁跑在谁身上、读到的是哪一代的配置」。
+        context = getattr(self, "context", None)
+        if context is not None:
+            setattr(context, _ACTIVE_INSTANCE_ATTR, self)
+        logger.info(f"[cfg] LOAD {_cfg_fingerprint(self)}")
+
+    def _note_entry_binding(self, entry: str) -> None:
+        """入口进门自报读数；跑在上一代实例上就当场 warning（见模块顶部那段说明）。
+
+        两件事分开：读数行每次都有（正常运行时它就是「这一刻读到的值」，比输出文案可靠），
+        告警只在真的对不上时打一行——不吵，但对上了就是铁证。
+        """
+        logger.info(f"[cfg] ENTRY {entry} {_cfg_fingerprint(self)}")
+        active = getattr(getattr(self, "context", None), _ACTIVE_INSTANCE_ATTR, None)
+        if active is not None and active is not self:
+            logger.warning(
+                f"[cfg] 陈旧实例接管了本次 {entry}：inst={id(self):#x} "
+                f"当前代={id(active):#x} —— 本次读到的很可能是上一代配置，"
+                f"与上方 [cfg] LOAD 那行对照即可定罪"
+            )
 
     def _shuffle_hint(self) -> str | None:
         """洗牌提示语：output.shuffle_lines 关闭时返回 None，调用方不发。
@@ -185,6 +245,7 @@ class StarFeatherPlugin(Star):
         # 会 set 出一个空 STOP result → RespondStage 收到空消息（Prepare 空日志）、
         # 收口/统计类插件可能把它误判为「空回复」入账（见 changelogs/v0.4.8.md 的命令入口收尾修复）。
         # 这坑踩过了，别再踩。
+        self._note_entry_binding("command")
         event.should_call_llm(True)
         try:
             text_norm = (text or "").strip()
@@ -260,6 +321,7 @@ class StarFeatherPlugin(Star):
         或 None —— 否则 runner 判定无返回值并 DONE，respond 空消息跳过，
         收口钩子不触发、群聊防并发门闩死锁（见 _tool_send）。
         """
+        self._note_entry_binding("tool")
         # 打开开关：运行期判断（装饰器静态注册无法卸载，见 __init__ 注释）
         if not self.tarot.llm_tool_enabled:
             await self._tool_send(event, "星羽塔罗的自然语言占卜未开启～ 试试 /占卜 感情 这样的命令。")

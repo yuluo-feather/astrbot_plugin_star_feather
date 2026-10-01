@@ -1157,8 +1157,11 @@ class TestStartupBanner:
             await p.initialize()
 
         asyncio.run(run())
-        assert len(records) == 1
-        text = records[0]
+        # 横幅之外还有一行配置快照（[cfg] LOAD，见 main.py 顶部「配置新鲜度自证」）：
+        # 这里只守横幅本身，把诊断行滤掉——否则以后每加一行诊断都得回来改这个断言。
+        banner = [m for m in records if not m.startswith("[cfg]")]
+        assert len(banner) == 1
+        text = banner[0]
         # ASCII 关键行（standard 字体 "Star Feather"）
         assert "/ ___|| |_ __ _ _ __  |  ___|__  __ _| |_| |__   ___ _ __" in text
         assert r"|____/ \__\__,_|_|    |_|  \___|\__,_|\__|_| |_|\___|_|" in text
