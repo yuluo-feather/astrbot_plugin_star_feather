@@ -263,6 +263,10 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 
 ## 📜 Changelog
 
+#### Unreleased
+
+- Fixed: AI errors no longer swallow a whole reading — when the AI service failed, the whole reading collapsed into one apologetic line and you lost the cards, their meanings and the line with it; now only the two AI-written passages are lost, the reading falls back to the built-in meanings and the spirit's line to the one drawn for that day, and the cards still come through
+
 #### v0.7.0
 
 - Added: layered meanings for all 78 cards — instead of a string of keywords, an upright reading now gives keywords, what's unfolding and what to do about it, and a reversed reading gives keywords, the state you're in, where the energy sticks and how to turn it around. Richer material for the AI, and more guidance in the built-in fallback. The bundled font subset was extended to cover every rendered string — the new meaning texts plus the spaces and brand characters in titles, card labels, the signature and the watermark — so cards no longer show tofu boxes.
