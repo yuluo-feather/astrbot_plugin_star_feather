@@ -5,6 +5,15 @@
 #   - 发布红线（版本四件套一致、市场包体 ≤16MB）写在 tests/test_release_gates.py，
 #     本地 pytest 与 CI 共用一把尺子——YAML 里再抄一套正则是第二处口径，早晚漂移；
 #   - 私密昵称扫描不进这里：它是发布体检 preflight 的职责，且本文件自身也在扫描范围内。
+#
+# 兼容性矩阵（为什么是这些格，别照着抄数字）：
+#   - 下限侧：requirements.txt 钉着 pillow>=10.0.0，那 10.0.0 就是对用户许的最低承诺，
+#     必须真跑一遍。py3.12 精确钉 10.0.0；py3.13 上 Pillow 的实际下限是 11.0.0
+#     （10.x 没有 cp313 轮子，钉 10.0.0 根本装不上），所以 3.13 格钉 11.0.0；
+#   - 上限侧：不钉，装上游最新 Pillow——新轮子先炸先知道；
+#   - Windows 是 AstrBot 的主场：路径、文件锁、字体目录都跟 libc 不同源，只在 ubuntu
+#     上绿不算绿。下限格只在 ubuntu 上钉：轮子是二进制构建差异，API 面与平台无关；
+#   - 钉完当场复核装到的版本：pip 静默解析成别的版本，这一格就名不副实了。
 name: CI
 
 on:
@@ -22,13 +31,39 @@ permissions:
 
 jobs:
   test:
-    name: lint & test (py${{ matrix.python }})
-    runs-on: ubuntu-latest
+    name: lint & test (${{ matrix.os }} · py${{ matrix.python }} · ${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.12", "3.13"]
+        include:
+          # 上限侧：三个平台/解释器组合都跟着上游最新 Pillow 跑
+          - os: ubuntu-latest
+            python: "3.12"
+            pillow: ""
+            label: 最新 Pillow
+          - os: ubuntu-latest
+            python: "3.13"
+            pillow: ""
+            label: 最新 Pillow
+          - os: windows-latest
+            python: "3.12"
+            pillow: ""
+            label: 最新 Pillow
+          - os: windows-latest
+            python: "3.13"
+            pillow: ""
+            label: 最新 Pillow
+          # 下限侧：声明的底线，精确钉住
+          - os: ubuntu-latest
+            python: "3.12"
+            pillow: "10.0.0"
+            label: Pillow 10.0.0 下限
+          - os: ubuntu-latest
+            python: "3.13"
+            pillow: "11.0.0"
+            label: Pillow 11.0.0 下限
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -41,12 +76,51 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           python -m pip install pytest pytest-timeout ruff
+      - name: 钉 Pillow 到声明下限
+        if: matrix.pillow != ''
+        env:
+          WANT: ${{ matrix.pillow }}
+        run: |
+          python -m pip install "Pillow==${{ matrix.pillow }}"
+          python -c "import os, PIL; want = os.environ['WANT']; assert PIL.__version__ == want, f'装到 {PIL.__version__}，不是 {want}——这一格就名不副实了'"
+      - name: 版本快照（排障用）
+        run: python -c "import sys, PIL; print('py', sys.version.split()[0], '| Pillow', PIL.__version__)"
       - name: 编译检查
         run: python -m compileall -q .
       - name: ruff
         run: python -m ruff check .
       - name: pytest
         run: python -m pytest tests -q --timeout=120
+
+  contract:
+    # AstrBot 契约守卫：我们依赖的框架面（main.py 的导入 ∪ conftest 的桩名单）在真实
+    # 框架里还活着吗。只报不拦——上游挪了面先让我们看见，不挡合并；红了的处置权在人手上。
+    name: AstrBot 契约守卫 (${{ matrix.label }} · 只报不拦)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: 运行版本
+            spec: "==4.28.1" # 运行目录正跑着的那一版
+          - label: 上游最新
+            spec: "" # 上游最新稳定版：先知道它动了我们哪一面
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 装插件依赖与真框架
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest pytest-timeout "astrbot${{ matrix.spec }}"
+      - name: 框架自报版本
+        run: python -c "import astrbot; print('astrbot', getattr(astrbot, '__version__', '?'))"
+      - name: 契约检查
+        run: python -m pytest tests/test_astrbot_contract.py -q -s --timeout=120
 
   package:
     name: 打包市场 zip
