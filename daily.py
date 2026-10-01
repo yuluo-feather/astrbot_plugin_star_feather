@@ -11,20 +11,19 @@
 """
 import asyncio
 import hashlib
-import logging
 import random
 import re
 import time
 from contextlib import AbstractAsyncContextManager, nullcontext
 from datetime import datetime
 
+from astrbot.api import logger
+
 from card_render import _render_daily_card_img, _schedule_image_cleanup
 from dailylines import pick_signature
 from kv_utils import kv_get, kv_put
 from prompts import SPIRIT_PROMPT_V
 from tarot_data import TAROT_CARDS
-
-logger = logging.getLogger(__name__)
 
 # 今日固定牌运判定：只有「明确在问当日运」才走每日固定，分两层——
 # 1) 明确运势词（运势/运气/牌运/日运/daily）直接命中；

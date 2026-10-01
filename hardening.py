@@ -6,13 +6,12 @@ interpret.py 只负责「找模型 → 发请求 → 拿文本」；
 
 说人话：想往牌灵嘴里塞怪东西？先过这一关。
 """
-import logging
 import re
+
+from astrbot.api import logger
 
 from prompts import SECTION_MARK_RE
 from settings import DEFAULT_QUESTION_MAX_LEN
-
-logger = logging.getLogger(__name__)
 
 # AI 解读的问题长度上限：防超长输入（费 token + 扩大 Prompt 注入面），
 # 超长时头尾保号压缩（见 clip_question）；默认值权威在 settings.DEFAULT_QUESTION_MAX_LEN

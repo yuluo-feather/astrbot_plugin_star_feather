@@ -14,9 +14,7 @@ gating 需要前者放行且不计数、后者正常计数，搅在一起会改�
 的降级策略需要区分二者（故障放行不计数 vs 无记录正常计数）。教训：接口缺陷
 往往是断线根因，修接口再接线优于弃模块（详见 modularize 技能 0.6 四查）。
 """
-import logging
-
-logger = logging.getLogger(__name__)
+from astrbot.api import logger
 
 
 async def kv_get(kv, key: str, default=None, what: str = "KV") -> tuple:

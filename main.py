@@ -5,11 +5,11 @@
 - 配置层：settings.py（全部默认值与旧配置迁移）、config.py（读取原语）、identity.py（事件身份标识）
 - 占卜核心：spreads.py（选阵与问题清洗）、tarot_core.py（抽牌与牌义）、tarot_data.py（牌库）、daily.py / dailylines.py（今日固定牌运 / 每日签文池）
 - AI 解读：interpret.py（候选链与超时）、hardening.py（Prompt 防护）、prompts.py（提示词与全部文案）
-- 输出与兜底：deliver.py（发送编排）、card_render.py / fonts.py（渲染与字体）、log_setup.py（运行日志落盘）
+- 输出与兜底：deliver.py（发送编排）、card_render.py / fonts.py（渲染与字体）
 - 限流与存储：gating.py / limiter.py（限流闸门与纯逻辑）、kv_utils.py（KV 读写原语，daily/gating 共用）
 """
-# ruff: noqa: F403, F405  # 星导入是 AstrBot 插件惯例，名字进来自框架，静态分析无从溯源
-import logging
+# ruff: noqa: F403, F405, I001  # 星导入是 AstrBot 插件惯例，名字进来自框架，静态分析无从溯源；
+# I001 一并豁免：框架 logger 必须排在星导入之后重新绑一次（见下方导入处注释），isort 想对调。
 import os
 import random
 import re
@@ -26,7 +26,7 @@ if _plugin_dir not in sys.path:
 # 时，from prompts import ... 直接 ImportError。所以在导入前无条件清掉本插件子模块，
 # 保证每次加载的都是磁盘上的最新代码，不给我留僵尸模块。
 for _sf_mod in ("config", "daily", "dailylines", "gating", "hardening", "identity", "interpret",
-                "kv_utils", "limiter", "log_setup", "prompts", "settings", "spreads",
+                "kv_utils", "limiter", "prompts", "settings", "spreads",
                 "tarot_core", "tarot_data", "card_render", "deliver", "fonts"):
     sys.modules.pop(_sf_mod, None)
 
@@ -35,6 +35,10 @@ for _sf_mod in ("config", "daily", "dailylines", "gating", "hardening", "identit
 from astrbot.api.all import *
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.message_components import Plain
+
+# 框架 logger（astrbot.api 的插件代理）：必须在星导入之后重新绑一次——
+# all.py 里的 logger 是 from astrbot import logger 那位全局 logger，星导入会把它灌进来。
+from astrbot.api import logger
 
 from card_render import cleanup_stale_images
 from daily import DailyFortune, _is_daily_request
@@ -49,8 +53,6 @@ from prompts import (
 )
 from spreads import clean_tool_question, select_formation
 from tarot_core import StarTarot
-
-logger = logging.getLogger(__name__)
 
 VERSION = "0.7.4"
 
@@ -89,8 +91,8 @@ VERSION = "0.7.4"
 # 真要失真，前提是「两份同源副本同时装着」；那时两侧的模块名不同，而 warning 行里
 # 就带着这两个模块名——所以措辞不软化，改成把判别所需的读数补齐（结论仍是结论）。
 #
-# 日志走本模块 logger（AstrBot 主日志控制台/WebUI 与 astrbot.log），不进
-# star_feather.log（那份只收 AI 解读域的排障底账，见 log_setup 的 docstring）。
+# 日志走框架 logger（astrbot.api）：落点是 AstrBot 主日志——控制台、WebUI 日志台，
+# 以及开了文件日志时的 logs/astrbot.log（我们不再自建日志文件）。
 _ACTIVE_INSTANCE_ATTR = "_sf_active_plugin_instance"
 
 # 读数里报哪几个开关：挑「面板上一改、用户侧立刻看得见」的四项——

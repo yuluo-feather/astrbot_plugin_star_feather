@@ -1,23 +1,22 @@
 """AI 解读：候选 Provider 链、超时切换、失败冷却——纯「找模型 → 发请求 → 拿文本」。
 
 输入侧安全（越狱剥除 / 截断）与输出侧结构校验在 hardening.py；
-运行日志落盘在 log_setup.py；提示词与格式协议在 prompts.py；
+提示词与格式协议在 prompts.py；
 本模块只做模型调用本身。
 
 说人话：牌抽好了，怎么让 AI 好好讲话，这里管——但它的嘴要听话，由 hardening 管。
 """
 import asyncio
-import logging
 import time
 
-import hardening
+from astrbot.api import logger
+
 from hardening import (
     clip_question,
     normalize_injection_input,
     strip_injection_fragments,
     validate_interpret_structure,
 )
-from log_setup import setup_logging
 from prompts import (
     SYSTEM_PROMPT_DIVINE,
     build_reading_prompt,
@@ -26,21 +25,6 @@ from prompts import (
     resolve_persona,
 )
 from settings import DEFAULT_AI_PERSONA, DEFAULT_QUESTION_MAX_LEN
-
-logger = logging.getLogger(__name__)
-
-# 运行日志落盘（关键事件：剥除命中/剥空/结构失格/候选链切换/冷却）：
-# 剥除命中由 hardening logger 打出（hardening.strip_injection_fragments），
-# 故连同 hardening logger 一起挂共享文件 handler（同批单 handler，不重复落盘）；
-# 初始化失败只告警，不影响解读主流程。
-# 【为什么传 hardening.logger 对象，而不是 logging.getLogger("hardening")】
-# 按名字取只在 hardening.__name__ 恰好等于短名 "hardening" 时才对得上，而那个前提
-# 当前只靠 main.py 的 sys.path.insert（顶层导入）维持。一旦按 plugin-import-model
-# 的方向改成包路径相对导入，__name__ 变全路径，handler 就装到一个没人写的孤儿
-# logger 上——剥除命中/剥空日志静默消失（不报错，只是再也看不到）。
-# 红线：tests/test_log_setup.py::TestInterpretLoggerBinding
-setup_logging(logger, hardening.logger)
-
 
 # 输出清洗用的引号集：中英引号 + 直角引号 + 单引号。用码点拼出，避开源码里的转义
 # 引号写法（编辑工具会把转义解码成真实字符，这坑踩过）。

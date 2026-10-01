@@ -2,7 +2,7 @@
 
 测试按域分文件：test_core（核心与三入口集成）/ test_settings（配置语义）/
 test_spreads（选阵与清洗）/ test_hardening（Prompt 防护）/ test_identity（身份标识）/
-test_gating（限流闸门）/ test_log_setup（运行日志）/ test_card_render（渲染与清理）/
+test_gating（限流闸门）/ test_card_render（渲染与清理）/
 test_fonts（字体子系统）/ test_deliver（分段与分发）/ test_limiter / test_config /
 test_dailylines（每日签文池与确定性挑选）/ test_integrity（数据完整性域）/
 test_kv_utils（KV 读写降级）/ test_fault_injection（故障注入矩阵：存储故障与降级契约）/
@@ -24,6 +24,7 @@ conftest 只提供最小名字桩：@register / @command / @llm_tool 装饰器�
 
 说人话：没有 AstrBot 的机器上，靠这些桩把戏把插件骗起来跑测试——本羽的牌灵得有个地方练手。
 """
+import logging
 import os
 import sys
 import types
@@ -143,8 +144,12 @@ class _Filter:
     llm_tool = staticmethod(llm_tool)
 
 
+# 框架 logger 桩：真框架里 astrbot.api.logger 是按插件路由的 logger 代理，运行时插件全走它。
+# 这里给一个同形的真 logging.Logger（名字按插件路由后的形态取），caplog 照旧收得到记录。
+_FRAMEWORK_LOGGER = logging.getLogger("astrbot.plugin.astrbot_plugin_star_feather")
+
 _mk_module("astrbot")
-_mk_module("astrbot.api")
+_mk_module("astrbot.api", logger=_FRAMEWORK_LOGGER)
 _mk_module("astrbot.api.all", Context=Context, AstrBotConfig=AstrBotConfig,
            Star=Star, register=register, command=command)
 _mk_module("astrbot.api.event", AstrMessageEvent=AstrMessageEvent,

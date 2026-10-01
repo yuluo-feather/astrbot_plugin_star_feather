@@ -10,19 +10,17 @@
 """
 import asyncio
 import functools
-import logging
 import os
 import random
 import secrets
 import tempfile
 import time
 
+from astrbot.api import logger
 from PIL import Image, ImageDraw
 
 from fonts import _load_font
 from tarot_data import SUIT_CN, meaning_text
-
-logger = logging.getLogger(__name__)
 
 # 背景选牌用模块私有 RNG：不消耗全局随机状态（全局那位留给「谁先谁后无所谓」的调用方，
 # 与 daily._daily_pick 的独立 RNG 同一口径），渲染也因此不扰动全局随机序——

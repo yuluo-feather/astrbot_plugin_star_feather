@@ -7,9 +7,9 @@ AI 解读（interpret.py + hardening.py）与结果分发（deliver.py）也已�
 
 换句话：牌怎么抽、抽到哪张、读什么，都在这；别的事不归它管。
 """
-# ruff: noqa: F403, F405  # 星导入是 AstrBot 插件惯例，名字进来自框架，静态分析无从溯源
+# ruff: noqa: F403, F405, I001  # 星导入是 AstrBot 插件惯例，名字进来自框架，静态分析无从溯源；
+# I001 一并豁免：框架 logger 必须排在星导入之后重新绑一次（见下方导入处注释），isort 想对调。
 import asyncio
-import logging
 import os
 import random
 import sys
@@ -21,14 +21,16 @@ if _plugin_dir not in sys.path:
 
 from astrbot.api.all import *
 
+# 框架 logger（astrbot.api 的插件代理）：必须在星导入之后重新绑一次——
+# all.py 里的 logger 是 from astrbot import logger 那位全局 logger，星导入会把它灌进来。
+from astrbot.api import logger
+
 from card_render import _schedule_image_cleanup, render_cards
 from deliver import Deliverer
 from interpret import AiInterpreter
 from settings import TarotSettings
 from spreads import FORMATIONS
 from tarot_data import TAROT_CARDS, meaning_text
-
-logger = logging.getLogger(__name__)
 
 
 class StarTarot:

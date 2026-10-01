@@ -11,15 +11,13 @@ main.py 只做入口编排：「读写 KV + 生成拦截文案」收敛于此。
 
 说人话：想连刷？牌灵会累的——但牌灵也懂体谅，存储挂了就放行。
 """
+# 本模块不打日志：闸门放行/拒绝的读数由调用点（main 的三入口）负责打，避免同一事件两处留痕。
 import asyncio
-import logging
 import time
 
 from identity import resolve_sender_uid
 from kv_utils import kv_get, kv_put
 from limiter import cooldown_remaining, daily_remaining, daily_touch
-
-logger = logging.getLogger(__name__)
 
 
 class LimitGate:
