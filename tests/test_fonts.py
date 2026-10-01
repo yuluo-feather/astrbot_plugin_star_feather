@@ -57,14 +57,27 @@ class TestFont:
         assert "StarFeather" in (getattr(f, "path", "") or "")
 
     def test_text_select_does_not_pollute_cache(self):
-        # 回归：带生僻字文本的选择（回退系统字体）不得写入缓存，
-        # 否则之后同 size 的常用字渲染会错误沿用系统字体、丢失内置字体
+        """回归：带生僻字文本的选择不得写入缓存——否则之后同 size 的常用字渲染
+        会错误沿用系统字体、丢失内置字体。
+
+        生僻字那一步的落点随环境变（本机有系统中文字体 → 回退成功；容器里没有 →
+        链尾指名报错，见 _font_encodes），但**缓存口径在两种世界里是同一条**：
+        带 text 的选择一律不入 _FONT_CACHE，选不出来也不许留痕。旧写法只写了回退
+        成功那一支，于是 CI 的 ubuntu × py3.12 × Pillow 10.0.0 格上第一行就抛
+        RuntimeError，整条用例红——同一前提的兄弟用例
+        （test_load_font_falls_back_for_missing_glyph）那次已按两种世界写开，
+        这条漏了，这次补齐。
+        """
         fonts._FONT_CACHE.clear()
-        rare = fonts._load_font(20, text="𠀀测试")
-        assert rare is not None
-        # 缓存此时应为空（或未含该 size 键）——关键断言
+        try:
+            rare = fonts._load_font(20, text="𠀀测试")
+        except RuntimeError:
+            rare = None          # 本环境无候选字体接住生僻字：选择失败（合法出口）
+        # 关键断言：这一次带 text 的选择不许进缓存（两种世界共同）
         assert (20, False) not in fonts._FONT_CACHE
-        # 下一次常用字渲染仍应命中内置字体
+        if rare is not None and os.name == "nt":
+            assert "StarFeather" not in (getattr(rare, "path", "") or "")  # 确实回退了
+        # 下一次常用字渲染仍应命中内置字体（不因上一次的选择而改道）
         common = fonts._load_font(20, text="权杖王后正位")
         assert "StarFeather" in (getattr(common, "path", "") or "")
 
