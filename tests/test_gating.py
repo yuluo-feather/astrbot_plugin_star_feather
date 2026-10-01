@@ -49,6 +49,34 @@ class SlowKV:
         self.store[key] = value
 
 
+class MeteredSlowKV(SlowKV):
+    """带 IO 延迟的 KV，顺手量「同时在读写的人数」。
+
+    判的是 gating 的读-判-写窗口有没有被并发闯进来：锁真的罩住整段窗口时，任何
+    时刻只有一个协程在做 KV IO（peak == 1）；锁被摘掉或挪到 KV 读写之外，这里立刻
+    涨到并发数量级。比「放行数没超配额」更贴机制——配额不超也可能出于巧合。
+    """
+
+    def __init__(self, delay=0.002):
+        super().__init__(delay)
+        self.inflight = 0
+        self.peak = 0
+
+    async def _io_pause(self):
+        self.inflight += 1
+        self.peak = max(self.peak, self.inflight)
+        await asyncio.sleep(self.delay)     # 让出点：没锁的话别人正是从这里挤进来
+        self.inflight -= 1
+
+    async def get_kv_data(self, key, default=None):
+        await self._io_pause()
+        return self.store.get(key, default)
+
+    async def put_kv_data(self, key, value):
+        await self._io_pause()
+        self.store[key] = value
+
+
 def _evt(uid="u1", origin="g1"):
     e = types.SimpleNamespace(unified_msg_origin=origin)
     e.get_sender_id = lambda: uid
@@ -158,6 +186,28 @@ class TestConcurrentRace:
 
         outs = asyncio.run(fire())
         assert sum(1 for o in outs if o == 0) == 1
+
+    def test_quota_exact_and_kv_window_serialized(self):
+        """配额并发风暴：放行数恰好等于配额、落库计数同步、读写窗口始终只有一个人。
+
+        只量 gating.py 自己的读-判-写，三条断言钉三件事：
+        1) 不超发（同时放行 30 个请求，配额 5 → 恰好 5，多了就是竞态放行）；
+        2) 不少发（同样恰好 5，少了说明闸门自己把正常请求挡了）；
+        3) 窗口没被闯进来（peak == 1；锁一旦没罩住读写，这里当场爆）。
+        """
+        kv = MeteredSlowKV(delay=0.002)
+        g = _gate(kv, cmd=0, daily=5)
+
+        async def fire():
+            return await asyncio.gather(
+                *[g.check(_evt(uid="u1"), for_command=False) for _ in range(30)])
+
+        outs = asyncio.run(fire())
+        allowed = sum(1 for o in outs if o is None)
+        assert allowed == 5, f"放行数不恰好等于配额: {allowed}/5"
+        assert kv.store["sf_cmd_cnt_u1"]["count"] == 5, \
+            "落库计数与放行数不一致：" + str(kv.store.get("sf_cmd_cnt_u1"))
+        assert kv.peak == 1, f"读-判-写窗口被并发闯入: 同时 {kv.peak} 个人在做 KV IO"
 
     def test_broken_kv_still_passes_with_lock(self):
         """加锁后 KV 故障降级语义不变：读失败静默放行。"""
