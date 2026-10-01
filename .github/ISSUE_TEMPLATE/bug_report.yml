@@ -1,0 +1,88 @@
+name: 报告一个问题
+description: 抽牌、解读、图片、配置哪里不对，用这个
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        麻烦把下面几项填齐。缺日志的报障通常要多来回一轮，填齐了能一次定位。
+
+  - type: input
+    id: plugin-version
+    attributes:
+      label: 插件版本
+      description: AstrBot WebUI 插件管理页面里本插件的版本号，或插件目录 metadata.yaml 里的 version
+      placeholder: 例如 0.7.1
+    validations:
+      required: true
+
+  - type: input
+    id: astrbot-version
+    attributes:
+      label: AstrBot 版本
+      description: WebUI 左下角显示的版本，或控制台启动日志里的那一行
+      placeholder: 例如 4.28.1
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 消息平台
+      options:
+        - QQ
+        - WebChat
+        - 微信
+        - 其他
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: 系统
+      description: AstrBot 跑在什么系统上
+      placeholder: 例如 Windows 11 / Ubuntu 24.04 / Docker
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 怎么触发的
+      description: 从发哪句话开始，到出错为止，能一步步照做就行
+      placeholder: |
+        1. 群里发「抽张牌看看运势」
+        2. 卡片图出来以后...
+        3. 出现下面的报错
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 你期望的结果 / 实际的结果
+      placeholder: |
+        期望：
+        实际：
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志
+      description: 出错时间前后那几十行，带堆栈最好；图片相关的报错请连着上面几行一起贴，别只贴 Traceback 的末行
+      render: text
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: latest
+    attributes:
+      label: 再确认一下
+      options:
+        - label: 已经升级到最新版本，问题仍然存在
+        - label: 日志里没有 API key、账号密码这类内容
+          required: true

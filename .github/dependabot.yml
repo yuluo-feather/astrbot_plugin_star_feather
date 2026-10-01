@@ -1,0 +1,18 @@
+# 只跟 GitHub Actions 的版本，不跟 pip。
+#
+# 为什么跟 Actions：ci.yml 里钉着 actions/checkout、actions/setup-python、
+# actions/upload-artifact 三个 action 的版本，没人管就会一路旧下去——上游发新主版本
+# 时旧的会被弃用，到运行时被摘掉那一刻，CI 是硬停而不是警告。
+# 为什么分组：三个 action 各自开一个 PR 是三次合并噪声，收成一个。
+# 为什么不管 pip：requirements.txt 是开区间（pillow>=10.0.0 / fonttools>=4.0），
+# 没有锁文件，Dependabot 在这里没有可升的对象；真正的上下限由 ci.yml 的矩阵盯。
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    schedule:
+      interval: weekly
