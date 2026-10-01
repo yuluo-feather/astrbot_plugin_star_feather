@@ -1,0 +1,43 @@
+name: 其他问题
+description: 用法不清楚、文档没说清、市场页对不上的地方，用这个
+title: "[Other] "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        抽牌、解读、图片、配置**确实出了错**（有报错、有异常表现）请改用「报告一个问题」那份——那边会问版本与日志，定位快一轮。
+
+  - type: textarea
+    id: what
+    attributes:
+      label: 你想问的 / 想说的
+      placeholder: |
+        例如：群聊里 @ 了机器人却没有反应，是不是还要在 WebUI 里设唤醒词？
+    validations:
+      required: true
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: 已经试过什么（可选）
+      description: 翻过 README 哪一段、动过哪些设置——省一轮来回
+    validations:
+      required: false
+
+  - type: input
+    id: plugin-version
+    attributes:
+      label: 插件版本（可选）
+      description: 只有跟某个版本的行为有关时才需要；填 WebUI 插件管理页里显示的版本号
+      placeholder: 例如 0.7.1
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: 再确认一下
+      options:
+        - label: 已翻过 README 与已有 Issue，没有找到答案
+          required: true

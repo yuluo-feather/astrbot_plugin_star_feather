@@ -1,0 +1,45 @@
+name: 提一个想法
+description: 想要的新功能、新玩法、新牌阵，用这个
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        说清「你想拿它做什么」比说清「该怎么实现」有用得多——实现方式交给我拿主意。
+
+  - type: textarea
+    id: want
+    attributes:
+      label: 你想要什么
+      description: 一句话说清想要的功能或玩法
+      placeholder: 例如：抽到不喜欢的牌时，希望能换一张
+    validations:
+      required: true
+
+  - type: textarea
+    id: scene
+    attributes:
+      label: 什么场景下用
+      description: 你在什么情况下需要它，现在这一步是怎么将就过去的
+      placeholder: |
+        场景：
+        现在的做法：
+    validations:
+      required: true
+
+  - type: textarea
+    id: shape
+    attributes:
+      label: 你想象中的样子（可选）
+      description: 有画面就写——怎么触发、回什么、要不要一个开关
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: 再确认一下
+      options:
+        - label: 已在 Issue 里搜过，没有重复的想法
+          required: true
