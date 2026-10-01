@@ -63,14 +63,28 @@ def _schedule_image_cleanup(img: str, delay: int = IMAGE_TTL_SECONDS) -> None:
 
     delay 统一用 IMAGE_TTL_SECONDS：普通牌面图与今日牌运海报卡曾各写一个
     （30 / 300 秒），其实是同一件事——内容在发送那一刻就被平台取走了，本地
-    文件之后活多久与用户无关，两个数字只会多一个会过时的点。"""
+    文件之后活多久与用户无关，两个数字只会多一个会过时的点。
+
+    契约：本函数永不抛。它只是保险丝，代价必须比它保的东西便宜——登记失败最多
+    留一张临时图（启动清理兜底，见 cleanup_stale_images），而抛出去会顺着调用点
+    一路顶到入口，把整条卦带走（tarot_core._maybe_render_image 的调用点就裸在
+    渲染兜底之外）。"""
     if not isinstance(img, str) or not img:
         return
     try:
         asyncio.get_running_loop()
     except RuntimeError:
         return  # 无事件循环（测试环境）：不创建协程，避免悬空；启动清理兜底
-    asyncio.create_task(_delayed_remove(img, delay))
+    task = _delayed_remove(img, delay)
+    try:
+        asyncio.create_task(task)
+    except Exception as e:
+        # 循环已在收尾（AstrBot 热重载 / 进程退出）：get_running_loop 还答得出话，
+        # create_task 却抛 RuntimeError('cannot schedule new futures after shutdown')。
+        # 先 close 掉刚建出来的协程——不关就是一条「never awaited」告警进日志，
+        # 明明只是少个保险丝，别顺手往日志里丢噪声。
+        task.close()
+        logger.warning(f"牌面图清理登记失败（保险丝失效，图留待启动清理）: {e}")
 
 
 def cleanup_stale_images() -> None:

@@ -5,7 +5,7 @@ test_kv_utils 管「无记录 vs 存储故障」、test_gating 管 KV 挂掉放�
 没人回答过「故障模式 × 消费者」这张网格上还有哪些格子是空的，于是散落的红线
 各自绿着、契约整体可以偷偷歪。本文件把网格铺开：每种故障模式对每个消费者
 （daily.pick_cached / daily.interp_cached / daily.spirit_cached / LimitGate.check /
-海报渲染）只断言对外可观测的行为——返回什么、写不写回、放不放行，一律不碰内部实现。
+海报渲染 / 牌面图的清理登记）只断言对外可观测的行为——返回什么、写不写回、放不放行，一律不碰内部实现。
 
 三条铁律（跨格不变，改代码时先看它们）：
 1. 故障不夺（性能上的）确定性：读坏了，`_daily_pick` 这类纯函数照样出同一张牌；
@@ -16,9 +16,12 @@ test_kv_utils 管「无记录 vs 存储故障」、test_gating 管 KV 挂掉放�
 零随机：期望值全部由 daily._daily_pick（md5 种子纯函数）现算，不写字面量。
 """
 import asyncio
+import gc
 import os
+import sys
 import time
 import types
+import warnings
 
 import pytest
 from stubs import PICK, FakeContext
@@ -558,3 +561,148 @@ class TestImageGoneBeforeSend:
         assert _run(p._ensure_image(missing, self.FORMATION, self.POSITIONS, [PICK])) is None
         p.tarot._maybe_render_image = boom
         assert _run(p._ensure_image(missing, self.FORMATION, self.POSITIONS, [PICK])) is None
+
+# ---------------- 窄口子：保险丝登记失败，不许带走主流程 ----------------
+#
+# 【取「本代」模块别靠 import 顺序】main.py 顶部会把自己的子模块从 sys.modules 里 pop 掉
+# 再导入（重载防御，见该文件注释）。于是「先 import tarot_core，再 import main」会拿到旧一代
+# 副本：运行时对象图里的 class 方法 globals 指向新一代，补丁却打在旧那份上——静默打空、
+# 用例假绿。本羽第一版就栽在这里（三条用例里唯一「过」的那条是假的）。
+# 第一版把这条规矩压在两个 import 语句的先后上，结果 ruff 的 I001 要把 import 按字母重排——
+# 顺序承载语义的写法在 lint 面前本来就是脆的。改法：过一遍 main 换代，之后按名字从
+# sys.modules 取（见 _live_modules），语义变成显式的、与语句顺序无关。
+
+# 复用同形事件桩：就地再写一份只会多一个会过时的点。
+# 名字必须带前缀——第一版顺手写成 _evt，把本文件顶部的模块级 _evt(uid) 覆盖掉了，
+# 于是「对照组：存储正常时配额真的会扣」那条用例拿到别的 uid，KeyError 红。
+# 别名 / 补丁 / 替换这类东西的射程，永远比你以为的宽一格。
+_gone_evt = TestImageGoneBeforeSend._evt
+_gone_collect = TestImageGoneBeforeSend._collect
+
+
+def _live_modules():
+    """返回（StarFeatherPlugin, tarot_core, card_render, daily）——都取「本代」，并自检同代。
+
+    自检不是洁癖：这个前提一旦不成立，补丁会静默落空、用例变成永远绿的假证据，
+    比红更难查（本条窄口子就是被这种假绿骗过一次才回头查出来的）。
+    """
+    from main import StarFeatherPlugin  # 先过一遍入口：它负责把子模块换代
+
+    tarot_core = sys.modules["tarot_core"]  # 再从 sys.modules 按名字取本代：与语句顺序无关
+    card_render = sys.modules["card_render"]
+    daily = sys.modules["daily"]
+
+    fuse = tarot_core._schedule_image_cleanup
+    assert fuse.__globals__ is card_render.__dict__, \
+        "补丁会打空：tarot_core 与 card_render 不是同一代（导入顺序错了）"
+    assert daily._schedule_image_cleanup is fuse, "daily 引的不是同一个函数对象"
+    return StarFeatherPlugin, tarot_core, card_render, daily
+
+
+class _ShuttingDownLoop:
+    """只废掉「排任务」一件事，其余照常转发真 asyncio。
+
+    热重载 / 进程收尾时事件循环正是这样：get_running_loop 还答得出话，
+    create_task 抛 RuntimeError('cannot schedule new futures after shutdown')。
+    """
+
+    def __getattr__(self, name):
+        if name == "create_task":
+            raise RuntimeError("cannot schedule new futures after shutdown")
+        return getattr(asyncio, name)
+
+
+def _loop_shutting_down(monkeypatch, *holders):
+    """把保险丝眼里的事件循环换成收尾态。
+
+    注入点刻意落在保险丝**内部那一步**，而不是替换 `_schedule_image_cleanup` 这个名字：
+    替换名字等于绕过被测的那道兜底，测出来的是空气。holders 传调用点所在的模块。
+    """
+    for mod in holders:
+        fuse = mod._schedule_image_cleanup
+        monkeypatch.setitem(fuse.__globals__, "asyncio", _ShuttingDownLoop())
+
+
+class TestCleanupFuseNeverCarriesTheReading:
+    """2026-10-01 逐点穷举注入查出来的窄口子：牌面图渲染有 try/except + 文字回退，
+    紧跟着的「登记清理」那一行却裸在兜底之外。同一条保险丝，daily 那边被外层 try 整段
+    兜住（登记失败＝海报卡回退），tarot_core 这边登记失败＝整条卦（图 + 解读 + 牌灵的话）
+    一起没：用户只收到提示和报错。
+
+    判据是量级对比：保险丝失效的代价＝临时目录里多一张图（启动清扫兜底），
+    整卦丢掉的代价＝用户这一次占卜没了。前者永远不该换来后者。
+    """
+
+    FORMATION = "羽签"
+    POSITIONS = ["你的当下"]
+
+    def _reading_with_real_fuse(self, StarFeatherPlugin, tarot_core, tmp_path):
+        """真入口 + 真核心 + 真登记清理，只把「渲染」和「AI 两段」换桩。
+
+        不能借 TestImageGoneBeforeSend._plugin：它把 _maybe_render_image 整个换成假的，
+        被测的那一行正好在它里面。
+        """
+        path = str(tmp_path / "fuse_reading.png")
+
+        def fake_render_image(formation, positions, picks):
+            open(path, "wb").write(b"PNG")
+            return path
+
+        t = tarot_core.StarTarot(FakeContext(None), None)
+        t.send_mode = "plain"
+        t.deliverer.forward_result = False
+        t.enable_ai = False          # 走本地牌义兜底，本用例不碰 provider
+        t._render_image = fake_render_image
+
+        p = StarFeatherPlugin.__new__(StarFeatherPlugin)
+        p.tarot = t
+        p.daily_card = False
+        p._shuffle_hint = lambda: None
+
+        async def fake_spirit(event, uid, picks, clean, persona_eff):
+            return "牌灵今天懒得开口"
+        p.daily = types.SimpleNamespace(spirit_cached=fake_spirit)
+        return p, path
+
+    def test_reading_survives_when_fuse_cannot_register(self, monkeypatch, tmp_path):
+        StarFeatherPlugin, tarot_core, _cr, _daily = _live_modules()
+        p, path = self._reading_with_real_fuse(StarFeatherPlugin, tarot_core, tmp_path)
+        _loop_shutting_down(monkeypatch, tarot_core)
+        evt = _gone_evt()
+        _gone_collect(p._run_reading(evt, self.FORMATION, self.POSITIONS, [PICK], "问感情"))
+        assert evt.result, "登记删图失败只是少个保险丝；整条卦不能跟着丢"
+        imgs = [c for c in evt.result if type(c).__name__ == "Image"]
+        assert [i.file for i in imgs] == [path], "该发出去的图照样发"
+        assert any(getattr(c, "text", "") for c in evt.result), "解读/牌义不能缺"
+
+    def test_poster_survives_when_fuse_cannot_register(self, monkeypatch, tmp_path):
+        """同一注入、同一条保险丝，走海报卡：登记失败不该把海报降级成普通牌面图。
+        （daily 那层 try 兜得住，所以旧行为不炸——但白渲染一张海报再丢掉。）"""
+        _Plugin, _tc, _cr, daily = _live_modules()
+        path = str(tmp_path / "fuse_poster.png")
+
+        def fake_poster(card, upright, signature, date_text, save_dir=None):
+            open(path, "wb").write(b"PNG")
+            return path
+
+        monkeypatch.setattr(daily, "_render_daily_card_img", fake_poster)
+        _loop_shutting_down(monkeypatch, daily)
+        got = _run(daily.DailyFortune(KvSpy(), _fake_tarot()).render_daily_card(
+            ["今日牌运"], [PICK], UID))
+        assert got == path
+
+    def test_fuse_swallows_and_leaves_no_dangling_coroutine(self, monkeypatch):
+        """保险丝自己的契约：登记失败既不抛，也不留「never awaited」的告警噪声
+        （create_task 抛之前那个协程已经建出来了，得 close 掉）。"""
+        _Plugin, _tc, card_render, _daily = _live_modules()
+        _loop_shutting_down(monkeypatch, card_render)
+
+        async def call_it():
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                card_render._schedule_image_cleanup("C:/not/exist/tarot_fuse.png")
+                gc.collect()
+            return [str(w.message) for w in caught]
+
+        msgs = _run(call_it())
+        assert not [m for m in msgs if "never awaited" in m], msgs
