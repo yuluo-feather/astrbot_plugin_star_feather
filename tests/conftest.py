@@ -5,7 +5,8 @@ test_spreads（选阵与清洗）/ test_hardening（Prompt 防护）/ test_ident
 test_gating（限流闸门）/ test_log_setup（运行日志）/ test_card_render（渲染与清理）/
 test_fonts（字体子系统）/ test_deliver（分段与分发）/ test_limiter / test_config /
 test_dailylines（每日签文池与确定性挑选）/ test_integrity（数据完整性域）/
-test_kv_utils（KV 读写降级）/ test_judgement_corpus（判定语料回归）/
+test_kv_utils（KV 读写降级）/ test_fault_injection（故障注入矩阵：存储故障与降级契约）/
+test_judgement_corpus（判定语料回归）/
 test_stub_signatures（打桩与真实签名一致性）/ test_docs_consistency（测试清单对账）/
 test_release_gates（发布红线：版本四件套与市场包体），
 共享桩（FakeProvider / FakeContext / 牌常量）在 stubs.py。

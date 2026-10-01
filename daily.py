@@ -182,6 +182,25 @@ def _render_slot(fortune) -> object:
     return getattr(getattr(fortune, "tarot", None), "_render_lock", None) or nullcontext()
 
 
+async def _ai_output(awaitable, what: str, who: str = "") -> str | None:
+    """装饰性 AI 产出的统一故障边界：异常 → None（走各自的降级路）。
+
+    解释器层已经吞掉了 provider 级失败（超时/报错一律返回 None，冷却换下一候选），
+    能漏到这里的异常都是解释器**自身的 bug**——prompt 拼接、人设模板、数据形态漂移。
+    但那不是占卜该陪葬的理由：「牌灵的话」坏了退池内句、AI 解读坏了退本地牌义，
+    用户照样拿到一整卦；不拦的话异常一路穿到 main 的兜底分支，整卦变成
+    「这卦起得有点乱……换个时候再来问」——一处装饰性产出的 bug 直接吞掉一次占卜。
+
+    who 是降级日志的身份（uid），排查时看得清是谁触发的；日志口径与 kv_utils 一致。
+    红线：tests/test_fault_injection.py::TestAiFaultBoundary
+    """
+    try:
+        return await awaitable
+    except Exception as e:
+        logger.warning(f"{what}生成异常（{who or '无标识'}），走降级: {e}")
+        return None
+
+
 class DailyFortune:
     """今日固定牌运的缓存与判定：给入口层提供「当天固定牌 + 当天解读」。
 
@@ -278,9 +297,11 @@ class DailyFortune:
                 slots = data.get("interps")
                 if isinstance(slots, dict) and slots.get(topic):
                     return slots[topic]
-        interp = await self.tarot._ai_interpret(
-            event, formation, positions, picks, clean or "（今日牌运）",
-            persona_eff=persona_eff)
+        interp = await _ai_output(
+            self.tarot._ai_interpret(
+                event, formation, positions, picks, clean or "（今日牌运）",
+                persona_eff=persona_eff),
+            "AI 解读", uid)
         if ok:
             async with self._kv_lock:
                 # 重读再合并：本主题生成期间别的主题可能已写回，拿旧 data 写回会把它覆盖掉
@@ -359,9 +380,11 @@ class DailyFortune:
         # 它非空、会整段拼进 prompt（build_spirit_line_prompt 的 topic_part 只判空串）。
         # 有意为之——本缓存的命中键不含 topic，同牌组当天本就该是同一句，
         # 传原话只会让这个定型值随用户措辞漂移。
-        line = await self.tarot.interpreter.spirit_line(
-            event, [(p["card"], p["upright"]) for p in picks],
-            _norm_topic(clean), persona_eff)
+        line = await _ai_output(
+            self.tarot.interpreter.spirit_line(
+                event, [(p["card"], p["upright"]) for p in picks],
+                _norm_topic(clean), persona_eff),
+            "牌灵的话", uid)
         if not line:
             return fallback  # AI 失败：池内当日句；不写缓存，下次再试 AI
         await kv_put(self.kv_store, key, {"v": SPIRIT_PROMPT_V, "date": today,
