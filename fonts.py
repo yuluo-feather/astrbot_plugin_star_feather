@@ -4,7 +4,8 @@
 都是「字体」这一个关注点；card_render 只消费 _load_font 的结果。
 
 优先级：内置主字体（Noto Sans SC 子集，品牌化命名 StarFeather-*）>
-系统字体 > 默认（可能缺中文字形）。粗体使用独立的 StarFeather-Bold 子集。
+系统字体 > 默认（可能缺中文字形；编码不了的默认字体直接报错，不往下传，
+见 _font_encodes）。粗体使用独立的 StarFeather-Bold 子集。
 （想写得好看，先过字体这一关——本羽的排面不能是豆腐块。）
 """
 import functools
@@ -95,6 +96,27 @@ def _font_covers(font, text: str) -> bool:
     return all(ord(c) in cmap for c in text if ord(c) not in _NON_GLYPH_CODES)
 
 
+def _font_encodes(font, text: str) -> bool:
+    """这份字体量得了这段文本吗——量不了，就是画不了。
+
+    Pillow 的默认字体是候补链的终点，但它在 11.0.0 之前是**位图字体**：
+    只认 latin-1，遇上中文连长度都算不出来（getlength 抛 UnicodeEncodeError），
+    而这个错会从绘图途中冒出来——那时牌已经画了一半。
+
+    【实测口径，2026-10-01：load_default() 的版本分界】
+      Pillow 10.0.0 → ImageFont（位图，getlength('灵感火花') 抛 UnicodeEncodeError）
+      Pillow 11.0.0 → FreeTypeFont（不抛，静默返回宽度；中文落成豆腐块）
+    所以这一判只看「能不能测」，不认版本号：能测就照旧放行（≥11 的豆腐是环境
+    缺字体的既成事实，本函数管不着），测不了就在链尾明说——上限层本就有
+    纯文本牌面这条退路，甩一个编解码错上去反而让人不知道发生了什么。
+    """
+    try:
+        font.getlength(text)
+    except (UnicodeEncodeError, ValueError):
+        return False
+    return True
+
+
 @functools.cache
 def _load_static_cmap(path: str) -> set | None:
     """打包的预先导出的 cmap 清单（fonts/charsets.json），fontTools 不可用时的兜底。
@@ -127,6 +149,11 @@ def _load_font(size: int, bold: bool = False, text: str = None):
     卡片会把 msyh 永久缓存，之后所有同 size 渲染都错失内置字体。
     （说白了：带字的按次算账，不带字的才许进缓存——别嫌本羽抠门。）
 
+    终点口径：候选链走完仍只剩 Pillow 默认字体时，若它连这段文本都编码不了
+    （11.0.0 之前 load_default() 是位图字体，只认 latin-1），当场抛 RuntimeError
+    指名原因。上层 tarot_core 有「回退纯文本牌面」这条退路，而编解码错是从
+    ImageDraw 内部甩出来的——读日志的人只看到 latin-1，不知道牌面为什么没了。
+
     【实测口径，2026-09-10 探针：别再提给带 text 路径加二级缓存】
     Pillow 自带 face 缓存——ImageFont.truetype 同字体连续加载仅 0.081ms，所以
     带 text 的调用即便 _FONT_CACHE 为空，再次也只要 0.265ms（走链 ≠ 重新解析字体），
@@ -144,7 +171,8 @@ def _load_font(size: int, bold: bool = False, text: str = None):
     """
     key = (size, bold)
     font = _FONT_CACHE.get(key)
-    if font is not None and (text is None or _font_covers(font, text)):
+    if font is not None and (text is None
+                             or (_font_covers(font, text) and _font_encodes(font, text))):
         return font
     # 缓存里那颗若因当前文本缺字被否，就不必在候选链里再试它一遍
     # （候选链第一项正是它，会白加载一次、白判一次缺字）
@@ -161,6 +189,13 @@ def _load_font(size: int, bold: bool = False, text: str = None):
                 _FONT_CACHE[key] = font
             return font
     font = ImageFont.load_default()
+    if text is not None and not _font_encodes(font, text):
+        raise RuntimeError(
+            "没有能渲染这段文本的字体：内置子集缺字，系统候选链也没命中"
+            "（常见于没装中文字体的 Linux 容器），而 Pillow 的默认字体编码不了中文"
+            "（11.0.0 之前 load_default() 是只认 latin-1 的位图字体）——"
+            "这一步交不出牌面图，请按 card_render 的口径回退纯文本牌面"
+        )
     if text is None:
         _FONT_CACHE[key] = font
     return font

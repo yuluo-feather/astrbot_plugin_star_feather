@@ -80,7 +80,7 @@ class TestRenderSmoke:
         picks = [
             {"card": _mk("major", "13", "死神", "Death", "结束新生", "停滞不前"), "upright": True},
             {"card": _mk("cups", "2", "圣杯二", "Two of Cups", "两情相悦", "关系失衡"), "upright": False},
-            {"card": _mk("wands", "1", "权杖一", "Ace of Wands", "灵感勃发", "阻碍重重"), "upright": True},
+            {"card": _mk("wands", "1", "权杖一", "Ace of Wands", "灵感火花", "阻碍重重"), "upright": True},
         ]
         path = card_render.render_cards(positions, picks, "羽时三刻", save_dir=str(tmp_path))
         assert os.path.isfile(path)

@@ -2,6 +2,7 @@
 ——想写得好看，先过字体这一关。"""
 import os
 
+import pytest
 from PIL import ImageFont
 
 import fonts
@@ -18,10 +19,38 @@ class TestFont:
 
     def test_load_font_falls_back_for_missing_glyph(self):
         # 缺字文本应回退到能覆盖的系统字体（Windows 开发机必有微软雅黑）
-        f = fonts._load_font(20, text="𠀀测试")
+        try:
+            f = fonts._load_font(20, text="𠀀测试")
+        except RuntimeError as e:
+            # 无中文字体的机器（CI 的 ubuntu runner）：候选链全灭，只剩默认字体，
+            # 而它编码不了中文——此时必须指名报错（见 _font_encodes），
+            # 而不是把 latin-1 的 UnicodeEncodeError 甩到绘图途中
+            assert "默认字体" in str(e)
+            return
         assert f is not None
         if os.name == "nt":
             assert "StarFeather" not in (getattr(f, "path", "") or "")
+
+    def test_unencodable_default_font_is_refused(self, monkeypatch):
+        """候补链只剩「编码不了」的默认字体时，要指名报错，不能把字体交出去。
+
+        2026-10-01 下限格实测（CI ubuntu × py3.12 × Pillow 10.0.0）：位图默认字体
+        在 textlength 上抛 latin-1 UnicodeEncodeError，错是从绘图途中冒出来的，
+        调用方只看到一句编解码错、不知道牌面为什么没出。这里用同行为的假默认字体
+        版本无关地钉住出口：内置子集缺字 + 本机无系统中文字体 = 明确的 RuntimeError。
+        """
+        class _BitmapDefault:
+            path = None
+
+            @staticmethod
+            def getlength(text):
+                raise UnicodeEncodeError("latin-1", text, 0, 1, "ordinal not in range(256)")
+
+        monkeypatch.setattr(fonts, "_font_candidates", lambda bold: ())
+        monkeypatch.setattr(fonts.ImageFont, "load_default", _BitmapDefault)
+        fonts._FONT_CACHE.clear()
+        with pytest.raises(RuntimeError, match="默认字体"):
+            fonts._load_font(22, text="灵感火花")
 
     def test_load_font_keeps_builtin_when_covered(self):
         f = fonts._load_font(20, text="权杖王后正位")
