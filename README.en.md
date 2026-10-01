@@ -265,6 +265,7 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 #### Unreleased
 
 - Fixed: a reading that lands right on a reload or shutdown is no longer lost whole — the card image had been drawn and the text written, yet a closing step that did not go through dragged everything down with it; that step now absorbs its own failure and the reading reaches you as usual
+- Fixed: text starting with a long run of 「说说说说…」 no longer holds up the reply — it used to leave your message unanswered for a long time (the longer the run, the worse); such text is now handled like any other message
 
 #### v0.7.1
 
