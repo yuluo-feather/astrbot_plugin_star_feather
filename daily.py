@@ -329,6 +329,9 @@ class DailyFortune:
                 # 写坏）会直接进 dict(...) 抛 ValueError/TypeError，而上抛前那次写回
                 # 整段跳过 → 坏值永不被覆盖，该用户解读缓存**永久失效**（每次问都重生成）。
                 # 红线：tests/test_core.py::TestDailyPoisonedCacheValue
+                # （2026-10-02 复核：这链不是逐层防御——三选一最终都归 dict、彼此没有
+                #   降级差异；它做的是把「fresh 可用 / 退回旧 data / 都不可用」三条路
+                #   显式摆出来。写成一行三元等价，但读不出降级路径。写法不动。）
                 if isinstance(fresh, dict):
                     data = dict(fresh)
                 elif isinstance(data, dict):

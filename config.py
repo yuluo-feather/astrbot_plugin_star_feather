@@ -12,6 +12,12 @@ def _cfg_get(config, group: str, key: str, default):
     """分组配置读取：优先 group.key（新 schema），回退扁平 key（旧配置兼容）。
 
     config 为 None 时回默认；两路都未命中（含值为 None）时回 default，绝不返回 None。
+
+    两处 try 形状上冗余（同一个 config 对象、同一个 .get，第一次抛第二次同样抛），
+    但刻意保留分开写：分组读取与扁平读取是两条各自容错的路径，合并成一个 try 会把
+    「分组读取内部抛错」变成「扁平读取根本不执行」。而 isinstance 已把 grp 锁在 dict 上、
+    grp.get 实际不抛，故合不合并行为等价、零收益，不值得为此重验一遍配置读取。
+    （2026-10-02 复核：本条已核、非 bug，按追注处理，代码不动。）
     """
     try:
         grp = config.get(group)

@@ -411,6 +411,42 @@ class TestAiProvider:
         assert p1.calls == 1
 
 
+class _BrokenProviderContext:
+    """取 provider 的三个接口全挂：候选链应照旧降级为空，但每处失败都要留痕。"""
+
+    async def get_using_provider_async(self, umo=None):
+        raise RuntimeError("会话配置坏了")
+
+    def get_all_providers(self):
+        raise RuntimeError("枚举坏了")
+
+
+class TestProviderCandidateSilentFailure:
+    """候选来源故障必须留痕（2026-10-02 复核⑦）：接口不抛是纪律，静默失败不是。
+
+    反向对照：健康 context 上不许出现这类告警——否则红线就成了「只要跑就红」。
+    """
+
+    def test_each_source_failure_keeps_a_trace(self, caplog):
+        from interpret import AiInterpreter
+        interp = AiInterpreter(_BrokenProviderContext(), True, 5, 60, "")
+        with caplog.at_level(logging.WARNING):
+            out = asyncio.run(interp._provider_candidates("umo"))
+        assert out == []  # 行为不变：候选为空，调用方照旧回退本地牌义
+        msgs = [r.getMessage() for r in caplog.records]
+        for tag in ("会话模型", "全局默认", "全部已加载"):
+            assert any(tag in m for m in msgs), f"{tag} 来源故障没留痕"
+
+    def test_healthy_context_stays_silent(self, caplog):
+        from interpret import AiInterpreter
+        p = FakeProvider("p1")
+        interp = AiInterpreter(FakeContext(p, [p]), True, 5, 60, "")
+        with caplog.at_level(logging.WARNING):
+            out = asyncio.run(interp._provider_candidates("umo"))
+        assert out == [p]
+        assert not [r for r in caplog.records if "候选来源" in r.getMessage()]
+
+
 # ---------- 今日固定牌运 ----------
 class TestDailyRequest:
     def test_hit_fortune_words(self):

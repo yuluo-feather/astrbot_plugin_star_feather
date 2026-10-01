@@ -114,7 +114,11 @@ class StarTarot:
         return "\n".join(lines)
 
     def _render_image(self, formation: str, positions: list[str], picks: list[dict]) -> str | None:
-        # 返回值必须是非空字符串（文件路径或 base64），否则视为失败回退文字版
+        # 返回值必须是非空字符串（文件路径或 base64），否则视为失败回退文字版。
+        # 这层不是防「自己写的函数不守契约」，而是跨模块契约闸：render_cards 在
+        # card_render.py，海报路径（daily.render_daily_card）也直接调它，是渲染出口；
+        # 将来它换实现（None / 空串 / bytes），在此挡下比让坏值流到发送侧便宜。
+        # （2026-10-02 复核：当前恒真，按追注处理，写法不动。）
         try:
             path = render_cards(positions, picks, formation)
         except Exception as e:

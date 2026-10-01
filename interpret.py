@@ -125,19 +125,22 @@ class AiInterpreter:
             except Exception:
                 pass
 
+        # 三个候选来源相互独立，各自吞各自的异常；但吞掉必须留痕——接口本身不抛是
+        # 候选链的纪律，静默失败却会让「用户看到回退本地牌义、日志里一片安静」
+        # 无从归因（2026-10-02 补）。
         try:
             _add(await self.context.get_using_provider_async(umo))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"候选来源[会话模型]取用失败，本签该来源缺席: {e}")
         try:
             _add(await self.context.get_using_provider_async())
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"候选来源[全局默认]取用失败，本签该来源缺席: {e}")
         try:
             for provider in self.context.get_all_providers():
                 _add(provider)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"候选来源[全部已加载]枚举失败，本签该来源缺席: {e}")
         return out
 
     async def spirit_line(self, event, cards: list, topic: str,
