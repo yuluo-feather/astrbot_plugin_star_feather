@@ -52,7 +52,7 @@ from tarot_core import StarTarot
 
 logger = logging.getLogger(__name__)
 
-VERSION = "0.7.1"
+VERSION = "0.7.2"
 
 # —— 配置新鲜度自证：那条「工具入口吃旧配置」孤例的止损手段（2026-10-01）——
 #

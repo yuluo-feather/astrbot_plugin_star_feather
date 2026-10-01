@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-  <img src="https://img.shields.io/badge/version-v0.7.1-f8a5c2" alt="v0.7.1"/>
+  <img src="https://img.shields.io/badge/version-v0.7.2-f8a5c2" alt="v0.7.2"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -261,6 +261,11 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 - Pure-logic unit tests in `tests/` (pytest, organized by module; case count grows with development): `test_core` (draw, render gating, interpreter integration, three-entry orchestration, daily fallbacks), `test_settings` (defaults & legacy migration), `test_spreads` (selection / alias / question cleaning), `test_hardening` (injection stripping / clipping / structure validation), `test_identity` (user-id fallback chain), `test_gating` (rate-limit gate), `test_log_setup` (log path candidates & idempotent install), `test_card_render` (render smoke, image cleanup), `test_fonts` (font fallback/cache regression), `test_deliver` (splitting & delivery), `test_limiter`, `test_config` (config primitives), `test_dailylines` (daily line pool & deterministic pick), `test_integrity` (data integrity domain: card pool / daily line pool / glyph coverage / config schema), `test_judgement_corpus` (judgement-corpus regression: help / daily-reading boundary phrasings locked), `test_kv_utils` (KV read/write fallbacks: store failure vs no record), `test_fault_injection` (fault-injection matrix: store failures vs each consumer's degradation contract, incl. AI exceptions never killing a reading), `test_stub_signatures` (monkeypatch stub vs real signature), `test_docs_consistency` (test list vs actual files), `test_release_gates` (release red lines: the six version carriers agree, market package stays within its size limit, runtime modules are all tracked), `test_config_freshness` (config freshness self-witness: per-entry reading lines and stale-instance warnings), `test_astrbot_contract` (AstrBot contract guard: the framework surface we rely on is still alive; skipped when the framework is not installed); `pip install pytest` first, then run `python -m pytest tests`. **Test import convention: always use plugin-root relative imports (`from daily import ...`), never `data.plugins.astrbot_plugin_star_feather.xxx` full paths** — that's the AstrBot runtime package path and breaks test collection when run standalone
 
 ## 📜 Changelog
+
+#### v0.7.2
+
+- Fixed: a reading that lands right on a plugin reload or shutdown is no longer lost whole — at that moment the card image had been drawn and the text written, yet the whole reading could fail to arrive; that closing step now absorbs its own failure and the reading comes through
+- Fixed: text starting with a long run of 「说说说说…」 no longer holds up the reply — it used to leave the message unanswered for a long time, getting worse the longer the run went, with a few dozen characters enough to stall it; such text is now handled like any other message
 
 #### v0.7.1
 
