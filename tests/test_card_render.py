@@ -174,6 +174,20 @@ class TestTempCleanup:
         card_render._schedule_image_cleanup("C:/not/exist/tarot_x.png")
         card_render._schedule_image_cleanup(None)
 
+    def test_ttl_is_one_number_and_it_is_a_fuse(self):
+        """保险丝时长只有一份，且不许回落到「牌灵的话」都能跑过的量级。
+
+        2026-09-29 实测：一句「牌灵的话」的 AI 请求自己跑了 63 秒——旧默认 30 秒
+        正好在那个窗口里把图删了，平台读到空，整条消息链被打回（Issue #2）。
+        正确性不靠定时器（发送前核验在 main._ensure_image），但把这里调回 30 秒
+        只会让「图提前消失」重新回到日常路径，所以钉个下界；同时断言两个函数的
+        默认值与常量同源：不许有人就地写回一个 30 / 300。
+        """
+        import inspect
+        assert card_render.IMAGE_TTL_SECONDS >= 120, "短于实测故障窗口（63 秒）的量级"
+        for fn in (card_render._delayed_remove, card_render._schedule_image_cleanup):
+            assert inspect.signature(fn).parameters["delay"].default == card_render.IMAGE_TTL_SECONDS
+
     def test_stale_cleanup_only_tarot(self, tmp_path, monkeypatch):
         save_dir = tmp_path / "star_feather"
         save_dir.mkdir()

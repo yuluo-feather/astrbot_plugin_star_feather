@@ -40,7 +40,7 @@ class TestPickSignature:
 
 class TestDailyCardOrchestration:
     """今日牌运卡编排（DailyFortune.render_daily_card）：渲染失败回退 None（不拦主流程）、
-    成功返回路径并注册 300s 清理（卡片是给人存图转发的，别 30 秒就删）。
+    成功返回路径并登记清理（时长由 card_render 的统一保险丝给，调用点不自带数字）。
     用真类（__new__ 免构造）调用：方法缺失立即红，防止桩比真实现先进的错位。"""
 
     @staticmethod
@@ -67,7 +67,7 @@ class TestDailyCardOrchestration:
             open(p, "wb").write(b"PNG")
             return p
 
-        def fake_cleanup(img, delay=30):
+        def fake_cleanup(img, delay=None):
             calls.append((img, delay))
 
         monkeypatch.setattr(daily, "_render_daily_card_img", fake_render)
@@ -75,7 +75,8 @@ class TestDailyCardOrchestration:
         picks = [{"card": TAROT_CARDS[0], "upright": True}]
         out = asyncio.run(self._fortune().render_daily_card(["今日牌运"], picks, "u1"))
         assert out.endswith(".png")
-        assert calls and calls[0][1] == 300
+        # delay 为 None＝调用点没自带时长（曾硬写 300 秒），统一走 IMAGE_TTL_SECONDS
+        assert calls and calls[0] == (out, None)
 
 
 class TestDailyCardRenderSlot:

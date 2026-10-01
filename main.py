@@ -324,6 +324,41 @@ class StarFeatherPlugin(Star):
         positions, picks = self.tarot._draw(formation)
         return False, daily_uid, formation, positions, picks
 
+    async def _ensure_image(self, img: str | None, formation: str,
+                            positions: list[str], picks: list[dict]) -> str | None:
+        """发送前核验牌面图还在不在：不在就重渲染一次，渲染不出来就降级为无图。
+
+        为什么非要有这一道：渲染发生在两次 AI 调用之前（牌灵的话 + 解读），而平台
+        是在**发送那一刻**才读文件的，中间的窗口由 ai_timeout × 候选数 × 2 段决定、
+        没有上界——2026-09-29 实机里一句「牌灵的话」的 AI 请求跑了 63 秒，图早被清理
+        定时器删掉，平台读到空，整条消息链（图 + 解读 + 牌灵的话）一起被打回
+        （判据与来龙去脉见 card_render.IMAGE_TTL_SECONDS 与 Issue #2）。
+
+        所以清理定时器只当保险丝，真正的判据落在发送前这一刻：距离平台读取只剩
+        毫秒级，不看任何定时数字。重渲染走 _maybe_render_image（自带清理登记）；
+        海报卡被删时回退普通牌面图——与「海报渲染失败」同一条既有退路；再失败就
+        无图，调用方既有的「无图补逐牌牌义」分支会接住，主流程照样走完。
+        """
+        if not isinstance(img, str) or not img:
+            return img  # 本就无图（text_only / 渲染失败）：无需核验，别白跑一次渲染
+        try:
+            if os.path.exists(img):
+                return img
+        except OSError:
+            return img  # 路径本身问不出来（权限/长度等）：交给发送侧，别在这里改语义
+        logger.warning(f"牌面图在发送前已不存在（多半是 AI 耗时超过清理保险丝）：{img}")
+        try:
+            new_img = await self.tarot._maybe_render_image(formation, positions, picks)
+        except Exception as e:
+            # 渲染器自己吞异常（tarot_core._render_image），这里是第二道：补渲染跑在
+            # 原有正常路径之外，再炸一次就等于把整条消息也带走——Issue #2 的教训正是
+            # 「别让图片的问题变成结果发不出去」
+            logger.warning(f"重渲染牌面图异常，本签降级为无图: {e}")
+            return None
+        if not new_img:
+            logger.warning("重渲染仍失败，本签降级为无图（解读附带逐牌牌义）")
+        return new_img
+
     async def _run_reading(self, event: AstrMessageEvent, formation: str, positions: list[str],
                            picks: list[dict], question: str, is_daily: bool = False,
                            daily_uid: str = "", fail_note: str = "",
@@ -381,6 +416,9 @@ class StarFeatherPlugin(Star):
         if sig_text:
             # 牌灵的话随 preface 进结果：AI 全失败回退牌义时，牌灵的话一句不丢
             preface = f"{preface}\n{sig_text}" if preface else sig_text
+        # 发送前核验牌面图：渲染早于上面两次 AI 调用，平台却是在发送那一刻才读文件，
+        # 中间窗口没有上界——图若已被清理保险丝删掉，就在这里补一张（Issue #2）
+        img = await self._ensure_image(img, formation, positions, picks)
         epilogue_text = random.choice(RESULT_EPILOGUE) if epilogue else ""
         async for r in self.tarot._deliver(event, interp, img, formation, positions, picks,
                                            fail_note=fail_note, preface=preface):

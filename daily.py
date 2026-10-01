@@ -219,11 +219,12 @@ class DailyFortune:
         self._kv_lock = asyncio.Lock()
 
     async def render_daily_card(self, topics: list[str], picks: list[dict], uid: str) -> str | None:
-        """今日牌运卡海报编排：签文（确定性函数）+ 日期文本 + 线程池渲染 + 300s 清理。
+        """今日牌运卡海报编排：签文（确定性函数）+ 日期文本 + 线程池渲染 + 登记清理。
 
         渲染失败一律返回 None——调用方回退普通牌面图，不拦占卜主流程；
-        清理期 300 秒而非常规 30 秒：卡片是给人存图转发的，别转个身就没了。
-        topics 保留接口（当前海报标题固定「星羽塔罗·今日牌运」，供日志与后续扩展）。
+        清理走 card_render 的统一保险丝（曾单列 300 秒「别转个身就没了」，
+        其实内容在发送那一刻就被平台取走了，本地文件活多久与用户无关——见
+        IMAGE_TTL_SECONDS）。topics 保留接口（标题固定「星羽塔罗·今日牌运」）。
         """
         try:
             card = picks[0]["card"]
@@ -236,7 +237,7 @@ class DailyFortune:
                                               date_text)
             if not img or not isinstance(img, str) or not img.strip():
                 return None
-            _schedule_image_cleanup(img, delay=300)
+            _schedule_image_cleanup(img)
             return img
         except Exception as e:
             logger.warning(f"今日牌运卡渲染失败，回退普通牌面图: {e}")
