@@ -9,6 +9,12 @@
 - 当前代、以及「还没登记过」两种情形都只报读数、不告警；上一代进门必须 warning，
   行里带两个 id，能直接与 [cfg] LOAD 那行对照定罪；
 - 字段残缺、没有 context 时读数行不许抛——为一行诊断把整次占卜带走更亏；
+- 诊断层永不抛，且坏掉也只许降级：登记、LOAD 读数、进门自检三处各有一条保险丝。
+  挡的是求值那一步（指纹 f-string 在 logger 之前算完，logging 的 handleError 够不着；
+  三参 getattr 的 default 只吞 AttributeError）——降级也要留一行读数，「进门必留一行」
+  不许落空，否则排查的人会以为压根没进门；
+- 登记写不进 context（__slots__ / frozen 之类）只许降级：读数行照打、initialize 不抛
+  ——抛出去不止丢一行日志，框架会判「插件加载失败」把整个插件摘掉；
 - 两个入口各有一条接线守卫：把进门那行调用删掉，哨兵就名存实亡。
 """
 import asyncio
@@ -36,6 +42,19 @@ def _plugin(tarot=None):
     p.tarot = _tarot() if tarot is None else tarot
     p.context = types.SimpleNamespace()
     return p
+
+
+class _FrozenContext:
+    """带 __slots__ 的 context 替身：往上写新属性必抛 AttributeError，正对那条 try。"""
+
+    __slots__ = ()
+
+
+class _HostileContext:
+    """读属性就抛非 AttributeError 的 context：三参 getattr 的 default 只吞 AttributeError，"""
+
+    def __getattr__(self, name):
+        raise RuntimeError(f"context 拒绝读取 {name}")
 
 
 def _text(caplog):
@@ -86,6 +105,37 @@ class TestLoadRegistration:
             asyncio.run(p.initialize())
         assert "[cfg] LOAD" in _text(caplog)
 
+    def test_unwritable_context_degrades_instead_of_raising(self, caplog):
+        """context 写不进去时只许降级：initialize 不许抛，读数行照打。
+
+        抛出去不止丢一行日志——框架那层把 initialize 的异常判成「插件加载失败」并
+        摘掉全部 handler，一次占卜都发不出去；而这一句本身只是登记。判据落在
+        「不抛 + [cfg] LOAD 照打 + 登记失败留一行 warning」三样上。
+        """
+        p = _plugin()
+        p.context = _FrozenContext()
+        with caplog.at_level(logging.INFO):
+            asyncio.run(p.initialize())
+        assert "[cfg] LOAD" in _text(caplog)
+        assert any("登记失败" in w for w in _warnings(caplog))
+
+    def test_load_readout_failure_degrades_instead_of_raising(self, caplog, monkeypatch):
+        """读数行自己算不出来也只许降级：initialize 不许抛，且要留一行「诊断坏了」。
+
+        指纹求值在 logger 之前，logging 的 handleError 兜不到这一步；它抛出去跟登记失败
+        是同一个后果——框架判「插件加载失败」。降级行是给排查人的：不能让人以为没加载过。
+        """
+        import main as main_mod
+
+        def boom(_plugin):
+            raise RuntimeError("指纹算不出来")
+
+        monkeypatch.setattr(main_mod, "_cfg_fingerprint", boom)
+        p = _plugin()
+        with caplog.at_level(logging.INFO):
+            asyncio.run(p.initialize())
+        assert any("读数行不可用" in w for w in _warnings(caplog))
+
 
 class TestEntryBinding:
     """进门那一行：正常只报读数，跑在上一代实例上才 warning。"""
@@ -122,6 +172,19 @@ class TestEntryBinding:
         with caplog.at_level(logging.INFO):
             p._note_entry_binding("tool")
         assert "[cfg] ENTRY tool" in _text(caplog)
+
+    def test_hostile_context_degrades_instead_of_raising(self, caplog):
+        """context 读不动时也只许降级——这一句裸放在两个入口的 try 之前。
+
+        抛出去不是丢一行日志，是把那一次占卜/那条命令带走（divine_tool 与 _command_entry
+        都在自己的 try 之前调它）。降级行同时保住「进门必留一行」这句承诺。
+        """
+        p = _plugin()
+        p.context = _HostileContext()
+        with caplog.at_level(logging.INFO):
+            p._note_entry_binding("tool")
+        assert "[cfg] ENTRY tool" in _text(caplog)      # 异常发生在读数行之后，那行照打
+        assert any("自检失败" in w for w in _warnings(caplog))
 
 
 class TestEntriesAreWired:

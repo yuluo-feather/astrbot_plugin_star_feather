@@ -67,11 +67,27 @@ VERSION = "0.7.2"
 #      两边永远对得上、什么都报不出来。context 跨重载是同一个对象，才当得了这把尺子。
 #   2. 两个入口进门各打一行 [cfg] ENTRY 读数。
 #   3. 进门时若发现自己不是当前代登记的那个实例，直接 warning。
+#   4. 登记那句裹了 try：它是这里唯一写到外部对象的地方，而 initialize() 一抛就被
+#      框架判「加载失败」并摘干净（见 initialize 里那段注释）——诊断可以失效，
+#      插件加载不能失败。本行读数（LOAD）与进门那两行（ENTRY）也吃同一条保险丝：
+#      它们要么在 initialize 里、要么在两条入口的 try 之前，抛一次就带走一次加载
+#      或一次占卜——判据只有一条，不许只保一半。
 #
 # 为什么「跑在旧实例上」必然等于「读到旧值」：本插件的配置全在 __init__ 那一刻从
 # settings.TarotSettings 快照到实例与子组件上（见 tarot_core.StarTarot），实例不换代，
 # 快照就不会更新。所以那一行 warning 就是铁证——不必再去翻会被覆盖的
 # platform_message_history（20:06 那次正是栽在这上面）。
+#
+# 这句 warning 凭什么敢把话定死：它直接观测到的只有「入口 self ≠ 登记 active」，
+# 另两种解释都被框架结构排除（2026-10-01 按 star_manager 源码核对）：
+#   (a)「有实例但没登记过」——实例化（star_manager.py:1227）与 initialize（:1421）
+#      在同一个 try 里，中间任何异常都走 except 并被 _cleanup_plugin_state 摘掉本插件
+#      全部 handler，半成品实例接不到任何 entry；且 initialize 全仓只此一个调用点，
+#      没有「只换 config 不换实例」的分支（那种路径下实例没变，也没人会误报）。
+#   (b)「那是另一个插件实例」——Context 是进程级单例（core_lifecycle 只建一次
+#      PluginManager），登记键又是本插件专属，同进程内同一插件只有一个活实例。
+# 真要失真，前提是「两份同源副本同时装着」；那时两侧的模块名不同，而 warning 行里
+# 就带着这两个模块名——所以措辞不软化，改成把判别所需的读数补齐（结论仍是结论）。
 #
 # 日志走本模块 logger（AstrBot 主日志控制台/WebUI 与 astrbot.log），不进
 # star_feather.log（那份只收 AI 解读域的排障底账，见 log_setup 的 docstring）。
@@ -184,25 +200,49 @@ class StarFeatherPlugin(Star):
 """)
         # 登记本代实例 + 打一行快照：热重载每来一次，这里就多一行 [cfg] LOAD，
         # 与入口那行 [cfg] ENTRY 对照就能看出「谁跑在谁身上、读到的是哪一代的配置」。
+        # 这一句是整套诊断里唯一写到外部对象的地方，而它跑在 initialize() 里：框架
+        # 那边 initialize 一抛就判「插件加载失败」并 _cleanup_plugin_state 摘掉全部
+        # handler（star_manager 插件加载流程那个大 try），代价是一次占卜都发不出去。
+        # 所以登记的代价必须比它保的东西便宜——哪天 Context 不许写（__slots__ /
+        # dataclass(frozen=True) / pydantic 模型）就让它静默退化：登记为空 ⇒ 入口读到
+        # active is None ⇒ 只报读数、不告警，机制空转而已。诊断失效可以，插件加载
+        # 失败不行（同 card_render._schedule_image_cleanup 那句「契约：本函数永不抛」）。
+        # 下面那行读数裹的是同一条保险丝：它跟登记同在 initialize 里，抛出去的后果一模一样。
         context = getattr(self, "context", None)
         if context is not None:
-            setattr(context, _ACTIVE_INSTANCE_ATTR, self)
-        logger.info(f"[cfg] LOAD {_cfg_fingerprint(self)}")
+            try:
+                setattr(context, _ACTIVE_INSTANCE_ATTR, self)
+            except Exception as e:
+                logger.warning(f"[cfg] 实例登记失败（新鲜度自证失效）: {e}")
+        try:
+            logger.info(f"[cfg] LOAD {_cfg_fingerprint(self)}")
+        except Exception as e:
+            logger.warning(f"[cfg] LOAD 读数行不可用（诊断失效，不影响加载）: {e}")
 
     def _note_entry_binding(self, entry: str) -> None:
         """入口进门自报读数；跑在上一代实例上就当场 warning（见模块顶部那段说明）。
 
         两件事分开：读数行每次都有（正常运行时它就是「这一刻读到的值」，比输出文案可靠），
         告警只在真的对不上时打一行——不吵，但对上了就是铁证。
+
+        契约：本函数永不抛——严格说挡的是 Exception：CancelledError 与 KeyboardInterrupt
+        属 BaseException，该穿就穿（诊断没资格吃取消）。它跑在每一次进门的路上，而两个入口
+        都把它裸放在自己的 try 之前——这里抛一次就带走那一次占卜。保险丝真正挡的是
+        求值那一步：指纹 f-string 在 logger 之前就算完了，logging 自带的 handleError
+        够不着；三参 getattr 的 default 也只吞 AttributeError。真出事就打一条降级读数行
+        ——「进门必留一行」不许落空，否则排查的人会以为压根没进门，那是最坏的一种误导。
         """
-        logger.info(f"[cfg] ENTRY {entry} {_cfg_fingerprint(self)}")
-        active = getattr(getattr(self, "context", None), _ACTIVE_INSTANCE_ATTR, None)
-        if active is not None and active is not self:
-            logger.warning(
-                f"[cfg] 陈旧实例接管了本次 {entry}：inst={id(self):#x} "
-                f"当前代={id(active):#x} —— 本次读到的很可能是上一代配置，"
-                f"与上方 [cfg] LOAD 那行对照即可定罪"
-            )
+        try:
+            logger.info(f"[cfg] ENTRY {entry} {_cfg_fingerprint(self)}")
+            active = getattr(getattr(self, "context", None), _ACTIVE_INSTANCE_ATTR, None)
+            if active is not None and active is not self:
+                logger.warning(
+                    f"[cfg] 陈旧实例接管了本次 {entry}：inst={id(self):#x} [{type(self).__module__}] "
+                    f"当前代={id(active):#x} [{type(active).__module__}] —— 本次读到的很可能是上一代配置，"
+                    f"与上方 [cfg] LOAD 那行对照即可定罪（两侧模块名不同 ⇒ 两份副本，非两代实例）"
+                )
+        except Exception as e:
+            logger.warning(f"[cfg] ENTRY {entry} 自检失败（诊断失效，不影响本次）: {e}")
 
     def _shuffle_hint(self) -> str | None:
         """洗牌提示语：output.shuffle_lines 关闭时返回 None，调用方不发。
