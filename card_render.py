@@ -30,6 +30,11 @@ logger = logging.getLogger(__name__)
 # 不用 secrets：这里要的是「每次不同」而非「不可预测」，私有 Random 语义更贴。
 _RNG = random.Random()
 
+# 缩放重采样口径：用 Resampling 枚举（9.1 起），不用模块级别名 Image.LANCZOS——
+# 别名在 Pillow 12 的类型标注里已经不在（运行期还在，纯静态报错），枚举写法在
+# 本仓库声明的 Pillow 底线 10.0.0 上就有，走它省得每次升级被静态检查咬一口。
+_RESAMPLE = Image.Resampling.LANCZOS
+
 
 # ---------- 产物生命周期：渲染出的临时图片由本模块统一管理 ----------
 IMAGE_TTL_SECONDS = 600
@@ -56,7 +61,7 @@ async def _delayed_remove(path: str, delay: int = IMAGE_TTL_SECONDS) -> None:
         pass  # 已被启动清理/其他路径处理，无需管
 
 
-def _schedule_image_cleanup(img: str, delay: int = IMAGE_TTL_SECONDS) -> None:
+def _schedule_image_cleanup(img: str | None, delay: int = IMAGE_TTL_SECONDS) -> None:
     """图片产生点即绑定清理（而不是绑定发送出口）：无论后续走 AI 成功、
     文字兜底还是异常中断，任务都已在渲染成功后注册完毕；
     不在事件循环（如测试）或进程被杀时，由启动清理兜底。
@@ -68,7 +73,12 @@ def _schedule_image_cleanup(img: str, delay: int = IMAGE_TTL_SECONDS) -> None:
     契约：本函数永不抛。它只是保险丝，代价必须比它保的东西便宜——登记失败最多
     留一张临时图（启动清理兜底，见 cleanup_stale_images），而抛出去会顺着调用点
     一路顶到入口，把整条卦带走（tarot_core._maybe_render_image 的调用点就裸在
-    渲染兜底之外）。"""
+    渲染兜底之外）。
+
+    入参允许 None / 空串并原地返回：渲染失败的返回值就是 None（tarot_core._render_image），
+    调用点不必自己先判一遍——判在这儿，一个判据、一个地方。签名不写窄，才敢让
+    None 一路传进来。
+    """
     if not isinstance(img, str) or not img:
         return
     try:
@@ -222,7 +232,7 @@ def _background_cached(suit: str, num: str, cn: str, w: int, h: int) -> Image.Im
     src = src.crop((0, band_top, src.width, band_top + band))
     scale = max(w / src.width, h / src.height)
     bw, bh = int(src.width * scale) + 1, int(src.height * scale) + 1
-    bg = src.resize((bw, bh), Image.LANCZOS)
+    bg = src.resize((bw, bh), _RESAMPLE)
     left, top = (bw - w) // 2, (bh - h) // 2
     canvas = bg.crop((left, top, left + w, top + h)).convert("RGBA")
     overlay = Image.new("RGBA", (w, h), (28, 34, 56, 178))  # 深藏青遮罩：花纹隐约、文字可读
@@ -251,11 +261,11 @@ def _load_card_image(path: str, upright: bool):
     结果按 (路径, 正逆) 缓存（LRU 8，约 6MB）：这一步是高清素材解码 + LANCZOS 缩放，
     实测本机 50~80ms/张（随负载浮动）——同一张牌再次出现（连续占卜、同群多签）时直接命中。
     返回的图是缓存本体，调用方只许 paste（不得就地改画）。"""
-    img = Image.open(path)
+    img: Image.Image = Image.open(path)
     scale = min(INNER_W / img.width, INNER_H / img.height)
     tw = max(1, int(img.width * scale))
     th = max(1, int(img.height * scale))
-    img = img.resize((tw, th), Image.LANCZOS)
+    img = img.resize((tw, th), _RESAMPLE)
     if img.mode != "RGBA":
         img = img.convert("RGBA")
     if not upright:

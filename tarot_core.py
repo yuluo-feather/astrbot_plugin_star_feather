@@ -32,6 +32,26 @@ logger = logging.getLogger(__name__)
 
 
 class StarTarot:
+    # 配置字段表：运行期由 __init__ 的 setattr 循环从 TarotSettings 复制过来（见下），
+    # 这里把同一批字段给静态分析一份——纯注解，不产生任何运行期属性。
+    # 「注解集合 == TarotSettings 解析出的字段集合」由 tests/test_settings.py 守着，少一个就红。
+    enable_ai: bool
+    segment_size: int
+    send_mode: str
+    shuffle_lines: bool
+    disclaimer: str
+    daily_fixed: bool
+    daily_card: bool
+    ai_timeout: int
+    ai_cooldown: int
+    llm_tool_enabled: bool
+    llm_tool_cooldown: int
+    cmd_rate_limit: int
+    daily_count_limit: int
+    ai_provider_id: str
+    ai_max_len: int
+    ai_persona: str
+
     def __init__(self, context: Context, config: AstrBotConfig = None):
         self.context = context
         # 配置解析收敛在 settings.TarotSettings：默认值、旧配置迁移都在那一层

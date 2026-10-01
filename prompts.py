@@ -79,9 +79,12 @@ PERSONA_PROFILES = {
 }
 
 
-def resolve_persona(persona: str) -> str | None:
+def resolve_persona(persona: str | None) -> str | None:
     """把配置值解析成实际人格：off / 空 / 未知 → None（中立，不注入人设）；
     random → 从人格池随机抽一个；池内人格原样返回。
+
+    入参收 None：配置里该键可以缺（settings 已把它放宽成 str | None），
+    这里再用 `persona or ""` 去空——签名跟着放宽，省得每个调用点先判一遍。
 
     None 即「无牌灵人设」：解读保持 SYSTEM_PROMPT_DIVINE 的中立语气。
     随机在调用时发生（每次占卜随机人设），配置本身不动。
@@ -94,8 +97,12 @@ def resolve_persona(persona: str) -> str | None:
     return p if p in PERSONA_PROFILES else None
 
 
-def build_system_prompt(persona: str) -> str:
+def build_system_prompt(persona: str | None) -> str:
     """按配置拼装 AI 解读系统提示：中立底稿 + 人设段（off 时就是底稿原样）。
+
+    persona 两吃：配置原值（off / random / 人格名）或已解析结果（None=中立）。
+    解析是幂等的（resolve_persona(None) 还是 None），所以两种喂法都成立——
+    interpret 传的是解析过一次的 eff，别再在这里解析第二次。
 
     调用方契约：一次占卜只调一次本函数（interpret 候选链循环外）——
     这样 random 对同一签是固定人格；若在循环内调用就会中途变脸，勿改。

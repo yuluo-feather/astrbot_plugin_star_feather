@@ -16,8 +16,12 @@ from PIL import ImageFont
 
 _FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
 
-_FONT_CACHE = {}   # (size, bold) -> ImageFont（仅不带 text 的选择可入缓存）
-_FONT_CMAP = {}    # path -> set(ord) | None（无法解析时：内置保守回退、系统字体放行）
+_FONT_CACHE: dict[tuple[int, bool], ImageFont.ImageFont | ImageFont.FreeTypeFont] = {}
+# ↑ 值类型写 union：(size, bold) -> 字体对象（仅不带 text 的选择可入缓存）。
+#   本机 Pillow 12.3 的存根里 FreeTypeFont 与 ImageFont.ImageFont 是并列两支
+#   （truetype → FreeTypeFont，load_default → 两者之一），只写 ImageFont 那两支都算不兼容。
+#   两支都写，两边都对；哪天存根改成继承关系，union 自动收拢成父类，不用回来改。
+_FONT_CMAP: dict[str, set[int] | None] = {}    # path -> set(ord) | None（无法解析时：内置保守回退、系统字体放行）
 _NON_GLYPH_CODES = frozenset({0x0A, 0x0D})   # 换行不是字形：绘制前已被分行拆掉
 
 
@@ -135,7 +139,7 @@ def _load_static_cmap(path: str) -> set | None:
         return None
 
 
-def _load_font(size: int, bold: bool = False, text: str = None):
+def _load_font(size: int, bold: bool = False, text: str | None = None):
     """加载中文字体，优先级：内置字体(fonts/) > 系统字体 > 默认(可能缺中文字形)。
 
     内置字体为 Noto Sans SC 子集（品牌化命名 StarFeather-*.otf，覆盖牌面文案），

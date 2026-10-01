@@ -15,7 +15,7 @@ import logging
 import random
 import re
 import time
-from contextlib import nullcontext
+from contextlib import AbstractAsyncContextManager, nullcontext
 from datetime import datetime
 
 from card_render import _render_daily_card_img, _schedule_image_cleanup
@@ -171,13 +171,14 @@ def _norm_topic(clean: str) -> str:
     return raw
 
 
-def _render_slot(fortune) -> object:
+def _render_slot(fortune) -> AbstractAsyncContextManager[None]:
     """渲染并发位：与核心 _render_image 共用同一把渲染锁（防多人同时占卜时内存暴涨）。
 
     海报卡与普通牌面图同是 Pillow 全尺寸合成（高清素材 + cover 放大），正是那把信号量
     要拦的负载——绕开它等于把最重的一条路径漏在锁外。
     运行时取而非构造期装配：桩对象（__new__ / SimpleNamespace 装配，没有 tarot、更没有
     锁）退化成不限并发，而不是让渲染路径 AttributeError 崩掉。
+    返回值是「异步上下文管理器」：信号量或 nullcontext 都吃得住 async with。
     """
     return getattr(getattr(fortune, "tarot", None), "_render_lock", None) or nullcontext()
 

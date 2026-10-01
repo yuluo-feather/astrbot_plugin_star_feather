@@ -30,7 +30,7 @@ def _cfg_get(config, group: str, key: str, default):
     return default
 
 
-def _cfg_int(config, group: str, key: str, default: int, floor: int = None) -> int:
+def _cfg_int(config, group: str, key: str, default: int, floor: int | None = None) -> int:
     """int 配置读取：非数字回 default；floor 给定时强制下限（如超时下限 5 秒）。
 
     数字读取目前只有 int 一种形态（float 配置无需求），不做泛型抽象——

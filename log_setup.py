@@ -63,7 +63,7 @@ def setup_logging(*loggers: logging.Logger) -> bool:
             fh = TimedRotatingFileHandler(resolve_log_path(), when="midnight",
                                           backupCount=7, encoding="utf-8")
             fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] [%(name)s] %(message)s"))
-            fh._sf_log_handler = True
+            setattr(fh, _HANDLER_FLAG, True)   # 认领标记：与上方 getattr(_HANDLER_FLAG) 同一把尺子
         for lg in targets:
             lg.addHandler(fh)
             lg.setLevel(logging.INFO)
