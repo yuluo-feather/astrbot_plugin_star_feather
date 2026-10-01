@@ -160,6 +160,16 @@ def _is_help_request(text: str) -> bool:
 
     命令入口与语料回归测试共用本函数。不要在别处复刻这段判定——复刻的那份会在
     调用方收紧（例如多行闸门）时失联：测试继续绿，而生产行为已经变了。
+
+    【两处 fullmatch 不是同一件事的两遍（2026-10-01 补）】
+    _HELP_REQUEST_RE 自身首尾锚定（^…$），再套 fullmatch 只是同义重申；真正靠
+    fullmatch 挡东西的是 _HELP_USAGE_RE——它的前置字符类 [^？?！!。]* 允许换行、
+    尾部又只有 [？?！!。]* 收尾、没有 \\s*，只有「整段匹配」才拦得住尾部那个换行。
+    而这份等价是上面那句 strip() 撑起来的：拿掉 strip 就现原形——「怎么用
+」在
+    _HELP_USAGE_RE 上 match 为真、fullmatch 为假（_HELP_REQUEST_RE 尾部有 \\s*，
+    不带 strip 也无差）。所以别把 strip 当顺手的多余，也别以「看着重复」为由把
+    任一处改成 match 或删掉一处：改的是行为，不是精简。
     """
     t = (text or "").strip()
     return bool(_HELP_REQUEST_RE.fullmatch(t)

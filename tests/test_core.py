@@ -7,6 +7,7 @@ gating（限流闸门）/ card_render（字体与渲染冒烟）/ deliver（分�
 
 说人话：各管各的模块都有自家单测，这里专盯「牌灵连招」——跨模块的活，一个都不能漏。"""
 import asyncio
+import logging
 import types
 
 from astrbot.api.message_components import Plain
@@ -1776,6 +1777,32 @@ class TestSpiritLine:
         p1 = FakeProvider("p1", result="「」")
         i = self._interp(p1)
         assert asyncio.run(i.spirit_line(EVENT, [(CARD, True)], "感情", None)) is None
+
+    def test_overlong_candidate_logs_then_falls_through(self, caplog):
+        """超长输出不再是静默走到循环末尾：留一行日志，然后继续下一候选。
+
+        interpret() 的候选链四步全有日志（冷却跳过 / 结构失格 / tried==0 / 全败），
+        spirit_line 原本零条——「牌灵的话为何老回退池内签文」在日志里查不出原因。
+        「只有换行使首行剥完为空」走同一条不合规分支，共用这一行日志。
+        """
+        from interpret import AiInterpreter
+        long_text = "这句话故意写得很长，长到超过四十个字，专门用来触发那条不合规分支" * 2
+        p1 = FakeProvider("p1", result=long_text)
+        p2 = FakeProvider("p2", result="短句就位。")
+        i = AiInterpreter(FakeContext(p1, [p1, p2]), True, 5, 60, "", 200)
+        with caplog.at_level(logging.INFO):
+            out = asyncio.run(i.spirit_line(EVENT, [(CARD, True)], "感情", None))
+        assert out == "短句就位。"  # 绕开这一候选，下一候选照用
+        assert any("输出不合规" in r.getMessage() for r in caplog.records)
+        assert not i._fail_ts_by_provider, "不合规是内容问题而非服务失败：不许记冷却"
+
+    def test_quotes_only_logs_why_it_gave_up(self, caplog):
+        """剥引号后为空那支同样要留痕：不记冷却，也不能是哑的。"""
+        p1 = FakeProvider("p1", result="「」")
+        i = self._interp(p1)
+        with caplog.at_level(logging.INFO):
+            assert asyncio.run(i.spirit_line(EVENT, [(CARD, True)], "感情", None)) is None
+        assert any("剥引号后为空" in r.getMessage() for r in caplog.records)
 
 # ---------- 牌灵的话：build_spirit_line_prompt ----------
 class TestSpiritPrompt:

@@ -173,10 +173,20 @@ class AiInterpreter:
                 continue
             text = text.strip().strip(_QUOTE_CHARS).strip()
             if not text:
-                continue  # 模型只回了引号/纯空白：当这次没生成，继续下一候选
+                # 模型只回了引号/纯空白：当这次没生成，继续下一候选。
+                # 留一行日志的理由：interpret() 的候选链四步全有日志（冷却跳过/结构失格/
+                # tried==0/全败），这里原本零条，排查「牌灵的话为什么老是回退池内签文」
+                # 时在日志里查不出原因（2026-10-01 补）。
+                logger.info(f"牌灵的话候选[{pid}]剥引号后为空，继续下一候选")
+                continue
             line = text.splitlines()[0].strip()
             if 0 < len(line) <= 40:
                 return line
+            # 走到循环体末尾＝这一候选不合规（超长，或「只有换行」使首行剥完为空），
+            # 接着试下一个候选。不是 continue，效果同：在最后一个候选上等于 return None。
+            # 不记失败冷却（见 docstring），但这支同样必须有日志，理由同上。
+            logger.info(
+                f"牌灵的话候选[{pid}]输出不合规（len={len(line)}，只收 1~40 字），继续下一候选")
         return None
 
     async def _chat_once(self, provider, prompt: str, system_prompt: str) -> str | None:

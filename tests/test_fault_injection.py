@@ -396,6 +396,35 @@ def test_render_slot_degrades_when_no_lock():
         pass
 
 
+def test_render_slot_keeps_a_falsy_lock():
+    """锁「假值但非 None」也必须照用：判据是 is not None，不是真值。
+
+    旧写法 `getattr(...) or nullcontext()` 会把任何 falsy 的锁换成不限并发——
+    渲染并发锁被静默绕过，日志里一行痕迹都没有。asyncio.Semaphore 恰好没有
+    __bool__（默认真值恒真），真实锁把这个口子盖住了；换成自定义锁当场现形。
+    """
+    entered = []
+
+    class FalsyLock:
+        def __bool__(self):
+            return False  # 伪装成「没有锁」，但它是锁
+
+        async def __aenter__(self):
+            entered.append(True)
+
+        async def __aexit__(self, *exc):
+            return False
+
+    fortune = types.SimpleNamespace(tarot=types.SimpleNamespace(_render_lock=FalsyLock()))
+
+    async def run():
+        async with daily_mod._render_slot(fortune):
+            pass
+
+    _run(run())
+    assert entered, "falsy 的锁被 or 换成了 nullcontext：渲染并发锁静默失效"
+
+
 # ================= ⑥ 图片生命周期故障：发送前图没了，不能把整条消息带走 =================
 class TestImageGoneBeforeSend:
     """Issue #2：牌面图在**发送之前**就没了，平台在发送那一刻读文件读到空，

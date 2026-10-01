@@ -43,6 +43,13 @@ SPECIFIC_WORDS = (
     "事业", "工作", "学业", "考试", "考研", "面试", "升职",
     "他", "她", "我们",
 )
+# 【这张表是子串匹配（`w in text`），不是词表精确匹配（2026-10-01 补）】
+# 单字「他」「她」会命中别的词，而列表里那几个多字词只是举例，读的人容易误以为
+# 这里是语义判定。已知误命中面（实测）：「最近其他事情怎么样」因为命中「他」被判成
+# 具体问题 → 走自由随机、topic 还按原句单独分桶；「我们最近怎么样」同理（这条是
+# 有意为之，「最近她对我什么感觉」属同一类：带人称代词即视为具体）。
+# 偏严方向，代价只是拿不到当天固定牌，故不是 bug。要收紧（词表精确匹配、或把
+# 「其他」这类排掉）属产品决策——先问，别顺手改。
 # 分桶专用词表：命中即视为「这个问题有具体主题」，其解读不再与泛问共用。
 #
 # 为什么不并入 SPECIFIC_WORDS：那份词表在 _is_daily_request 里是**排除条件**
@@ -179,8 +186,17 @@ def _render_slot(fortune) -> AbstractAsyncContextManager[None]:
     运行时取而非构造期装配：桩对象（__new__ / SimpleNamespace 装配，没有 tarot、更没有
     锁）退化成不限并发，而不是让渲染路径 AttributeError 崩掉。
     返回值是「异步上下文管理器」：信号量或 nullcontext 都吃得住 async with。
+
+    【判「有没有锁」用 is not None，不用 or 短路（2026-10-01 改）】
+    asyncio.Semaphore 的 MRO 是 [Semaphore, _ContextManagerMixin, _LoopBoundMixin,
+    object]，四处都没有 __bool__ / __len__，所以 bool(Semaphore(0)) 也是 True，or 眼下
+    行为正确——但它靠的是「默认真值恒真」这条隐式契约。哪天锁被包一层实现 __bool__ 的
+    自定义对象（或框架换掉锁的实现），or 会当场静默换成 nullcontext()：最重的那条渲染
+    路径漏在并发锁外，日志里不留一行痕迹。显式判 None 与「有没有」这个语义一一对应，
+    代价同样是那一行。
     """
-    return getattr(getattr(fortune, "tarot", None), "_render_lock", None) or nullcontext()
+    lock = getattr(getattr(fortune, "tarot", None), "_render_lock", None)
+    return lock if lock is not None else nullcontext()
 
 
 async def _ai_output(awaitable, what: str, who: str = "") -> str | None:
