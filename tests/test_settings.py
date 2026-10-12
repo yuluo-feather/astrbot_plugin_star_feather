@@ -1,13 +1,13 @@
 """配置语义层单测：send_mode 三态 / 旧配置迁移 / TarotSettings 解析。
 ——默认值都在这，别处别自作主张。"""
-from settings import (
+from data.plugins.astrbot_plugin_star_feather.settings import (
     DEFAULT_AI_PERSONA,
     TarotSettings,
     resolve_send_mode,
 )
 
 # 字段对齐用例要拿 StarTarot 的注解表做对照（配置字段在插件侧的落点）
-from tarot_core import StarTarot
+from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
 
 
 class TestResolveSendMode:

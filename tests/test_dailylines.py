@@ -6,9 +6,13 @@ import os
 import time
 import types
 
-import daily
-from dailylines import _FALLBACK_SIGNATURE, SIGIL_LINES, pick_signature
-from tarot_data import TAROT_CARDS
+from data.plugins.astrbot_plugin_star_feather import daily
+from data.plugins.astrbot_plugin_star_feather.dailylines import (
+    _FALLBACK_SIGNATURE,
+    SIGIL_LINES,
+    pick_signature,
+)
+from data.plugins.astrbot_plugin_star_feather.tarot_data import TAROT_CARDS
 
 CARD = TAROT_CARDS[0]  # 愚者
 

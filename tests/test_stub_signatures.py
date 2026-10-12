@@ -20,6 +20,9 @@
   打 card_render 的模块属性对调用点无效（真实函数照跑，还挂了延迟删除任务），
   且 fake 少了 delay 参数。签名宽度由本检查拦下；打错模块请改打在被测模块的
   名字上（如 monkeypatch.setattr(tarot_core, "_schedule_image_cleanup", ...)）。
+  字符串形式（"card_render.f"）自 2026-10-12 第 ⑥ 轮起更要避开：插件模块只有包名
+  一个身份，顶层名解析会落到同名文件上（AstrBot 根目录就摆着一个 main.py），
+  一律用模块对象写。
 - 不查语义：fake 返回值对不对、是否被调用，那是各自用例的断言。
 - **不查实例属性打桩，也不查给自制桩对象添方法**。前者（`t._ai_interpret = fake`）
   是替换真实方法但有签名风险，只是实例属性不在模块命名空间、AST 无从解析真实签名；
@@ -225,8 +228,8 @@ def test_scanner_skips_unresolvable_targets_without_crashing():
 
 if __name__ == "__main__":          # 手工跑：打印逐条结论，便于定位
     import sys
-    sys.path.insert(0, os.path.dirname(_TESTS_DIR))
-    import conftest  # noqa: F401  装上 astrbot 桩，插件模块才导得进来
+    sys.path.insert(0, _TESTS_DIR)
+    import conftest  # noqa: F401  装上 astrbot 桩与插件包链，插件模块才导得进来
     c, v, s = _sites()
     print("已检查 " + str(len(c)) + " 处，违规 " + str(len(v)) + " 处，跳过 " + str(len(s)) + " 处")
     for line in c:

@@ -3,9 +3,8 @@
 import os
 
 import pytest
+from data.plugins.astrbot_plugin_star_feather import fonts
 from PIL import ImageFont
-
-import fonts
 
 
 class TestFont:

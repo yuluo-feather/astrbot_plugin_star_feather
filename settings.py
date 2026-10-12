@@ -6,7 +6,7 @@ StarTarot / AiInterpreter / Deliverer 只消费解析后的数值，不碰配置
 
 ——默认值、迁移规则都只在这里维护，其他地方别自作主张。
 """
-from config import _cfg_bool, _cfg_get, _cfg_int
+from .config import _cfg_bool, _cfg_get, _cfg_int
 
 # ---- 默认值常量：集中管理散落的默认值 / 间隔（改默认值只找这一处） ----
 DEFAULT_SEGMENT_SIZE = 300      # 无标记文本兜底分段长度

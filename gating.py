@@ -15,10 +15,10 @@ main.py 只做入口编排：「读写 KV + 生成拦截文案」收敛于此。
 import asyncio
 import time
 
-from clock import Clock
-from identity import resolve_sender_uid
-from kv_utils import kv_get, kv_put
-from limiter import cooldown_remaining, daily_remaining, daily_touch
+from .clock import Clock
+from .identity import resolve_sender_uid
+from .kv_utils import kv_get, kv_put
+from .limiter import cooldown_remaining, daily_remaining, daily_touch
 
 
 class LimitGate:

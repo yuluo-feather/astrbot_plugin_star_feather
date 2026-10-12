@@ -17,12 +17,12 @@ from contextlib import AbstractAsyncContextManager, nullcontext
 
 from astrbot.api import logger
 
-from card_render import IMAGE_DIR_ROOT, _render_daily_card_img, _schedule_image_cleanup
-from clock import Clock
-from dailylines import pick_signature
-from kv_utils import kv_get, kv_put
-from prompts import SPIRIT_PROMPT_V
-from tarot_data import TAROT_CARDS
+from .card_render import IMAGE_DIR_ROOT, _render_daily_card_img, _schedule_image_cleanup
+from .clock import Clock
+from .dailylines import pick_signature
+from .kv_utils import kv_get, kv_put
+from .prompts import SPIRIT_PROMPT_V
+from .tarot_data import TAROT_CARDS
 
 # 今日固定牌运判定：只有「明确在问当日运」才走每日固定，分两层——
 # 1) 明确运势词（运势/运气/牌运/日运/daily）直接命中；

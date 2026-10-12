@@ -5,6 +5,8 @@
 import asyncio
 import types
 
+from data.plugins.astrbot_plugin_star_feather.tarot_data import TAROT_CARDS
+
 
 class FakeProvider:
     """模拟 AstrBot LLM provider：可控异常与延时，记录调用次数。"""
@@ -43,8 +45,6 @@ class FakeContext:
     def get_all_providers(self):
         return self.others
 
-
-from tarot_data import TAROT_CARDS
 
 CARD = TAROT_CARDS[0]  # 愚者（字典结构，与真实牌库同源）
 PICK = {"card": CARD, "upright": True}

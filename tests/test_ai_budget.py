@@ -15,18 +15,19 @@ daily 的透传、main 的「一次占卜开一笔」。塞进 test_core 会被�
 import asyncio
 import logging
 import os
-import sys
 import time
 import types
 
+from data.plugins.astrbot_plugin_star_feather import card_render
+from data.plugins.astrbot_plugin_star_feather import interpret as interpret_mod
+from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+from data.plugins.astrbot_plugin_star_feather.interpret import AiBudget, AiInterpreter
+from data.plugins.astrbot_plugin_star_feather.settings import (
+    DEFAULT_AI_BUDGET,
+    DEFAULT_SPIRIT_STAGE_BUDGET,
+)
+from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
 from stubs import CARD, EVENT, OK_INTERP, PICK, FakeContext, FakeProvider
-
-import card_render
-import interpret as interpret_mod
-from daily import DailyFortune
-from interpret import AiBudget, AiInterpreter
-from settings import DEFAULT_AI_BUDGET, DEFAULT_SPIRIT_STAGE_BUDGET
-from tarot_core import StarTarot
 
 
 class Clock:
@@ -393,14 +394,12 @@ class TestEndToEndDeliveryUnderSpentBudget:
         的产出：挂在 AiInterpreter 上，所以无论谁新开一笔预算（入口每段、解读器每
         候选、阶段兜底）都被记下——「一次占卜一笔预算」这条契约得有个能落地的判据。
 
-        取「本代」模块的老规矩（见 test_fault_injection 的 _live_modules）：main 顶部
-        会 pop 子模块再导入，先 import main、再从 sys.modules 按名字取，
-        免得用例里的 tarot 与入口的 tarot 不是同一代，补丁静默打空、用例假绿。
+        模块一律按包路径取（见 test_fault_injection 的 _live_modules）：插件内只有
+        包名一个身份，用例里的 tarot 与入口用的就是同一份，补丁不会打空。
         """
-        from main import StarFeatherPlugin
-
-        tarot_core = sys.modules["tarot_core"]
-        daily_mod = sys.modules["daily"]
+        from data.plugins.astrbot_plugin_star_feather import daily as daily_mod
+        from data.plugins.astrbot_plugin_star_feather import tarot_core
+        from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
 
         ctx = FakeContext(using=None, others=list(providers))
         t = tarot_core.StarTarot(ctx, None)

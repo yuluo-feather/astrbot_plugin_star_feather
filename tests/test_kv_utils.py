@@ -3,7 +3,7 @@
 """
 import asyncio
 
-from kv_utils import kv_get, kv_put
+from data.plugins.astrbot_plugin_star_feather.kv_utils import kv_get, kv_put
 
 
 class MemoryKV:

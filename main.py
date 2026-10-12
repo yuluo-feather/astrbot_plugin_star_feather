@@ -13,22 +13,16 @@
 import os
 import random
 import re
-import sys
 
-# 插件被动态 __import__ 加载时不在 sys.path 里，得自己把插件目录塞进去——不然 import 直接炸。
-# 守卫写法：已在则跳过，热重载时不重复累积 sys.path 条目。
-_plugin_dir = os.path.dirname(os.path.abspath(__file__))
-if _plugin_dir not in sys.path:
-    sys.path.insert(0, _plugin_dir)
-
-# 重载防御：AstrBot 重载插件时只卸载星模块（data.plugins.astrbot_plugin_star_feather），
-# 顶层子模块（prompts 等）会赖在 sys.modules 里不走——旧模块没有新名字（如 TOOL_EPILOGUE）
-# 时，from prompts import ... 直接 ImportError。所以在导入前无条件清掉本插件子模块，
-# 保证每次加载的都是磁盘上的最新代码，不给我留僵尸模块。
-for _sf_mod in ("config", "daily", "dailylines", "gating", "hardening", "identity", "interpret",
-                "kv_utils", "limiter", "prompts", "settings", "spreads",
-                "tarot_core", "tarot_data", "card_render", "deliver", "fonts"):
-    sys.modules.pop(_sf_mod, None)
+# 导入模型（2026-10-12 第 ⑥ 轮）：插件内一律包内相对导入（from .daily import ...），
+# 目录里不留 sys.path.insert、也不留 sys.modules.pop。老那套「顶层平铺名 + 手动清缓存」
+# 有两个洞：
+#   ① 子模块注册成顶层名（daily / prompts ...）后，框架按 data.plugins.<目录名>.* 前缀
+#      重载时永远清不到它——旧模块赖在 sys.modules 里、新名字（如 TOOL_EPILOGUE）读不到，
+#      于是被迫再写一段 pop 循环兜底，那是症状的症状；
+#   ② pop 清的是通用名字，同一解释器里别的插件或库若同名，会被无辜拆掉。
+# 框架的加载路径本就是 __import__("data.plugins.astrbot_plugin_star_feather.main")，包前缀
+# 已经在手上，相对导入是顺着它走，不是另开一条路。
 
 # 本插件的模块间引用（实现分别在 config / daily / gating / identity / prompts / settings / spreads）：
 # 测试与外部如需内部函数，请直接从实现模块导入，别绕道本入口文件转发。
@@ -40,19 +34,19 @@ from astrbot.api.message_components import Plain
 # all.py 里的 logger 是 from astrbot import logger 那位全局 logger，星导入会把它灌进来。
 from astrbot.api import logger
 
-from card_render import cleanup_stale_images
-from daily import DailyFortune, _is_daily_request
-from gating import LimitGate
-from identity import resolve_sender_uid
-from prompts import (
+from .card_render import cleanup_stale_images
+from .daily import DailyFortune, _is_daily_request
+from .gating import LimitGate
+from .identity import resolve_sender_uid
+from .prompts import (
     HELP_TEXT,
     RESULT_EPILOGUE,
     SHUFFLE_LINES,
     TOOL_EPILOGUE,
     resolve_persona,
 )
-from spreads import clean_tool_question, select_formation
-from tarot_core import StarTarot
+from .spreads import clean_tool_question, select_formation
+from .tarot_core import StarTarot
 
 VERSION = "0.7.5"
 

@@ -9,9 +9,8 @@ import datetime
 from zoneinfo import ZoneInfo
 
 import pytest
-
-import card_render
-from clock import Clock, resolve_timezone
+from data.plugins.astrbot_plugin_star_feather import card_render
+from data.plugins.astrbot_plugin_star_feather.clock import Clock, resolve_timezone
 
 
 class _Ctx:
@@ -101,16 +100,15 @@ class TestClockWiring:
         monkeypatch.setattr(card_render, "IMAGE_DIR_ROOT", str(tmp_path / "star_feather"))
 
     def test_core_clock_uses_framework_timezone(self):
-        from tarot_core import StarTarot
+        from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
 
         t = StarTarot(_Ctx({"timezone": "Asia/Shanghai"}), None)
         assert t.clock.tz is not None and t.clock.tz.key == "Asia/Shanghai"
 
     def test_daily_shares_core_clock(self):
+        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
         from stubs import FakeContext
-
-        from daily import DailyFortune
-        from tarot_core import StarTarot
 
         t = StarTarot(_Ctx({"timezone": "UTC"}), None)
         d = DailyFortune(FakeContext(None), t)
@@ -118,9 +116,8 @@ class TestClockWiring:
 
     def test_stub_tarot_still_gets_a_clock(self):
         """桩对象（单测/诊断）没有 clock：自建一份跟本地时区，不让日期键失联。"""
+        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
         from stubs import FakeContext
-
-        from daily import DailyFortune
 
         d = DailyFortune(FakeContext(None), object())
         assert isinstance(d.clock, Clock)

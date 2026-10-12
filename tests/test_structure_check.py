@@ -13,19 +13,18 @@ import asyncio
 import logging
 
 import pytest
-from stubs import EVENT, OK_INTERP, PICK, FakeContext, FakeProvider
-
-from hardening import (
+from data.plugins.astrbot_plugin_star_feather.hardening import (
     validate_interpret_structure,
     validate_interpret_structure_strict,
 )
-from interpret import AiInterpreter
-from settings import (
+from data.plugins.astrbot_plugin_star_feather.interpret import AiInterpreter
+from data.plugins.astrbot_plugin_star_feather.settings import (
     DEFAULT_STRUCTURE_CHECK,
     STRUCTURE_CHECK_LOOSE,
     STRUCTURE_CHECK_SHADOW,
     STRUCTURE_CHECK_STRICT,
 )
+from stubs import EVENT, OK_INTERP, PICK, FakeContext, FakeProvider
 
 OK3 = ("【第1张·过去】一段过去。【第2张·现在】一段现在。"
        "【第3张·未来】一段未来。【总结】结论。")

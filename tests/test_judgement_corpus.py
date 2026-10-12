@@ -11,9 +11,8 @@
 import time
 
 import pytest
-
-from daily import _is_daily_request
-from main import _is_help_request
+from data.plugins.astrbot_plugin_star_feather.daily import _is_daily_request
+from data.plugins.astrbot_plugin_star_feather.main import _is_help_request
 
 
 def is_help(text: str) -> bool:

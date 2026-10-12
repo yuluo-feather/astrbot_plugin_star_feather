@@ -1,6 +1,10 @@
 """限流纯逻辑单测：会话节流 / 每日计数。
 ——牌灵不小气，但也经不起连刷。"""
-from limiter import cooldown_remaining, daily_remaining, daily_touch
+from data.plugins.astrbot_plugin_star_feather.limiter import (
+    cooldown_remaining,
+    daily_remaining,
+    daily_touch,
+)
 
 
 # ---------- 会话节流 cooldown_remaining ----------

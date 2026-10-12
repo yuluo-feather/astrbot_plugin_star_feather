@@ -5,12 +5,14 @@ import importlib.util
 import os
 
 import pytest
+from data.plugins.astrbot_plugin_star_feather import fonts
+from data.plugins.astrbot_plugin_star_feather.dailylines import SIGIL_LINES
+from data.plugins.astrbot_plugin_star_feather.settings import (
+    PERSONA_VALUES,
+    TarotSettings,
+)
+from data.plugins.astrbot_plugin_star_feather.tarot_data import TAROT_CARDS
 from PIL import ImageFont
-
-import fonts
-from dailylines import SIGIL_LINES
-from settings import PERSONA_VALUES, TarotSettings
-from tarot_data import TAROT_CARDS
 
 
 class TestTarotDataIntegrity:
