@@ -53,6 +53,7 @@ class StarTarot:
     ai_provider_id: str
     ai_max_len: int
     ai_persona: str
+    ai_budget: int
 
     def __init__(self, context: Context, config: AstrBotConfig = None):
         self.context = context
@@ -62,14 +63,17 @@ class StarTarot:
         for _k in ("enable_ai", "segment_size", "send_mode", "shuffle_lines",
                    "disclaimer", "daily_fixed", "daily_card", "ai_timeout", "ai_cooldown",
                    "llm_tool_enabled", "llm_tool_cooldown", "cmd_rate_limit",
-                   "daily_count_limit", "ai_provider_id", "ai_max_len",
-                   "ai_persona"):  # 牌灵人设：随配置透传，只改解读口吻（见 prompts.build_system_prompt）
+                   "daily_count_limit", "ai_provider_id", "ai_max_len", "ai_persona",
+                   # 末两项：牌灵人设（只改口吻，见 prompts.build_system_prompt）
+                   # 与单次占卜的 AI 总预算（见 interpret.AiBudget）
+                   "ai_budget"):
             setattr(self, _k, getattr(st, _k))
         # 子组件：AI 解读（interpret.py）与结果分发（deliver.py）
         # person 只影响 system_prompt 的口吻前缀：解读内容、输出结构与安全规则一字不动
         self.interpreter = AiInterpreter(context, self.enable_ai, self.ai_timeout,
                                          self.ai_cooldown, self.ai_provider_id,
-                                         self.ai_max_len, self.ai_persona)
+                                         self.ai_max_len, self.ai_persona,
+                                         self.ai_budget)
         self.deliverer = Deliverer(self.segment_size, self.disclaimer,
                                    self.send_mode == "forward")
         # 渲染并发锁（×2）：Pillow 拼图丢线程池执行，见 _maybe_render_image
@@ -148,7 +152,9 @@ class StarTarot:
         清理在 card_render 的图片产生点（渲染成功后）注册而非发送出口：
         任何入口、任何路径（AI 成功/兜底/异常中断）都无需关心删除。
         但清理只是防堆积的保险丝——渲染与平台读文件之间隔着两次 AI 调用，
-        窗口没有上界，「图还在不在」由发送前的核验兜底（main._ensure_image）。"""
+        窗口本身没有保证（ai_budget_seconds 落地后 AI 阶段有了总预算上界，图中途
+        被保险丝删掉仍属正常），「图还在不在」由发送前的核验兜底（main._ensure_image；
+        它只判文件在不在，不判图片年龄）。"""
         if self.send_mode == "text_only":
             return None
         async with self._render_lock:
@@ -156,19 +162,30 @@ class StarTarot:
         _schedule_image_cleanup(img)
         return img
 
+    def new_budget(self):
+        """开一笔 AI 总预算（委托 AiInterpreter）：入口层不必伸手进子组件。
+
+        一次占卜调一次，同一个对象喂给牌灵的话与解读——阶段之间不重置，
+        见 interpret.AiBudget。
+        """
+        return self.interpreter.new_budget()
+
     async def _ai_interpret(self, event, formation: str, positions: list[str],
                             picks: list[dict], user_input: str,
-                            persona_eff: str | None = None) -> str | None:
+                            persona_eff: str | None = None,
+                            budget=None) -> str | None:
         """AI 结构化解读（委托 AiInterpreter）；牌面详情在核心侧格式化，
         解读器保持对塔罗数据结构零依赖。persona_eff 由调用方传入（同一签
-        牌灵的话与解读共用同一人格）；None 时解读器自行解析。"""
+        牌灵的话与解读共用同一人格）；None 时解读器自行解析。
+        budget 同理透传：同一签的牌灵的话与解读必须共用同一个 AI 总截止点。"""
         lines = []
         for i, (pos, pick) in enumerate(zip(positions, picks), 1):
             _, cn, state, meaning = self._pick_info(pick)
             lines.append(f"- 第{i}张【{pos}】「{cn}」{state}（{meaning}）\n")
         detail = "".join(lines)
         return await self.interpreter.interpret(event, formation, positions, picks,
-                                                user_input, detail, persona_eff=persona_eff)
+                                                user_input, detail, persona_eff=persona_eff,
+                                                budget=budget)
 
     async def _deliver(self, event, interp: str | None, img: str | None, formation: str,
                        positions: list[str], picks: list[dict], fail_note: str = "",

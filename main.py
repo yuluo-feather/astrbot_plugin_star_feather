@@ -453,10 +453,13 @@ class StarFeatherPlugin(Star):
         """发送前核验牌面图还在不在：不在就重渲染一次，渲染不出来就降级为无图。
 
         为什么非要有这一道：渲染发生在两次 AI 调用之前（牌灵的话 + 解读），而平台
-        是在**发送那一刻**才读文件的，中间的窗口由 ai_timeout × 候选数 × 2 段决定、
-        没有上界——2026-09-29 实机里一句「牌灵的话」的 AI 请求跑了 63 秒，图早被清理
-        定时器删掉，平台读到空，整条消息链（图 + 解读 + 牌灵的话）一起被打回
-        （判据与来龙去脉见 card_render.IMAGE_TTL_SECONDS 与 Issue #2）。
+        是在**发送那一刻**才读文件的，中间隔着整段 AI 等待——2026-09-29 实机里一句
+        「牌灵的话」的 AI 请求跑了 63 秒，图早被清理定时器删掉，平台读到空，整条消息链
+        （图 + 解读 + 牌灵的话）一起被打回（判据与来龙去脉见 card_render.IMAGE_TTL_SECONDS
+        与 Issue #2）。2026-10-12 起 AI 阶段有了总预算（ai.ai_budget_seconds，默认 120s），
+        这段窗口从「没有上界」收成「≤ 预算 + 一次单请求的余量」。
+        但本函数**只判文件在不在、不判图片年龄**：「发送时拿到的总是最近一次渲染的图」
+        靠的是渲染点离发送足够近 + 600 秒保险丝正常在跑，不是靠这一道核验单独保证的。
 
         所以清理定时器只当保险丝，真正的判据落在发送前这一刻：距离平台读取只剩
         毫秒级，不看任何定时数字。重渲染走 _maybe_render_image（自带清理登记）；
@@ -523,6 +526,11 @@ class StarFeatherPlugin(Star):
         # 同一签就会「牌灵傲娇、正文温柔」两副腔调；而 v0.6.0 承诺的是一签固定
         # 同一人格、next 签才换。所以在这里解析一次，全路径共用同一值。
         persona_eff = resolve_persona(self.tarot.ai_persona)
+        # 一次占卜一笔 AI 总预算（ai.ai_budget_seconds，默认 120s）：牌灵的话与解读
+        # 共用同一个截止点，候选重试、不同供应商回退、结构重试都不得重置它（issue #21 ④）。
+        # 它管的是 AI 阶段的等待上界，不是这条消息端到端的上界——图渲染与平台发送
+        # 另有耗时；预算耗尽后的表现是回退本地牌义，加上发送前的那道图片核验。
+        budget = self.tarot.new_budget()
         if is_daily and daily_uid and picks:
             # 开关 output.daily_card 只控海报渲染：关掉回到普通牌面图，牌灵的话照常
             if self.daily_card and self.tarot.send_mode != "text_only":
@@ -532,14 +540,15 @@ class StarFeatherPlugin(Star):
         # 牌灵的话：所有占卜路径统一生成（羽签/羽时三刻/羽镜/恋羽十字都有这句
         # 牌灵的开口）——裸句直出，无「牌灵的话：」前缀与引号
         if picks:
-            sig_text = await self.daily.spirit_cached(event, daily_uid, picks, clean, persona_eff)
+            sig_text = await self.daily.spirit_cached(event, daily_uid, picks, clean, persona_eff,
+                                                      budget)
         if is_daily and daily_uid:
             interp = await self.daily.interp_cached(event, daily_uid, formation, positions,
-                                                    picks, clean, persona_eff)
+                                                    picks, clean, persona_eff, budget)
         else:
             interp = await self.tarot._ai_interpret(
                 event, formation, positions, picks, clean or empty_fallback,
-                persona_eff=persona_eff)
+                persona_eff=persona_eff, budget=budget)
         if sig_text:
             # 牌灵的话随 preface 进结果：AI 全失败回退牌义时，牌灵的话一句不丢
             preface = f"{preface}\n{sig_text}" if preface else sig_text

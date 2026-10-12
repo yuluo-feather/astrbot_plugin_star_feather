@@ -24,11 +24,76 @@ from prompts import (
     build_system_prompt,
     resolve_persona,
 )
-from settings import DEFAULT_AI_PERSONA, DEFAULT_QUESTION_MAX_LEN
+from settings import (
+    AI_BUDGET_MIN_ATTEMPT,
+    DEFAULT_AI_BUDGET,
+    DEFAULT_AI_PERSONA,
+    DEFAULT_QUESTION_MAX_LEN,
+    DEFAULT_SPIRIT_STAGE_BUDGET,
+)
 
 # 输出清洗用的引号集：中英引号 + 直角引号 + 单引号。用码点拼出，避开源码里的转义
 # 引号写法（编辑工具会把转义解码成真实字符，这坑踩过）。
 _QUOTE_CHARS = "「」『』“”" + chr(34) + chr(39)
+
+# 阶段名：预算停手时进日志，也让调用方判断「本阶段是不是被预算掐掉的」
+_STAGE_SPIRIT = "牌灵的话"
+_STAGE_INTERPRET = "AI 解读"
+
+
+def _budget_seconds(value) -> float:
+    """预算配置归一：坏值按默认预算处理——别因为一个坏配置反而取消掉上界。"""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(DEFAULT_AI_BUDGET)
+
+
+class AiBudget:
+    """一次占卜的 AI 总预算：所有 AI 阶段共用同一个截止点（硬上限）。
+
+    为什么要有：单请求超时（ai_timeout）只管一次调用，管不住「两段 × 每段多个
+    候选 × 供应商回退」的总时长——最坏情况下没有上界，用户就在那儿干等。
+    本对象只保证一件事：**该次占卜 AI 阶段的等待有上界**；它不是整条消息端到端
+    的上界（图片渲染、框架调度、平台发送各有各的耗时）。
+
+    seconds <= 0 = 不限制（limited=False）：显式的高级选项，等于关掉总预算保护
+    （AiInterpreter 构造时会就此留一条 warning）。
+
+    clock 可注入：测试用假时钟推进，不睡墙钟。
+    """
+
+    def __init__(self, seconds, clock=time.monotonic):
+        self.seconds = _budget_seconds(seconds)
+        self.clock = clock
+        self.limited = self.seconds > 0
+        self.deadline = clock() + self.seconds if self.limited else None
+        # 已因预算停手的阶段：同一阶段只报一次日志（多候选各自报一遍会把日志刷满）
+        self.stopped: set[str] = set()
+
+    def remaining(self) -> float:
+        """剩余预算（秒）；不限制时返回 inf，调用方无需分支。"""
+        if not self.limited:
+            return float("inf")
+        return self.deadline - self.clock()
+
+    def step_timeout(self, per_call, stage_cap: float | None = None) -> float | None:
+        """本次请求的有效超时 = min(单次超时, 剩余预算, 阶段上限)。
+
+        返回 None = 不再发起新请求：预算耗尽，或剩下的不够跑一次有意义的请求
+        （低于 AI_BUDGET_MIN_ATTEMPT，硬发出去就是白等一次超时）。
+        不限制时返回 per_call（阶段上限照样生效）。
+        """
+        left = self.remaining()
+        if left < AI_BUDGET_MIN_ATTEMPT:
+            return None
+        limit = float(per_call)
+        if self.limited:
+            limit = min(limit, left)
+        if stage_cap is not None:
+            limit = min(limit, float(stage_cap))
+        return limit
+
 
 class AiInterpreter:
     """AI 深度解读器：候选链 + 单请求超时 + 按 Provider 粒度的失败冷却。
@@ -44,7 +109,8 @@ class AiInterpreter:
     def __init__(self, context, enable_ai: bool = True, ai_timeout: int = 30,
                  ai_cooldown: int = 60, ai_provider_id: str = "",
                  max_question_len: int = DEFAULT_QUESTION_MAX_LEN,
-                 persona: str = DEFAULT_AI_PERSONA):
+                 persona: str = DEFAULT_AI_PERSONA,
+                 ai_budget: int = DEFAULT_AI_BUDGET):
         self.context = context
         self.enable_ai = enable_ai
         self.ai_timeout = ai_timeout
@@ -56,6 +122,35 @@ class AiInterpreter:
         # 粒度到 provider（而非插件全局熔断）：单个模型挂掉只冷却它自己，
         # 其他模型与其他用户不受拖累；冷却期内该 provider 直接从候选链里跳过。
         self._fail_ts_by_provider: dict[str, float] = {}
+        self.ai_budget = ai_budget  # 单次占卜的 AI 总预算（秒），0=不限制；见 AiBudget
+        # 0 = 不限制：显式的高级选项，但别让它静默生效——面板上看不出这个值的后果，
+        # 日志里至少留一次（构造期一次，不往每次占卜里刷）
+        if _budget_seconds(ai_budget) <= 0:
+            logger.warning(
+                f"ai_budget_seconds={ai_budget}：本次运行不设 AI 总预算上限，"
+                "AI 阶段的等待时长将没有上界（该选项关闭了总预算保护）")
+
+    def new_budget(self) -> AiBudget:
+        """开一笔新的 AI 总预算。
+
+        入口（main._run_reading）在一次占卜开始时调**一次**，把同一个对象喂给这次
+        占卜的全部 AI 阶段（牌灵的话 + 解读，含候选重试与供应商回退）——阶段之间
+        不许重置截止点，这正是本预算存在的意义。
+        """
+        return AiBudget(self.ai_budget)
+
+    def _budget_stop(self, budget: AiBudget, stage: str) -> None:
+        """预算让某阶段停手：留一行日志（同一阶段只报一次），随后按 None 回退本地牌义。"""
+        if stage in budget.stopped:
+            return
+        budget.stopped.add(stage)
+        left = budget.remaining()
+        if left <= 0:
+            logger.warning(f"AI 总预算已耗尽（{stage}，预算 {budget.seconds:g}s）："
+                           "不再发起新请求，回退本地牌义")
+        else:
+            logger.warning(f"AI 总预算仅剩 {left:.1f}s（{stage}）："
+                           "不够发起一次有效请求，回退本地牌义")
 
     def _provider_id(self, provider) -> str:
         try:
@@ -128,7 +223,7 @@ class AiInterpreter:
         return out
 
     async def spirit_line(self, event, cards: list, topic: str,
-                          persona_eff) -> str | None:
+                          persona_eff, budget: AiBudget | None = None) -> str | None:
         """牌灵的一句话（聊天「牌灵的话」）：AI 按人设生成短句
         （要求 25 字内，实际接受 ≤40 字——宽容策略，避免过度丢弃）。
 
@@ -139,6 +234,11 @@ class AiInterpreter:
         """
         if not self.enable_ai:
             return None
+        # 预算：调用方（一次占卜）传入共用对象；不传就本阶段自开一笔——直接调用
+        # spirit_line 的老用法照样有上界，不会因为漏传而变成无界等待。
+        # 牌灵的话是次要内容，另受 DEFAULT_SPIRIT_STAGE_BUDGET 阶段上限约束：它不能
+        # 独吞整笔预算、把核心解读的时间耗光（但两者仍服从同一个总截止点）。
+        bd = budget if budget is not None else self.new_budget()
         # 清洗链与 interpret() 一致：归一化先行 → 截断 → 句式剥除（防御深度统一，
         # topic 会整段拼进 prompt，不能只剥不档）
         topic = normalize_injection_input(topic or "")
@@ -155,7 +255,11 @@ class AiInterpreter:
             pid = self._provider_id(provider)
             if self._in_cooldown(pid):
                 continue
-            text = await self._chat_once(provider, prompt, system)
+            timeout = bd.step_timeout(self.ai_timeout, DEFAULT_SPIRIT_STAGE_BUDGET)
+            if timeout is None:
+                self._budget_stop(bd, _STAGE_SPIRIT)
+                break  # 预算见底：候选链剩下的不再试（共享截止点，不重置）
+            text = await self._chat_once(provider, prompt, system, timeout)
             if not text:
                 continue
             text = text.strip().strip(_QUOTE_CHARS).strip()
@@ -176,18 +280,24 @@ class AiInterpreter:
                 f"牌灵的话候选[{pid}]输出不合规（len={len(line)}，只收 1~40 字），继续下一候选")
         return None
 
-    async def _chat_once(self, provider, prompt: str, system_prompt: str) -> str | None:
-        """对单个候选发起解读请求：超时或异常一律返回 None，交给下一个候选。"""
+    async def _chat_once(self, provider, prompt: str, system_prompt: str,
+                         timeout: float | None = None) -> str | None:
+        """对单个候选发起解读请求：超时或异常一律返回 None，交给下一个候选。
+
+        timeout：本次请求的有效超时，由调用方按预算算出（AiBudget.step_timeout）；
+        不传则用实例的 ai_timeout——直接调用本方法的老口径不变。
+        """
+        limit = self.ai_timeout if timeout is None else timeout
         try:
             resp = await asyncio.wait_for(
                 provider.text_chat(
                     prompt=prompt, session_id=None, contexts=[], image_urls=[],
                     system_prompt=system_prompt,
                 ),
-                timeout=self.ai_timeout,
+                timeout=limit,
             )
         except asyncio.TimeoutError:
-            logger.warning(f"AI 解读超时（>{self.ai_timeout}s），放弃该提供商")
+            logger.warning(f"AI 解读超时（>{limit:g}s），放弃该提供商")
             return None
         except Exception as e:
             logger.warning(f"AI 解读请求失败: {e}")
@@ -199,15 +309,19 @@ class AiInterpreter:
 
     async def interpret(self, event, formation: str, positions: list[str],
                         picks: list[dict], user_input: str, detail: str,
-                        persona_eff: str | None = None) -> str | None:
+                        persona_eff: str | None = None,
+                        budget: AiBudget | None = None) -> str | None:
         """AI 结构化解读。返回 None 表示本轮没有 AI 解读（候选全部失败或全部处于冷却期），
         由调用方回退本地牌义。给用户的感觉是：解读要么有，要么是牌义，不会等成雕塑。
 
         persona_eff：调用方（如 daily 牌灵的话同签共用人格）传解析后的人格；
         None 时本方法自解析（每次调用一次掷骰）。
+        budget：本次占卜共用的 AI 总预算（AiBudget）；不传则本阶段自开一笔。
+        候选重试与供应商回退都吃这同一笔预算——不许在这里重置。
         """
         if not self.enable_ai:
             return None
+        bd = budget if budget is not None else self.new_budget()
         # 清洗链路顺序（技能规范）：归一化（先行）→ 截断 → 句式剥除
         user_input = normalize_injection_input(user_input)  # 归一化先行：全角/零宽/bidi 绕行先失效
         if self.max_question_len > 0:
@@ -230,8 +344,12 @@ class AiInterpreter:
             if self._in_cooldown(pid):
                 logger.info(f"AI 解读 provider[{pid}] 处于失败冷却期，跳过")
                 continue
+            timeout = bd.step_timeout(self.ai_timeout)
+            if timeout is None:
+                self._budget_stop(bd, _STAGE_INTERPRET)
+                break  # 预算见底：剩下的候选与供应商回退都不再试（截止点不重置）
             tried += 1
-            text = await self._chat_once(provider, prompt, system_prompt)
+            text = await self._chat_once(provider, prompt, system_prompt, timeout)
             if not text:
                 self._mark_fail(pid)  # 服务级失败：只冷却这个 provider
                 continue
@@ -240,6 +358,8 @@ class AiInterpreter:
                 logger.warning("AI 解读未按【第N张·位置】结构输出，弃用该候选，继续尝试")
                 continue
             return text
+        if _STAGE_INTERPRET in bd.stopped:
+            return None  # 预算掐掉的：原因已在 _budget_stop 里写过，别叠一条误导性的「全败」
         if tried == 0:
             logger.info("AI 解读候选全部处于失败冷却期，直接使用本地牌义")
             return None

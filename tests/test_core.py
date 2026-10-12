@@ -565,9 +565,15 @@ class _FakeTarot:
     send_mode = "plain"  # 匹配真实现的发图判断（text_only 不渲染）
     ai_persona = "off"  # 牌灵人设：main 的 resolve_persona 从这里取
 
+    def new_budget(self):
+        # 真实现委托 AiInterpreter（tarot_core.StarTarot.new_budget）：桩只需要「有个
+        # 对象可传」，各阶段桩都不读它——但 main 的「一次占卜共用一笔」接线照旧成立
+        from interpret import AiBudget
+        return AiBudget(120)
+
     async def _maybe_render_image(self, *a):
         return None
-    async def _ai_interpret(self, ev, fmt, pos, picks, clean, persona_eff=None):
+    async def _ai_interpret(self, ev, fmt, pos, picks, clean, persona_eff=None, budget=None):
         return "AI:" + str(clean)
     async def _deliver(self, ev, interp, img, fmt, pos, picks, fail_note="", preface=""):
         seg = str(interp) + ("|fail" if fail_note else "")
@@ -583,9 +589,9 @@ class TestRunReading:
         p.tarot = _FakeTarot()
         p.daily_card = True  # 今日牌运卡开关（output.daily_card），默认开
         p._shuffle_hint = (lambda: "hint") if hint else (lambda: None)
-        async def fake_daily(event, uid, fmt, pos, picks, clean, persona_eff=None):
+        async def fake_daily(event, uid, fmt, pos, picks, clean, persona_eff=None, budget=None):
             return "DAILY:" + str(clean)
-        async def fake_spirit(event, uid, picks, clean, persona_eff):
+        async def fake_spirit(event, uid, picks, clean, persona_eff, budget=None):
             # 默认桩=AI 失败兜底语义（池内当日句）；AI 成功路径由专门用例覆盖
             from time import strftime
             return pick_signature(picks[0]["card"], picks[0]["upright"],
@@ -611,6 +617,29 @@ class TestRunReading:
         async def run():
             return [x async for x in agen]
         return asyncio.run(run())
+
+    def test_one_budget_shared_by_spirit_and_interpret(self):
+        """一次占卜只开一笔 AI 总预算，两段拿到的是同一个对象。
+
+        接线松了这一处，预算就等于没有：任何一段（或候选重试）各自新开一笔，
+        截止点就被悄悄往后推一次，「总时长有上界」的承诺随之失效。
+        """
+        p = self._plugin(hint=False)
+        seen = {}
+
+        async def fake_spirit(event, uid, picks, clean, persona_eff, budget=None):
+            seen["spirit"] = budget
+            return "sig"
+
+        async def spy_interpret(ev, fmt, pos, picks, clean, persona_eff=None, budget=None):
+            seen["interpret"] = budget
+            return "AI"
+
+        p.daily.spirit_cached = fake_spirit
+        p.tarot._ai_interpret = spy_interpret
+        self._collect(p._run_reading(self._evt(), "羽签", ["你的当下"], [PICK], "问感情"))
+        assert seen["spirit"] is not None
+        assert seen["spirit"] is seen["interpret"]  # 同一截止点：阶段之间不重置
 
     def test_daily_card_switch_off_skips_poster(self):
         # output.daily_card=False：牌运卡海报不渲染（回退普通牌面图），解读照常走缓存
@@ -645,11 +674,11 @@ class TestRunReading:
         monkeypatch.setattr(main_mod, "resolve_persona", counting_resolve)
         p = self._plugin(hint=False)
 
-        async def spy_spirit(event, uid, picks, clean, persona_eff):
+        async def spy_spirit(event, uid, picks, clean, persona_eff, budget=None):
             seen["spirit"] = persona_eff
             return "sig"
 
-        async def spy_interpret(ev, fmt, pos, picks, clean, persona_eff=None):
+        async def spy_interpret(ev, fmt, pos, picks, clean, persona_eff=None, budget=None):
             seen["interpret"] = persona_eff
             return "AI"
 
@@ -683,7 +712,7 @@ class TestRunReading:
     def test_daily_branch_ai_spirit_line_prepended(self):
         # 牌灵的话 AI 成功：preface 用 AI 句（人设化），而非池内静态句
         p = self._plugin(hint=False)
-        async def ai_spirit(event, uid, picks, clean, persona_eff):
+        async def ai_spirit(event, uid, picks, clean, persona_eff, budget=None):
             return "今天适合慢下来，先照顾好自己。"
         p.daily.spirit_cached = ai_spirit
         out = self._collect(p._run_reading(self._evt(), "羽签", ["你的当下"], [PICK],
@@ -908,7 +937,7 @@ class TestRunReadingRealChain:
         from tarot_core import StarTarot
         t = StarTarot(FakeContext(None), None)
         assert t.send_mode == "forward"  # 默认合并转发，走 forward 分支
-        async def fake_interp(event, formation, positions, picks, clean, persona_eff=None):
+        async def fake_interp(event, formation, positions, picks, clean, persona_eff=None, budget=None):
             return "【第1张·过去】一段过去。\
 【第2张·现在】一段现在。\
 【总结】结论。"
@@ -919,7 +948,7 @@ class TestRunReadingRealChain:
         p = StarFeatherPlugin.__new__(StarFeatherPlugin)
         p.tarot = t
         p._shuffle_hint = lambda: None
-        async def fake_spirit(event, uid, picks, clean, persona_eff):
+        async def fake_spirit(event, uid, picks, clean, persona_eff, budget=None):
             from time import strftime
             return pick_signature(picks[0]["card"], picks[0]["upright"],
                                   uid, strftime("%Y%m%d"))
@@ -941,7 +970,7 @@ class TestRunReadingRealChain:
         from main import StarFeatherPlugin
         from tarot_core import StarTarot
         t = StarTarot(FakeContext(None), None)
-        async def fake_interp(event, formation, positions, picks, clean, persona_eff=None):
+        async def fake_interp(event, formation, positions, picks, clean, persona_eff=None, budget=None):
             return "【第1张·过去】一段过去。\
 【总结】结论。"
         async def fake_render(formation, positions, picks, *a):
@@ -951,7 +980,7 @@ class TestRunReadingRealChain:
         p = StarFeatherPlugin.__new__(StarFeatherPlugin)
         p.tarot = t
         p._shuffle_hint = lambda: None
-        async def fake_spirit(event, uid, picks, clean, persona_eff):
+        async def fake_spirit(event, uid, picks, clean, persona_eff, budget=None):
             from time import strftime
             return pick_signature(picks[0]["card"], picks[0]["upright"],
                                   uid, strftime("%Y%m%d"))
@@ -1350,7 +1379,7 @@ class TestDailyInterpTopic:
             async def put_kv_data(self, key, value):
                 kv[key] = value
 
-        async def fake_ai(event, formation, positions, picks, clean, persona_eff=None):
+        async def fake_ai(event, formation, positions, picks, clean, persona_eff=None, budget=None):
             calls.append(clean)
             return f"解读:{clean}"
 
@@ -1426,7 +1455,7 @@ class TestDailyInterpTopic:
                 await asyncio.sleep(0.005)
                 kv[key] = value
 
-        async def fake_ai(event, formation, positions, picks, clean, persona_eff=None):
+        async def fake_ai(event, formation, positions, picks, clean, persona_eff=None, budget=None):
             await asyncio.sleep(0.01)        # AI 调用期间另一条协程会进来
             return f"解读:{clean}"
 
@@ -1468,7 +1497,7 @@ class TestDailyInterpTopic:
             async def put_kv_data(self, key, value):
                 kv[key] = value
 
-        async def fake_ai(event, formation, positions, picks, clean, persona_eff=None):
+        async def fake_ai(event, formation, positions, picks, clean, persona_eff=None, budget=None):
             calls.append(clean)
             return f"解读:{clean}"
 
@@ -1544,7 +1573,7 @@ class TestDailyPoisonedCacheValue:
             async def put_kv_data(self, key, value):
                 kv[key] = value
 
-        async def fake_ai(event, formation, positions, picks, clean, persona_eff=None):
+        async def fake_ai(event, formation, positions, picks, clean, persona_eff=None, budget=None):
             calls.append(clean)
             return f"解读:{clean}"
 
@@ -1602,7 +1631,7 @@ class TestDailyNullInterp:
             async def put_kv_data(self, key, value):
                 kv[key] = value
 
-        async def fake_ai(event, formation, positions, picks, clean, persona_eff=None):
+        async def fake_ai(event, formation, positions, picks, clean, persona_eff=None, budget=None):
             calls.append(clean)
             return ret
 
@@ -1661,7 +1690,7 @@ class TestSpiritCache:
             async def put_kv_data(self, key, value):
                 kv[key] = value
 
-        async def fake_spirit(event, cards, topic, persona_eff):
+        async def fake_spirit(event, cards, topic, persona_eff, budget=None):
             calls.append((cards, topic, persona_eff))
             return line
 
@@ -1706,7 +1735,7 @@ class TestSpiritCache:
             async def put_kv_data(self, key, value):
                 kv[key] = value
 
-        async def fake_spirit(event, cards, topic, persona_eff):
+        async def fake_spirit(event, cards, topic, persona_eff, budget=None):
             calls.append(topic)
             return "故障期间生成的那句"
 
@@ -1960,7 +1989,7 @@ class TestCommandEntryEpilogueEndToEnd:
         from prompts import RESULT_EPILOGUE
         from tarot_core import StarTarot
         t = StarTarot(FakeContext(None), None)
-        async def fake_interp(event, formation, positions, picks, clean, persona_eff=None):
+        async def fake_interp(event, formation, positions, picks, clean, persona_eff=None, budget=None):
             return "【第1张·过去】一段过去。\
 【总结】结论。"
         async def fake_render(formation, positions, picks, *a):
@@ -1970,7 +1999,7 @@ class TestCommandEntryEpilogueEndToEnd:
         p = StarFeatherPlugin.__new__(StarFeatherPlugin)
         p.tarot = t
         p._shuffle_hint = lambda: None
-        async def fake_spirit(event, uid, picks, clean, persona_eff):
+        async def fake_spirit(event, uid, picks, clean, persona_eff, budget=None):
             from time import strftime
             return pick_signature(picks[0]["card"], picks[0]["upright"], uid, strftime("%Y%m%d"))
         p.daily = types.SimpleNamespace(spirit_cached=fake_spirit)
