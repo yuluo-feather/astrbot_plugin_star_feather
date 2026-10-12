@@ -14,6 +14,8 @@ daily 的透传、main 的「一次占卜开一笔」。塞进 test_core 会被�
 """
 import asyncio
 import logging
+import os
+import sys
 import time
 import types
 
@@ -226,3 +228,231 @@ class TestFallbackAndWiring:
         bd = AiBudget(120)
         out = asyncio.run(p.spirit_cached(EVENT, "u1", [PICK], "今日运势", None, bd))
         assert out == "今天适合慢下来" and seen["budget"] is bd
+
+
+# ---------- 端到端：预算掐掉 AI 之后，这条卦照样发得出去 ----------
+class TestEndToEndDeliveryUnderSpentBudget:
+    """把三层串成一条真入口跑一遍：供应商装死 → 预算到点上界 → 结果仍然出得来。
+
+    上面三段分别证明「算得对」（算法层）、「接了线」（真实墙钟）、「回退有内容」
+    （本地牌义非空），但每一段都是拆开看的；只要中间少接一根线（预算没透传到某段、
+    回退结果没接进 _deliver），用户拿到的就是「等满一段 + 什么都没收到」，
+    而三段单元用例全绿。验收口径 1（时间有上界）的另一半正是这条「事后仍能交付」。
+
+    判据是配好的两条，缺一不可：
+    - new_budget 计数（确定性）：一次占卜只许开一笔预算，计数 > 1 即红。它抓的是
+      「谁又开了一笔」——入口两段各开一笔、解读器内部每候选各开一笔，都算。不靠
+      墙钟阈值，CI 上不飘。
+    - 两个供应商：第一个装死把预算烧光，第二个**一次都不许被叫到**——这是「预算耗尽
+      后不得再启动下一轮请求」在端到端的形状（换供应商、换段位都不行）。
+    两种失灵都做过变异实测（不是推测，实测计数与红况如下）：
+    - interpret 的 bd.step_timeout 换成 self.new_budget().step_timeout → 计数 3
+      （入口 1 + 两个候选各 1），两条用例都红；
+    - main 里两段传的 budget 换成各自 new_budget() → 计数 3 / 2（普通占卜 / 每日
+      牌运，差额来自不发起请求的那一段实参照样会开预算），两条用例也都红。
+    注：单看墙钟抓不住「只在两段之间重置」（两段各 1.2s ≈ 2.4s，仍在 3.0 阈值内），
+    所以结算归计数、墙钟只作旁证——「档位对了不等于判据有效」的老账。
+    """
+
+    FORMATION = "羽签"
+    POSITIONS = ["你的当下"]
+
+    def test_hung_provider_still_yields_a_sendable_reading(self, tmp_path):
+        """普通占卜路径：候选链烧光预算 → 结果仍发得出去。"""
+        first = FakeProvider("slow-1", result=OK_INTERP, delay=5.0)   # 装死 5 秒
+        second = FakeProvider("slow-2", result=OK_INTERP, delay=5.0)  # 回退目标：不许被叫
+        p, evt, path, created = self._plugin(tmp_path, [first, second])
+
+        elapsed = self._run(p, evt, "问感情")
+
+        assert len(created) == 1, "一次占卜只许开一笔预算，候选/供应商回退都不许重开"
+        assert first.calls == 1, "能试的照试一次"
+        assert second.calls == 0, "预算已耗尽：换供应商也不许重新开一笔请求"
+        assert elapsed < 3.0, f"预算 1.2s，端到端却用了 {elapsed:.2f}s"
+        self._assert_still_delivered(evt, path)
+
+    def test_two_stages_share_the_deadline_through_the_entry(self, tmp_path):
+        """每日牌运路径：牌灵的话与解读**两段都会发起请求**，共用同一个截止点。
+
+        判据是「这一趟只新开了一笔预算」（new_budget 计数）——确定性判据，不靠墙钟，
+        而且它同时管住两种重置：入口两段各开一笔、解读器内部每候选各开一笔。
+        墙钟上界只作旁证：每段各开一笔的实现里，第二段会拿到满额预算重新等满，
+        elapsed 从 1.2s 量级抬到 2.4s 量级。
+        """
+        first = FakeProvider("slow-1", result=OK_INTERP, delay=5.0)
+        second = FakeProvider("slow-2", result=OK_INTERP, delay=5.0)
+        p, evt, path, created = self._plugin(tmp_path, [first, second])
+
+        elapsed = self._run(p, evt, "今日运势", is_daily=True, daily_uid="u1")
+
+        assert len(created) == 1, "两段 AI 共用同一笔预算：阶段之间不许重置截止点"
+        assert first.calls == 1, "牌灵的话那一段先试一次，就这一次"
+        assert second.calls == 0, "第一段已把预算烧光：第二段不许重开一笔、也不许换供应商"
+        assert elapsed < 3.0, f"预算 1.2s，端到端却用了 {elapsed:.2f}s"
+        self._assert_still_delivered(evt, path)
+
+    def _plugin(self, tmp_path, providers):
+        """装一条真入口：真缓存层 + 真总预算 + 只换渲染（不碰 AI 与预算那条链）。
+
+        返回 (插件, 事件, 图片路径, 新开预算清单)。最后一个元素是 new_budget 计数钩子
+        的产出：挂在 AiInterpreter 上，所以无论谁新开一笔预算（入口每段、解读器每
+        候选、阶段兜底）都被记下——「一次占卜一笔预算」这条契约得有个能落地的判据。
+
+        取「本代」模块的老规矩（见 test_fault_injection 的 _live_modules）：main 顶部
+        会 pop 子模块再导入，先 import main、再从 sys.modules 按名字取，
+        免得用例里的 tarot 与入口的 tarot 不是同一代，补丁静默打空、用例假绿。
+        """
+        from main import StarFeatherPlugin
+
+        tarot_core = sys.modules["tarot_core"]
+        daily_mod = sys.modules["daily"]
+
+        ctx = FakeContext(using=None, others=list(providers))
+        t = tarot_core.StarTarot(ctx, None)
+        t.send_mode = "plain"
+        t.deliverer.forward_result = False
+        # 单次请求超时 30 秒、总预算 1.2 秒：差值就是这两条用例要的东西——等多久由
+        # 预算说了算，不由供应商的 ai_timeout 说了算
+        t.interpreter = AiInterpreter(ctx, ai_timeout=30, ai_budget=1.2)
+
+        created = []
+        real_new_budget = t.interpreter.new_budget      # 挂在最里层：tarot.new_budget 也走它
+
+        def counting_new_budget():
+            bd = real_new_budget()
+            created.append(bd)
+            return bd
+        t.interpreter.new_budget = counting_new_budget
+
+        path = str(tmp_path / "e2e.png")
+
+        def fake_render_image(formation, positions, picks):
+            open(path, "wb").write(b"PNG")
+            return path
+        t._render_image = fake_render_image
+
+        p = StarFeatherPlugin.__new__(StarFeatherPlugin)
+        p.tarot = t
+        p.daily_card = False                        # 走普通牌面图，海报卡另有用例
+        p._shuffle_hint = lambda: None              # 单张牌阵本来也不出提示
+        p.daily = daily_mod.DailyFortune(_KV(), t)  # 真缓存层：牌灵的话走真透传
+
+        evt = types.SimpleNamespace()
+        evt.result = None
+        evt.sent = []
+        evt.get_self_id = lambda: "12345"
+
+        def chain_result(chain):
+            evt.result = chain
+            return chain
+        evt.chain_result = chain_result
+
+        async def send(chain):
+            evt.sent.append(chain)
+        evt.send = send
+        return p, evt, path, created
+
+    def _run(self, plugin, evt, question, **kw):
+        """跑一遍入口，返回墙钟耗时。"""
+        t0 = time.monotonic()
+        asyncio.run(self._drain(plugin, evt, question, **kw))
+        return time.monotonic() - t0
+
+    def _assert_still_delivered(self, evt, path):
+        """回退之后这条卦仍然发得出去：有图、有本地文案、没有 AI 残留。"""
+        assert evt.result, "AI 全败不等于这条卦没结果：必须仍有可发送的消息"
+        nodes = list(evt.result)
+        imgs = [c for c in nodes if type(c).__name__ == "Image"]
+        assert [i.file for i in imgs] == [path], "图照发，且是送出去那一刻仍存在的那张"
+        assert os.path.exists(path)
+        # 图片模式的回退形状（deliver.deliver：有图就不再叠逐牌牌义，那是卡面的活）：
+        # 图 + 牌灵的话（AI 失败时回退池内当日句）。这里要的是「文案来自本地，
+        # 不是 AI 残留」，所以按标记判定而不是按某一句文案。
+        texts = "".join(getattr(c, "text", "") for c in nodes).strip()
+        assert texts, "牌灵的话兜底也要照发：AI 全败不等于这条消息只剩一张图"
+        assert "【第" not in texts, "预算耗尽时不该出现任何 AI 正文残留"
+
+    @staticmethod
+    async def _drain(plugin, evt, question, **kw):
+        async for _ in plugin._run_reading(evt, TestEndToEndDeliveryUnderSpentBudget.FORMATION,
+                                           TestEndToEndDeliveryUnderSpentBudget.POSITIONS,
+                                           [PICK], question, **kw):
+            pass
+
+
+# ---------- 候选来源本身也在预算之内（issue #21 ④-a） ----------
+class _SlowContext(FakeContext):
+    """候选来源慢但活着（或慢到装死）：量「取候选的等待到底有没有上界」。
+
+    AstrBot 侧的取候选是异步的（get_using_provider_async ×2 + get_all_providers），
+    这一步此前没有任何等待上限——上游卡住时，总预算就漏掉一段不受约束的等待，
+    预算再准也压不住它。
+    """
+
+    def __init__(self, using=None, others=None, delay=0.0, calls=None):
+        super().__init__(using=using, others=others)
+        self.delay = delay
+        self.calls = calls
+
+    async def get_using_provider_async(self, umo=None):
+        if self.calls is not None:
+            self.calls.append(umo)
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        return self.using
+
+
+class TestCandidateFetchWithinBudget:
+    def _run(self, it, budget):
+        return asyncio.run(it.interpret(EVENT, "羽签", ["你的当下"], [PICK], "问感情",
+                                        "详情", budget=budget))
+
+    def test_slow_candidate_source_is_capped_by_remaining_budget(self):
+        """来源装死 5 秒、总预算 1.2 秒 → 约 1.2 秒就回退，不是等满 5 秒。
+
+        真睡不可免的理由同 TestRealWallClock：只有墙钟能证明它确实接到了 wait_for 上。
+        """
+        it = AiInterpreter(_SlowContext(delay=5.0), ai_timeout=30)
+        t0 = time.monotonic()
+        out = self._run(it, AiBudget(1.2))
+        elapsed = time.monotonic() - t0
+        assert out is None
+        assert elapsed < 3.0, f"取候选没有上界：等了 {elapsed:.2f}s"
+
+    def test_candidate_wait_is_accounted_as_the_same_budget_stop(self, caplog):
+        """取候选超时按同一个死因记账：该阶段进 stopped，且只落一条预算日志。"""
+        it = AiInterpreter(_SlowContext(delay=5.0), ai_timeout=30)
+        bd = AiBudget(1.2)
+        with caplog.at_level(logging.WARNING):
+            assert self._run(it, bd) is None
+        assert "AI 解读" in bd.stopped       # 调用方据此不再叠一条「全败」误导日志
+        notes = [r.getMessage() for r in caplog.records if "总预算" in r.getMessage()]
+        assert len(notes) == 1, f"预算日志应恰好一条，实际 {notes}"
+
+    def test_exhausted_budget_never_even_asks_for_candidates(self):
+        """开局即耗尽：连候选都不去取——取用本身也是要花时间的异步动作。"""
+        clk = Clock()
+        seen = []
+        it = AiInterpreter(_SlowContext(delay=5.0, calls=seen), ai_timeout=30)
+        bd = AiBudget(120, clk)
+        clk.advance(120)
+        assert self._run(it, bd) is None
+        assert seen == []                    # 一次都没发出去
+
+    def test_unlimited_budget_keeps_fetching_as_before(self):
+        """ai_budget_seconds=0 = 不设上限：取候选照旧直取，不新加一层超时。
+
+        判据取「ai_timeout 只有 1 秒、来源却要 1.5 秒」——若谁把取候选挂到单次
+        超时上，这一格就当场变红。
+        """
+        prov = FakeProvider("p0", result=OK_INTERP)
+        it = AiInterpreter(_SlowContext(using=prov, delay=1.5), ai_timeout=1, ai_budget=0)
+        assert self._run(it, AiBudget(0)) == OK_INTERP
+
+    def test_candidate_fetch_timeout_does_not_freeze_the_provider(self):
+        """取候选超时 ≠ 模型服务故障：不许把它记进失败冷却、拖累后面的占卜。"""
+        prov = FakeProvider("p0", result=OK_INTERP)
+        it = AiInterpreter(_SlowContext(using=prov, delay=5.0), ai_timeout=30, ai_cooldown=60)
+        assert self._run(it, AiBudget(1.2)) is None
+        assert it._fail_ts_by_provider == {}
+

@@ -940,6 +940,7 @@ class TestRunReadingRealChain:
         async def fake_interp(event, formation, positions, picks, clean, persona_eff=None, budget=None):
             return "【第1张·过去】一段过去。\
 【第2张·现在】一段现在。\
+【第3张·未来】一段未来。\
 【总结】结论。"
         async def fake_render(formation, positions, picks, *a):
             return None
