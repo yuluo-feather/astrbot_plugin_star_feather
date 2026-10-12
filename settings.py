@@ -23,6 +23,9 @@ PERSONA_VALUES = ("off", "tsundere", "gentle", "mystic", "random")  # 与 _conf_
 # 解读结构校验强度（ai.structure_check）：loose=只按宽松口径（标记段数≥牌数），
 # shadow=照旧放行但把严格口径的判定记一行（先量再收紧，默认），strict=按严格口径拒候选。
 # 严格口径的三条判据见 hardening.validate_interpret_structure_strict。
+# 影子档量两件事（缺一不可，口径见 interpret._log_shadow_summary）：① 候选拒绝率；
+# ② 「按严格口径这一次会不会整段降级」——按候选链的三个出口给三态判决：链中出现严格
+# 通过者=不降级、链已观测完且无严格通过者=降级、因宽松放行提前收尾=未观测（不硬报降级）。
 STRUCTURE_CHECK_LOOSE = "loose"
 STRUCTURE_CHECK_SHADOW = "shadow"
 STRUCTURE_CHECK_STRICT = "strict"

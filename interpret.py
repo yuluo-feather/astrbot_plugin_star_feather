@@ -68,6 +68,12 @@ class _ShadowTally:
         self.rejected = 0          # 会被严格口径拒掉的候选（候选拒绝率的分子）
         self.reasons: Counter[str] = Counter()   # 拒绝原因分布（缺号 / 越界 / 重复 / …）
         self.strict_pass_any = False   # 严格口径下本次至少有一个候选能放行
+        # 第一个放行候选的序号（从 1 起）：判决要说清「严格口径会走到第几个候选」。
+        # 只记序号、不记文本——解读原文不落盘。
+        self.strict_pass_index: int | None = None
+        # 本次是否**因宽松口径放行而收尾**。这是唯一「严格口径会走得更深」的出口，
+        # 也是判决里「未观测」那支的判据（三种出口见 _log_shadow_summary）。
+        self.closed_by_loose_return = False
 
 
 class AiBudget:
@@ -147,6 +153,12 @@ class AiInterpreter:
         self.ai_budget = ai_budget  # 单次占卜的 AI 总预算（秒），0=不限制；见 AiBudget
         # 输出结构校验强度（ai.structure_check）：见 _accept_structure
         self.structure_check = structure_check
+        # 影子读数的实例级累计：单签样本太小，判断「要不要收紧」得看长期分布，
+        # 所以每次汇总都把累计一并落进同一行（见 _log_shadow_summary）。
+        self._shadow_totals: dict[str, int] = {
+            "readings": 0, "no_degrade": 0, "degrade": 0, "unknown": 0,
+            "candidates": 0, "rejected": 0,
+        }
         # 0 = 不限制：显式的高级选项，但别让它静默生效——面板上看不出这个值的后果，
         # 日志里至少留一次（构造期一次，不往每次占卜里刷）
         if _budget_seconds(ai_budget) <= 0:
@@ -389,7 +401,9 @@ class AiInterpreter:
 
         tally：影子模式的本次计数（调用方在 shadow 档才传）。它记的是**严格口径**的
         判定，与本次实际放行与否无关——这是故意的：影子要量的就是「若按 strict 走，
-        这一条会怎样」，两种口径的判断必须落在同一批候选上才可比。
+        这一条会怎样」，两种口径的判断必须落在同一批候选上才可比。本函数只管逐条
+        判定与计数；「这一次究竟会不会降级」取决于候选链从哪个出口收尾，见
+        _log_shadow_summary 的三种出口。
         """
         loose = validate_interpret_structure(text, n_positions)
         if self.structure_check == STRUCTURE_CHECK_LOOSE:
@@ -402,6 +416,8 @@ class AiInterpreter:
             tally.candidates += 1
             if ok:
                 tally.strict_pass_any = True
+                if tally.strict_pass_index is None:
+                    tally.strict_pass_index = tally.candidates
             else:
                 tally.rejected += 1
                 tally.reasons.update(why)
@@ -419,21 +435,47 @@ class AiInterpreter:
         return loose
 
     def _log_shadow_summary(self, tally: _ShadowTally) -> None:
-        """影子口径的本次汇总：把两个分母一起落下来（结尾判据见下）。
+        """影子口径的本次汇总：两个指标 + 一个判决，外加实例级累计读数。
 
-        逐条判定只回答「哪一条会被拒」，单个分子没有意义。一行汇总给出三个数：
-        本次候选数、会被严格口径拒掉的候选数、以及严格口径下本次会不会降级——
-        对数出「候选拒绝率」与「收紧后的占卜降级率」而言，分子分母就齐了。
+        两个指标的口径在这里写死（主人 2026-10-12 定的第二条约束）：
+        - **候选拒绝率** = rejected / candidates。分母是**本次真的请求到并判定过**的
+          候选，不是「完整候选链的长度」——没请求到的候选没有观测量。
+        - **降级率** = 严格口径下「整段 AI 解读回退本地牌义」的概率。它**不能**拿
+          「影子拒了多少条候选」顶替：某条候选被拒 ≠ 这次降级，因为严格口径被拒之后
+          会继续往下试后面的候选（cost 更高、但可能救回来）。所以判决按候选链的
+          **三种出口**分，只有三态才能反映完整链的最终结果：
+          ① 出现过严格通过的候选 ⇒ 严格口径也会走到它并放行 ⇒ **不降级**（确定）；
+          ② 链已走完（所有可用候选都试过，或被预算/服务失败这类**与结构无关**的原因
+             截断——那些在严格口径下同样发生）且无严格通过者 ⇒ **降级**（确定）；
+          ③ 链因宽松口径放行而提前收尾、后续候选本次没请求 ⇒ **未观测**：严格口径会
+             继续试它们，降级与否取决于它们。这一支只能报未知，不许写成「会降级」，
+             否则就是把一个我们没量过的数当成结论用。
+        逐条判定只回答「哪一条会被拒」，没有分母就没有结论——这也是这行存在的理由。
         不含解读原文：只有数字与原因（隐私与体积都不允许把用户解读长期存盘）。
         """
         if self.structure_check != STRUCTURE_CHECK_SHADOW or tally.candidates == 0:
             return
         why = "/".join(f"{k}×{v}" for k, v in sorted(tally.reasons.items())) or "无"
-        verdict = ("严格口径下本次照常出解读" if tally.strict_pass_any
-                   else "严格口径下本次会降级为本地牌义")
+        if tally.strict_pass_index is not None:
+            verdict = (f"严格口径下本签不降级（第 {tally.strict_pass_index} 个候选即严格放行，"
+                       "尝试深度与本次一致）")
+            bucket = "no_degrade"
+        elif tally.closed_by_loose_return:
+            verdict = ("严格口径下会继续尝试本次未请求的后继候选：本签降级与否**未观测**"
+                       "（本次是宽松口径放行后收尾的）")
+            bucket = "unknown"
+        else:
+            verdict = "严格口径下本签降级为本地牌义（整条可用候选链已观测完，无候选严格通过）"
+            bucket = "degrade"
+        t = self._shadow_totals
+        t["readings"] += 1
+        t[bucket] += 1
+        t["candidates"] += tally.candidates
+        t["rejected"] += tally.rejected
         logger.info(
             f"结构校验·影子汇总：候选 {tally.candidates} 个，会被严格口径拒 {tally.rejected} 个"
-            f"（{why}）；{verdict}")
+            f"（{why}）；{verdict}｜累计：{t['readings']} 签——不降级 {t['no_degrade']}／"
+            f"降级 {t['degrade']}／未观测 {t['unknown']}，判定候选 {t['candidates']} 个中会被拒 {t['rejected']} 个")
 
     async def interpret(self, event, formation: str, positions: list[str],
                         picks: list[dict], user_input: str, detail: str,
@@ -489,6 +531,8 @@ class AiInterpreter:
             if not self._accept_structure(text, len(positions), tally):
                 continue
             if tally is not None:
+                # 因宽松口径放行而收尾：严格口径下会继续往下试，判决要落在「未观测」
+                tally.closed_by_loose_return = True
                 self._log_shadow_summary(tally)
             return text
         if tally is not None:

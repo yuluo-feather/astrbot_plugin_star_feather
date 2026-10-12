@@ -143,7 +143,12 @@ class TestStructureCheckModes:
 # ---------- 计量层：影子汇总必须给出两个分母 ----------
 class TestShadowTally:
     def test_summary_counts_candidate_and_rejection(self, caplog):
-        """一个候选、严格会拒 → 汇总给出「候选 1 / 拒 1」，并记下本次会降级。"""
+        """候选 1 个、严格会拒 → 汇总给「候选 1 / 拒 1」，判决是**未观测**而非降级。
+
+        为什么不是「会降级」：这条候选宽松通过、链就此收尾，而严格口径拒了它之后会
+        继续试后面的候选——那些候选本次没跑，降级与否根本没有观测量。把部分观测当
+        结论用，恰恰是决定要不要收紧时最容易犯的错（主人 2026-10-12 专门点了这条）。
+        """
         prov = FakeProvider("p0", result=LEGACY_TWO_OF_THREE)
         it = _interp([prov])
         with caplog.at_level(logging.INFO):
@@ -151,7 +156,7 @@ class TestShadowTally:
         line = [r.getMessage() for r in caplog.records if "影子汇总" in r.getMessage()]
         assert len(line) == 1, f"影子汇总应恰好一行，实际 {line}"
         assert "候选 1 个" in line[0] and "拒 1 个" in line[0]
-        assert "缺号" in line[0] and "会降级" in line[0]
+        assert "缺号" in line[0] and "未观测" in line[0]
 
     def test_summary_denominator_covers_every_checked_candidate(self, caplog):
         """分母是「参与校验的候选总数」：前两条连宽松都不过，也必须算进去。
@@ -167,7 +172,7 @@ class TestShadowTally:
         line = [r.getMessage() for r in caplog.records if "影子汇总" in r.getMessage()]
         assert len(line) == 1
         assert "候选 3 个" in line[0] and "拒 2 个" in line[0]
-        assert "照常出解读" in line[0]
+        assert "不降级" in line[0] and "第 3 个候选" in line[0]
 
     def test_summary_reported_even_when_nothing_passes(self, caplog):
         """一条候选都不达标也要落汇总：这类占卜恰恰是收紧后最先降级的那批。"""
@@ -176,7 +181,7 @@ class TestShadowTally:
         with caplog.at_level(logging.INFO):
             assert _ask(it, ["过去", "现在"]) is None
         line = [r.getMessage() for r in caplog.records if "影子汇总" in r.getMessage()]
-        assert len(line) == 1 and "候选 1 个" in line[0] and "会降级" in line[0]
+        assert len(line) == 1 and "候选 1 个" in line[0] and "降级为本地牌义" in line[0]
 
     def test_summary_is_not_written_when_nothing_was_checked(self, caplog):
         """没有候选经过校验（全部冷却/预算耗尽）时不落汇总：没有分母的空行只会刷日志。"""
@@ -196,6 +201,51 @@ class TestShadowTally:
                 assert _ask(it, ["过去"]) == single
             assert not [r for r in caplog.records if "影子汇总" in r.getMessage()], mode
             caplog.clear()
+
+    def test_confirmed_degrade_when_chain_is_exhausted(self, caplog):
+        """链已走完且无候选严格通过 → 判决是**确定降级**（这一支才敢给结论）。
+
+        两个候选连宽松都不过（完全没有标记），严格口径面对的是同一批候选、同样失败，
+        不存在「后面还有候选」这回事——观测即完整链，所以结论可以是确定的。
+        """
+        p0 = FakeProvider("p0", result="完全没有结构的一段话。")
+        p1 = FakeProvider("p1", result="仍然没有结构。")
+        it = _interp([p0, p1])
+        with caplog.at_level(logging.INFO):
+            assert _ask(it, ["过去", "现在"]) is None
+        line = [r.getMessage() for r in caplog.records if "影子汇总" in r.getMessage()]
+        assert len(line) == 1
+        assert "候选 2 个" in line[0] and "拒 2 个" in line[0]
+        assert "降级为本地牌义" in line[0] and "整条可用候选链已观测完" in line[0]
+
+    def test_unknown_branch_is_not_reported_as_degrade(self, caplog):
+        """宽松放行后收尾 = 严格口径会走得更深：这一支必须报「未观测」，不许报降级。
+
+        与上一条配对看：两条用例的候选都被严格拒，区别只在**链从哪个出口收尾**——
+        出口不同，结论的确定性就不同。第二个指标要反映的是「完整候选链的最终降级
+        结果」，所以这两种情形不能共用一句话。
+        """
+        prov = FakeProvider("p0", result=LEGACY_TWO_OF_THREE)
+        it = _interp([prov])
+        with caplog.at_level(logging.INFO):
+            _ask(it, ["过去", "现在", "未来"])
+        line = [r.getMessage() for r in caplog.records if "影子汇总" in r.getMessage()]
+        assert "未观测" in line[0] and "降级与否" in line[0]
+        assert "降级为本地牌义" not in line[0]
+
+    def test_cumulative_line_accumulates_across_readings(self, caplog):
+        """累计读数要跨占卜累加：单签样本决定不了要不要收紧，看的是长期分布。"""
+        it = _interp([FakeProvider("p0", result=OK3)])
+        with caplog.at_level(logging.INFO):
+            _ask(it, ["过去", "现在", "未来"])   # 判决：不降级
+            _ask(it, ["过去", "现在", "未来"])
+            caplog.clear()
+            _ask(it, ["过去", "现在", "未来"])
+        line = [r.getMessage() for r in caplog.records if "影子汇总" in r.getMessage()]
+        assert len(line) == 1
+        assert "累计：3 签" in line[0] and "不降级 3" in line[0]
+        assert "降级 0" in line[0] and "未观测 0" in line[0]
+        assert "判定候选 3 个中会被拒 0 个" in line[0]
 
 
 # ---------- 替身样本与真实口径对齐 ----------
