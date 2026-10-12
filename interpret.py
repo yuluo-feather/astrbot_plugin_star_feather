@@ -8,6 +8,7 @@
 """
 import asyncio
 import time
+from collections import Counter
 
 from astrbot.api import logger
 
@@ -16,6 +17,7 @@ from hardening import (
     normalize_injection_input,
     strip_injection_fragments,
     validate_interpret_structure,
+    validate_interpret_structure_strict,
 )
 from prompts import (
     SYSTEM_PROMPT_DIVINE,
@@ -30,6 +32,10 @@ from settings import (
     DEFAULT_AI_PERSONA,
     DEFAULT_QUESTION_MAX_LEN,
     DEFAULT_SPIRIT_STAGE_BUDGET,
+    DEFAULT_STRUCTURE_CHECK,
+    STRUCTURE_CHECK_LOOSE,
+    STRUCTURE_CHECK_SHADOW,
+    STRUCTURE_CHECK_STRICT,
 )
 
 # 输出清洗用的引号集：中英引号 + 直角引号 + 单引号。用码点拼出，避开源码里的转义
@@ -47,6 +53,21 @@ def _budget_seconds(value) -> float:
         return float(value)
     except (TypeError, ValueError):
         return float(DEFAULT_AI_BUDGET)
+
+
+class _ShadowTally:
+    """影子口径的本次占卜计数：只存数字与原因，不存解读原文。
+
+    为什么需要它：逐条影子判定只回答「这一条会被拒」，没有分母——只有分子既算不出
+    候选拒绝率，也算不出「切 strict 之后会有多少次占卜整段降级」。而这两个数正是
+    决定要不要收紧的全部依据。原文不落盘：隐私与体积都受不了（见日志里的汇总行）。
+    """
+
+    def __init__(self):
+        self.candidates = 0        # 参与结构校验的非空候选（候选拒绝率的分母）
+        self.rejected = 0          # 会被严格口径拒掉的候选（候选拒绝率的分子）
+        self.reasons: Counter[str] = Counter()   # 拒绝原因分布（缺号 / 越界 / 重复 / …）
+        self.strict_pass_any = False   # 严格口径下本次至少有一个候选能放行
 
 
 class AiBudget:
@@ -110,7 +131,8 @@ class AiInterpreter:
                  ai_cooldown: int = 60, ai_provider_id: str = "",
                  max_question_len: int = DEFAULT_QUESTION_MAX_LEN,
                  persona: str = DEFAULT_AI_PERSONA,
-                 ai_budget: int = DEFAULT_AI_BUDGET):
+                 ai_budget: int = DEFAULT_AI_BUDGET,
+                 structure_check: str = DEFAULT_STRUCTURE_CHECK):
         self.context = context
         self.enable_ai = enable_ai
         self.ai_timeout = ai_timeout
@@ -123,6 +145,8 @@ class AiInterpreter:
         # 其他模型与其他用户不受拖累；冷却期内该 provider 直接从候选链里跳过。
         self._fail_ts_by_provider: dict[str, float] = {}
         self.ai_budget = ai_budget  # 单次占卜的 AI 总预算（秒），0=不限制；见 AiBudget
+        # 输出结构校验强度（ai.structure_check）：见 _accept_structure
+        self.structure_check = structure_check
         # 0 = 不限制：显式的高级选项，但别让它静默生效——面板上看不出这个值的后果，
         # 日志里至少留一次（构造期一次，不往每次占卜里刷）
         if _budget_seconds(ai_budget) <= 0:
@@ -222,6 +246,48 @@ class AiInterpreter:
             logger.warning(f"候选来源[全部已加载]枚举失败，本签该来源缺席: {e}")
         return out
 
+    async def _gather_candidates(self, umo: str | None,
+                                 budget: AiBudget | None = None,
+                                 stage: str | None = None) -> list:
+        """按剩余预算收集候选：候选来源的异步取用本身也在总预算之内（issue #21 ④-a）。
+
+        为什么单开这一层：`ai_timeout` 只包住 `_chat_once`，而「拿候选」这一步本身
+        也是异步的（会话模型 / 全局默认 / 全部已加载，三个来源各自 await 一次）。它
+        此前没有等待上限，于是所谓「一次占卜的 AI 总预算」漏掉了一段不受约束的等待
+        ——上游队列卡住时，预算算得再准也压不住它。
+
+        口径：
+          - 无预算、或预算不限（`ai_budget_seconds=0`）：原样直取，不给 0 那档新增语义；
+          - 有预算：等待上限 = 剩余预算；剩余不足 AI_BUDGET_MIN_ATTEMPT 就不再取
+            （注定超时，白等一次）；
+          - 取候选超时 = 这段等待把预算吃掉了，与「预算见底」按同一个死因记账
+            （`_budget_stop`，同一阶段只报一次），不再自己叠第二条日志；
+          - 超时只影响这一次占卜，**不**把 provider 记进失败冷却——取不到候选未必是
+            模型服务的问题，冻住它只会连累后面的占卜。
+        """
+        if budget is None or not budget.limited:
+            return await self._provider_candidates(umo)
+
+        def _stop_here() -> list:
+            """预算见底就地停手：与阶段内的停手共用同一条账。"""
+            if stage is not None:
+                self._budget_stop(budget, stage)
+            else:
+                logger.warning("AI 总预算见底，不足以取用候选来源：本签回退本地牌义")
+            return []
+
+        left = budget.remaining()
+        if left < AI_BUDGET_MIN_ATTEMPT:
+            return _stop_here()
+        try:
+            return await asyncio.wait_for(self._provider_candidates(umo), timeout=left)
+        except asyncio.TimeoutError:
+            return _stop_here()
+        except Exception as e:
+            # 出口纪律：候选收集自身的意外绝不带走整条消息（同 main._ensure_image）
+            logger.warning(f"候选收集失败（{e}）：本签按无候选处理，回退本地牌义")
+            return []
+
     async def spirit_line(self, event, cards: list, topic: str,
                           persona_eff, budget: AiBudget | None = None) -> str | None:
         """牌灵的一句话（聊天「牌灵的话」）：AI 按人设生成短句
@@ -251,7 +317,7 @@ class AiInterpreter:
         # 会让「一句话」生成跑偏成结构化解读；人设风格已拼在 prompt 的 signature_style
         system = SYSTEM_PROMPT_DIVINE
         umo = getattr(event, "unified_msg_origin", None)
-        for provider in await self._provider_candidates(umo):
+        for provider in await self._gather_candidates(umo, bd, _STAGE_SPIRIT):
             pid = self._provider_id(provider)
             if self._in_cooldown(pid):
                 continue
@@ -307,6 +373,68 @@ class AiInterpreter:
         except Exception:
             return None
 
+    def _accept_structure(self, text: str, n_positions: int,
+                          tally: _ShadowTally | None = None) -> bool:
+        """输出结构闸：这一份候选文本按当前口径放不放行（ai.structure_check）。
+
+        loose   —— 只走宽松口径（【第N张·位置】标记段数 ≥ 牌数），v0.7.8 之前的行为。
+        shadow  —— 默认。行为等同于 loose，但同时用严格口径判一遍，不合规就记一行
+                   info：**先量再收紧**。理由很实际——严格口径拒掉一个候选＝那次占卜
+                   整段 AI 解读降级成本地牌义，这笔代价只能用真实候选的拒绝率来估，
+                   而真实候选只有线上跑得出来。影子判定不改任何行为，所以敢默认开。
+        strict  —— 按严格口径放行：编号 1..N 各一次、总结 0/1 次、位置名非空。
+
+        三档共用同一个函数入口：收紧时改一个配置值，不用改代码，也不会出现
+        「哪儿查、哪儿不查」的两份实现慢慢走偏。
+
+        tally：影子模式的本次计数（调用方在 shadow 档才传）。它记的是**严格口径**的
+        判定，与本次实际放行与否无关——这是故意的：影子要量的就是「若按 strict 走，
+        这一条会怎样」，两种口径的判断必须落在同一批候选上才可比。
+        """
+        loose = validate_interpret_structure(text, n_positions)
+        if self.structure_check == STRUCTURE_CHECK_LOOSE:
+            if not loose:
+                logger.warning("AI 解读未按【第N张·位置】结构输出，弃用该候选，继续尝试")
+                return False
+            return True
+        ok, why = validate_interpret_structure_strict(text, n_positions)
+        if tally is not None:
+            tally.candidates += 1
+            if ok:
+                tally.strict_pass_any = True
+            else:
+                tally.rejected += 1
+                tally.reasons.update(why)
+        if self.structure_check == STRUCTURE_CHECK_STRICT:
+            if not ok:
+                logger.warning(
+                    f"AI 解读结构不合规（严格口径：{'/'.join(why)}），弃用该候选，继续尝试")
+                return False
+            return True
+        # shadow：判定只落日志，放行与否完全交给宽松口径
+        if loose and not ok:
+            logger.info(f"结构校验·影子：本候选会被严格口径拒绝（{'/'.join(why)}），当前仍按宽松口径放行")
+        elif not loose:
+            logger.warning("AI 解读未按【第N张·位置】结构输出，弃用该候选，继续尝试")
+        return loose
+
+    def _log_shadow_summary(self, tally: _ShadowTally) -> None:
+        """影子口径的本次汇总：把两个分母一起落下来（结尾判据见下）。
+
+        逐条判定只回答「哪一条会被拒」，单个分子没有意义。一行汇总给出三个数：
+        本次候选数、会被严格口径拒掉的候选数、以及严格口径下本次会不会降级——
+        对数出「候选拒绝率」与「收紧后的占卜降级率」而言，分子分母就齐了。
+        不含解读原文：只有数字与原因（隐私与体积都不允许把用户解读长期存盘）。
+        """
+        if self.structure_check != STRUCTURE_CHECK_SHADOW or tally.candidates == 0:
+            return
+        why = "/".join(f"{k}×{v}" for k, v in sorted(tally.reasons.items())) or "无"
+        verdict = ("严格口径下本次照常出解读" if tally.strict_pass_any
+                   else "严格口径下本次会降级为本地牌义")
+        logger.info(
+            f"结构校验·影子汇总：候选 {tally.candidates} 个，会被严格口径拒 {tally.rejected} 个"
+            f"（{why}）；{verdict}")
+
     async def interpret(self, event, formation: str, positions: list[str],
                         picks: list[dict], user_input: str, detail: str,
                         persona_eff: str | None = None,
@@ -339,7 +467,9 @@ class AiInterpreter:
         umo = getattr(event, "unified_msg_origin", None)
         got_text = False  # 是否至少有一个候选产出了文本（区分“服务失败”与“结构失格”）
         tried = 0
-        for provider in await self._provider_candidates(umo):
+        # 影子计数只在 shadow 档开：其余档位没有「量」的任务，别白记
+        tally = (_ShadowTally() if self.structure_check == STRUCTURE_CHECK_SHADOW else None)
+        for provider in await self._gather_candidates(umo, bd, _STAGE_INTERPRET):
             pid = self._provider_id(provider)
             if self._in_cooldown(pid):
                 logger.info(f"AI 解读 provider[{pid}] 处于失败冷却期，跳过")
@@ -354,14 +484,19 @@ class AiInterpreter:
                 self._mark_fail(pid)  # 服务级失败：只冷却这个 provider
                 continue
             got_text = True
-            if not validate_interpret_structure(text, len(positions)):
-                logger.warning("AI 解读未按【第N张·位置】结构输出，弃用该候选，继续尝试")
+            # 结构闸：按 ai.structure_check 的口径判定（默认影子——只量不拦，
+            # 严格口径的拒绝率得先用真实候选统计出来再决定是否启用）
+            if not self._accept_structure(text, len(positions), tally):
                 continue
+            if tally is not None:
+                self._log_shadow_summary(tally)
             return text
+        if tally is not None:
+            self._log_shadow_summary(tally)
         if _STAGE_INTERPRET in bd.stopped:
             return None  # 预算掐掉的：原因已在 _budget_stop 里写过，别叠一条误导性的「全败」
         if tried == 0:
-            logger.info("AI 解读候选全部处于失败冷却期，直接使用本地牌义")
+            logger.info("AI 解读没有可用候选（来源不可用或全部处于失败冷却期），直接使用本地牌义")
             return None
         if not got_text:
             logger.warning("所有可用提供商均未产出 AI 解读（已按 provider 记录失败冷却）")

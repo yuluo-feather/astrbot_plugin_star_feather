@@ -432,10 +432,18 @@ class TestImageGoneBeforeSend:
 
     真实故障链（2026-09-29 实机日志）：14:23:57 渲染 → 登记 30 秒清理 →
     14:24:27 定时器删图 → 牌灵的话那次 AI 请求自己跑了 63 秒 → 14:25:03 发送 →
-    FileNotFoundError。窗口由 ai_timeout × 候选数 × 2 段决定，**没有上界**，
-    所以「删干净」和「发得出去」是两件独立的事，得各管各的。
+    FileNotFoundError。当时的窗口由 ai_timeout × 候选数 × 2 段决定，**没有上界**。
 
-    注入方式刻意与真实一致：图正常渲染出来，让它在「渲染 → 发送」中间被删掉，
+    2026-10-12 之后窗口本身被两道闸收掉了：ai.ai_budget_seconds 给 AI 阶段一个总预算，
+    ② 图片后置渲染把渲染点搬到两段 AI 之后（见 TestRenderAfterAI）——现在渲染到平台
+    读文件只剩毫秒。所以本类守的已经不是「那 63 秒」，而是两件仍然成立的事：
+      · 注入仍按「图渲染成功 → 文件在发送前消失」来做（② 之后这只可能来自外部删除，
+        不再是清理保险丝自己到点）；
+      · 「图片问题绝不带走消息」这条出口纪律，在顺序改动之后依然有效。
+    换句话说：这条链的原病灶被前面的闸堵住了，但如果有人把顺序挪回去、或者把核验删掉，
+    本类必须立刻红——它是那两道闸的下游保险。
+
+    注入方式刻意与真实一致：图正常渲染出来，在渲染返回那一刻把它删掉，
     再走真 _run_reading → 真 _deliver，只看对外可观测的结果（链里 Image 指的文件
     此刻到底存不存在、消息还发不发得出去）。非转发模式断言链首那张图——与线上
     那条 [Image, Plain, Plain, Plain] 的失败链同形。
@@ -468,8 +476,13 @@ class TestImageGoneBeforeSend:
         return evt
 
     @staticmethod
-    def _plugin(render, on_spirit=None):
-        """真入口 + 真核心 + 真分发，只把「渲染」和「AI 那两段」换成可控的桩。"""
+    def _plugin(render, on_after_render=None):
+        """真入口 + 真核心 + 真分发，只把「渲染」和「AI 那两段」换成可控的桩。
+
+        on_after_render：渲染产图后立刻回调一次（仅第一次渲染触发）。注入点选在
+        这里而不是 AI 里，是因为 ② 之后「图在渲染与发送之间不见」只剩这一种可达
+        路径——删图的手不再是清理保险丝，而是外部因素，它落在渲染刚收工那一瞬。
+        """
         from main import StarFeatherPlugin
         from tarot_core import StarTarot
         t = StarTarot(FakeContext(None), None)
@@ -482,7 +495,10 @@ class TestImageGoneBeforeSend:
 
         async def fake_render(formation, positions, picks, *a):
             calls.append(formation)
-            return render()
+            path = render()
+            if on_after_render and len(calls) == 1:
+                on_after_render()  # 图刚渲染出来就没了：残留窗口的模型
+            return path
 
         t._maybe_render_image = fake_render
         p = StarFeatherPlugin.__new__(StarFeatherPlugin)
@@ -491,8 +507,6 @@ class TestImageGoneBeforeSend:
         p._shuffle_hint = lambda: None
 
         async def fake_spirit(event, uid, picks, clean, persona_eff, budget=None):
-            if on_spirit:
-                on_spirit()  # 就夹在渲染与发送之间：真实窗口正是「牌灵的话」那次请求
             return "牌灵今天懒得开口"
         p.daily = types.SimpleNamespace(spirit_cached=fake_spirit)
         return p, calls
@@ -502,7 +516,7 @@ class TestImageGoneBeforeSend:
         return [c for c in chain if type(c).__name__ == "Image"]
 
     def test_image_deleted_mid_window_is_rerendered_before_send(self, tmp_path):
-        """图在 AI 窗口里被删 → 发送前补渲染一张，交出去的是**存在的**文件。"""
+        """图在「渲染 → 发送」之间消失 → 发送前补渲染一张，交出去的是**存在的**文件。"""
         first = str(tmp_path / "tarot_first.png")
         fresh = str(tmp_path / "tarot_fresh.png")
         rendered = []
@@ -514,9 +528,9 @@ class TestImageGoneBeforeSend:
             return path
 
         def kill_the_image():
-            os.remove(first)  # 清理定时器到点，把已被 AI 拖出去的那张删了
+            os.remove(first)  # 图刚渲染出来就被外部删了（保险丝之外的路径）
 
-        p, calls = self._plugin(render, on_spirit=kill_the_image)
+        p, calls = self._plugin(render, on_after_render=kill_the_image)
         evt = self._evt()
         self._collect(p._run_reading(evt, self.FORMATION, self.POSITIONS, [PICK], "问感情"))
         assert evt.result, "图补回来了，消息必须照发"
@@ -538,7 +552,7 @@ class TestImageGoneBeforeSend:
             open(path, "wb").write(b"PNG")
             return path
 
-        p, calls = self._plugin(render, on_spirit=lambda: os.remove(path))
+        p, calls = self._plugin(render, on_after_render=lambda: os.remove(path))
         evt = self._evt()
         self._collect(p._run_reading(evt, self.FORMATION, self.POSITIONS, [PICK], "问感情"))
         assert evt.result, "无图也必须把解读发出去"
@@ -570,6 +584,7 @@ class TestImageGoneBeforeSend:
         assert calls == [self.FORMATION]
         assert not self._images(evt.result)
 
+
     def test_verify_image_returns_as_is_on_healthy_path(self, tmp_path):
         """核验函数自身的契约：存在→原样返回；空/None→原样返回（不额外渲染）。"""
         p, calls = self._plugin(lambda: None)
@@ -590,6 +605,89 @@ class TestImageGoneBeforeSend:
         assert _run(p._ensure_image(missing, self.FORMATION, self.POSITIONS, [PICK])) is None
         p.tarot._maybe_render_image = boom
         assert _run(p._ensure_image(missing, self.FORMATION, self.POSITIONS, [PICK])) is None
+
+
+# ============ ② 图片后置渲染：渲染排在两段 AI 之后（2026-10-12） ============
+class TestRenderAfterBothAI:
+    """顺序契约：渲染必须发生在牌灵的话与解读**之后**、发送之前。
+
+    为什么值得一条红线：这个顺序既是「图熬过 AI 窗口」的解法，也是唯一让它成立的
+    东西——只要有人把渲染挪回 AI 之前（改代码时最容易的动机是「早点出图、让等待被
+    渲染填满」），窗口立刻恢复成 AI 总预算的量级，Issue #2 的故障链原地复活，而
+    功能测试会全绿：谁都还在出图、谁都还在发消息，只是那张图的寿命又不受控了。
+
+    断言用调用时间线，不碰内部实现：只记「谁先被调用」。同时钉住代价的那一面——
+    渲染返回 None 时消息照样发得出去（无图走既有退路），后置不等于把结果扣住。
+    """
+
+    FORMATION = "羽签"
+    POSITIONS = ["你的当下"]
+
+    @staticmethod
+    def _collect(agen):
+        async def run():
+            return [x async for x in agen]
+        return asyncio.run(run())
+
+    def _timeline(self):
+        from main import StarFeatherPlugin
+        from tarot_core import StarTarot
+        t = StarTarot(FakeContext(None), None)
+        t.send_mode = "plain"
+        t.deliverer.forward_result = False
+        t.enable_ai = False
+        seen = []
+
+        async def fake_interp(event, formation, positions, picks, clean,
+                              persona_eff=None, budget=None):
+            seen.append("interp")
+            return "【第1张·你的当下】一段解读。"
+
+        async def fake_render(formation, positions, picks, *a):
+            seen.append("render")
+            return None
+
+        t._ai_interpret = fake_interp
+        t._maybe_render_image = fake_render
+        p = StarFeatherPlugin.__new__(StarFeatherPlugin)
+        p.tarot = t
+        p.daily_card = False
+        p._shuffle_hint = lambda: None
+
+        async def fake_spirit(event, uid, picks, clean, persona_eff, budget=None):
+            seen.append("spirit")
+            return "牌灵今天懒得开口"
+        p.daily = types.SimpleNamespace(spirit_cached=fake_spirit)
+
+        evt = types.SimpleNamespace()
+        evt.result = None
+        evt.sent = []
+        evt.get_self_id = lambda: "12345"
+
+        def chain_result(chain):
+            evt.result = chain
+            return chain
+        evt.chain_result = chain_result
+
+        async def send(chain):
+            evt.sent.append(chain)
+        evt.send = send
+        self._collect(p._run_reading(evt, self.FORMATION, self.POSITIONS, [PICK], "问感情"))
+        return seen, evt
+
+    def test_render_is_called_after_both_ai_stages(self):
+        seen, evt = self._timeline()
+        assert seen == ["spirit", "interp", "render"], (
+            f"渲染必须在两段 AI 之后：顺序被改回 AI 之前，图片寿命重新变成"
+            f"「AI 总预算量级」，Issue #2 的故障链复活（实际时间线 {seen!r}）")
+
+    def test_render_failure_still_sends_result(self):
+        """渲染返回 None（后置付出的代价里最坏的一档）：结果照发，不因图扣下消息。"""
+        _, evt = self._timeline()
+        assert evt.result, "无图也要把解读发出去"
+        texts = [getattr(c, "text", "") for c in evt.result]
+        assert any(texts), "无图时走既有退路（补逐牌牌义）"
+
 
 # ---------------- 窄口子：保险丝登记失败，不许带走主流程 ----------------
 #

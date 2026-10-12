@@ -2,11 +2,12 @@
 
 测试按域分文件：test_core（核心与三入口集成）/ test_settings（配置语义）/
 test_spreads（选阵与清洗）/ test_hardening（Prompt 防护）/ test_identity（身份标识）/
-test_gating（限流闸门）/ test_card_render（渲染与清理）/
+test_gating（限流闸门）/ test_card_render（渲染与清理）/ test_clock（日期边界：时区口径与今天唯一来源）/
 test_fonts（字体子系统）/ test_deliver（分段与分发）/ test_limiter / test_config /
 test_dailylines（每日签文池与确定性挑选）/ test_integrity（数据完整性域）/
 test_kv_utils（KV 读写降级）/ test_fault_injection（故障注入矩阵：存储故障与降级契约）/
 test_ai_budget（AI 总预算：单次占卜的 AI 花费上界与回退）/
+test_structure_check（解读结构校验：三档口径行为、严格判据与影子计数分母）/
 test_judgement_corpus（判定语料回归）/
 test_stub_signatures（打桩与真实签名一致性）/ test_docs_consistency（测试清单对账）/
 test_release_gates（发布红线：版本四件套与市场包体）/
