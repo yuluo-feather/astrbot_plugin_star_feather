@@ -15,6 +15,7 @@ main.py 只做入口编排：「读写 KV + 生成拦截文案」收敛于此。
 import asyncio
 import time
 
+from clock import Clock
 from identity import resolve_sender_uid
 from kv_utils import kv_get, kv_put
 from limiter import cooldown_remaining, daily_remaining, daily_touch
@@ -24,18 +25,28 @@ class LimitGate:
     """限流闸门：供命令入口与工具入口共用。
 
     kv_store 须提供 get_kv_data/put_kv_data（插件实例自身即可）；
-    cmd_rate_limit / daily_count_limit 来自 TarotSettings 解析结果。
+    cmd_rate_limit / daily_count_limit 来自 TarotSettings 解析结果；
+    clock 给日期边界（每日计数跨天重置）用，不传则跟随本地时区自建一份。
     """
 
-    def __init__(self, kv_store, cmd_rate_limit: int, daily_count_limit: int):
+    def __init__(self, kv_store, cmd_rate_limit: int, daily_count_limit: int, clock=None):
         self.kv_store = kv_store
         self.cmd_rate_limit = cmd_rate_limit
         self.daily_count_limit = daily_count_limit
+        self.clock = clock or Clock()
         # 读-判-写原子化（2026-09-06 渗透实测）：真实 KV 每次 IO 都有事件循环让出点，
         # 并发请求会全部读到旧值 → 每日计数与会话节流被整体绕过（带 IO 延迟桩实测
         # 30 并发/配额5 全部放行、20 并发/冷却10s 全绕过）。实例级 asyncio.Lock
         # 串行化「读→判→写」窗口：单进程内原子（AstrBot 单体运行）；多进程部署
-        # 需框架侧分布式锁，此锁不覆盖。KV 异常降级语义不变（锁只在正常路径持有）。
+        # 需框架侧分布式锁，此锁不覆盖。
+        # 【保护范围，2026-10-12 复核后写实】这把锁属于实例：同一实例内的并发请求互保，
+        # 但热重载前后两代实例各持一把锁，互不相识——两侧并发操作同一份 KV 时并不互保
+        # （宿主侧能力已核，2026-10-12：astrbot/core/utils/plugin_kv_store.py 的
+        # PluginKVStoreMixin 只有 put_kv_data / get_kv_data / delete_kv_data 三个方法，
+        # 没有事务、也没有 compare-and-swap 一类的原子「读—判—写」⇒ 没有更细的锁可换）。
+        # 实际影响有限：热重载那几秒里两侧各跑一次计数，最坏是配额少算一两次——
+        # 比它严重的共享资源是图片目录，那已在 card_render 按实例隔离。
+        # 若将来要多进程部署，这里是必须改的入口，别指望现有实现顺手兜住。
         self._kv_lock = asyncio.Lock()
 
     async def session_throttle(self, key: str, cooldown: int) -> int:
@@ -84,7 +95,9 @@ class LimitGate:
         if self.daily_count_limit > 0:
             uid = resolve_sender_uid(event)
             if uid:
-                today = time.strftime("%Y%m%d")
+                # 日期键走 clock（与今日牌运/牌灵的话同一口径）：会话节流那条时间戳另用
+                # time.time()，两者各管各的——一个是墙钟时长，一个是日期边界，别混
+                today = self.clock.today()
                 key = f"sf_cmd_cnt_{uid}"
                 async with self._kv_lock:  # 读-判-写原子化，防并发读旧值超发配额（渗透实测）
                     data, ok = await kv_get(self.kv_store, key, None, "每日计数")

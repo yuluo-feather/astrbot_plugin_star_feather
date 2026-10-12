@@ -13,13 +13,12 @@ import asyncio
 import hashlib
 import random
 import re
-import time
 from contextlib import AbstractAsyncContextManager, nullcontext
-from datetime import datetime
 
 from astrbot.api import logger
 
-from card_render import _render_daily_card_img, _schedule_image_cleanup
+from card_render import IMAGE_DIR_ROOT, _render_daily_card_img, _schedule_image_cleanup
+from clock import Clock
 from dailylines import pick_signature
 from kv_utils import kv_get, kv_put
 from prompts import SPIRIT_PROMPT_V
@@ -163,6 +162,27 @@ def _cached_card(raw) -> dict | None:
 
 _GENERIC_TOPIC = "（今日牌运）"
 
+# 解读分桶上限（⑧）：同一天同一个人换着主题问，每个主题各占一桶，而桶只在跨天时随
+# pick_cached 整体作废——当天换主题不回收，KV 条目会随主题数线性长大。
+# 上限一到就丢「最早插入」的那桶：FIFO（按插入顺序），不是 LRU。
+# 选 FIFO 的理由是可证明：分桶是个 dict，KV 里存的就是它的序列化形态，插入顺序在
+# JSON 往返后原样保留，于是「淘汰最早的」实现就是删首个 key 一句话；换 LRU 得额外
+# 维护访问计数或时间戳——多一份状态、多一处会过时的地方，而这里的访问分布本就偏
+# 「当天问过的事基本不再回头」，LRU 多出来的命中率换不回这份复杂度。
+# 注意 dict 重写已有 key **不改变**其顺序，所以严格是「最早插入」而非「最早更新」。
+# 20 的口径：一次占卜一问一桶，20 桶＝一天换 20 个话题仍留得住；真要压成本，
+# 该动的是 limit.daily_count（限流），而不是把缓存做大。
+DAILY_INTERP_MAX = 20
+
+
+def _trim_interp_slots(slots: dict) -> None:
+    """把解读分桶裁到 DAILY_INTERP_MAX：超出的按「最早插入」逐个丢（原地改）。
+
+    只做结构维护，不做业务判定，所以不返回值、也不吞异常——调用点已判过 slots 是 dict。
+    """
+    while len(slots) > DAILY_INTERP_MAX:
+        slots.pop(next(iter(slots)), None)
+
 
 def _norm_topic(clean: str) -> str:
     """解读缓存的主题指纹：具体问题按清洗后原文；泛问（无具体主题词）统一为当日牌运。
@@ -231,10 +251,24 @@ class DailyFortune:
     入口层（main.py）仅通过本类访问，不直接接触 KV 细节。
     """
 
+    # 类级兜底（与 __init__ 同口径：本地时区 + 图片根目录）：只有 __new__ 直调才会
+    # 用到（单测、诊断脚本），真实装配一律被 __init__ 的实例属性覆盖。
+    # 为什么要兜而不是让它抛：渲染路径整段裹 try，AttributeError 会被当成「渲染失败」
+    # 静默吞掉，测试里表现为「明明渲染桩成功了却返回 None」——今天这仨红就是这个形状。
+    # 生产口径由 test_clock.py::TestClockWiring 钉住，不靠这两个默认值撑。
+    clock = Clock()
+    image_dir = IMAGE_DIR_ROOT
+
     def __init__(self, kv_store, tarot):
         # kv_store 传插件自身（见类 docstring）、tarot 是 StarTarot 实例
         self.kv_store = kv_store
         self.tarot = tarot
+        # 日期边界的唯一来源（clock.Clock）：取 tarot 上那份（同一实例内与框架时区口径
+        # 一致）；桩对象没有就自建一份跟随本地时区——不因诊断/装配形态让日期键失联
+        self.clock = getattr(tarot, "clock", None) or Clock()
+        # 图片目录同样取自核心那份（①实例隔离：海报卡别落到共享父目录去）；
+        # 桩对象没有就退回根目录——诊断/装配形态不该让渲染无处可放
+        self.image_dir = getattr(tarot, "image_dir", None) or IMAGE_DIR_ROOT
         # 缓存读-判-写串行化（gating 同款防线）：并发占卜时两条协程各自读旧值再写回，
         # 后写的会把先写的分桶整个覆盖掉（实测：并发问两个主题，KV 里只剩一个）
         self._kv_lock = asyncio.Lock()
@@ -250,12 +284,13 @@ class DailyFortune:
         try:
             card = picks[0]["card"]
             upright = bool(picks[0]["upright"])
-            date_text = (f"{int(time.strftime('%m'))}月{int(time.strftime('%d'))}日"
-                         f"·周{'一二三四五六日'[datetime.now().weekday()]}")
-            signature = pick_signature(card, upright, uid, time.strftime("%Y%m%d"))
+            date_text = self.clock.date_text()
+            signature = pick_signature(card, upright, uid, self.clock.today())
             async with _render_slot(self):
+                # 显式传本实例的目录（①实例隔离）：海报卡与普通牌面图同住一处，
+                # 都由本实例自己的清理路径负责
                 img = await asyncio.to_thread(_render_daily_card_img, card, upright, signature,
-                                              date_text)
+                                              date_text, self.image_dir)
             if not img or not isinstance(img, str) or not img.strip():
                 return None
             _schedule_image_cleanup(img)
@@ -270,7 +305,7 @@ class DailyFortune:
         由调用方统一回退自由随机（确定性函数保证 KV 异常也不丢固定）。"""
         if not uid:
             return None
-        key, today = f"sf_daily_{uid}", time.strftime("%Y%m%d")
+        key, today = f"sf_daily_{uid}", self.clock.today()
         # 读-判-写原子化（gating 同款防线）：并发时两条协程各自读旧值再写回，
         # 后写的会把先写的字段整个覆盖掉
         async with self._kv_lock:
@@ -307,14 +342,14 @@ class DailyFortune:
         换回来不丢，不同问题再不串答案（旧版单槽无主题区分，同一天问什么
         都返回第一段解读——「问什么都一个答案」的元凶）。
         主题分桶依赖 limit.daily_count 启用才受每日次数间接约束；默认 0=关闭时
-        主题分桶无硬上界，仅靠跨天 pop（pick_cached 的 interps 清理）回收，
-        同日换主题不回收。
+        主题分桶的硬上界是 DAILY_INTERP_MAX（FIFO，见该常量），跨天另由
+        pick_cached 的 interps 清理整体回收。
 
         budget：调用方（一次占卜）传的 AI 总预算对象，原样透传给解读器——缓存命中的
         路径根本不碰 AI，也就无所谓预算；未命中而现场生成时才吃这笔预算。
         """
         topic = _norm_topic(clean)
-        key, today = f"sf_daily_{uid}", time.strftime("%Y%m%d")
+        key, today = f"sf_daily_{uid}", self.clock.today()
         # 命中判定原子化；写回另起一次锁（AI 调用不占锁，见下）
         async with self._kv_lock:
             data, ok = await kv_get(self.kv_store, key, None, "每日牌运解读缓存")
@@ -363,6 +398,10 @@ class DailyFortune:
                 # 红线：tests/test_core.py::TestDailyNullInterp
                 if interp:
                     data["interps"][topic] = interp
+                    # 写入后裁剪（⑧）：超过 DAILY_INTERP_MAX 就丢最早插入的那桶。
+                    # 裁剪在写入之后、写回之前——读写两侧看到的都是同一个形状，命中判定
+                    # 不必额外考虑「桶还在不在」
+                    _trim_interp_slots(data["interps"])
                 await kv_put(self.kv_store, key, data, "每日牌运解读缓存")
         return interp
 
@@ -390,7 +429,7 @@ class DailyFortune:
         恢复前的重复查询会重新生成，AI 每次措辞可能不同，直接破坏「当日同牌组同一句」。
         红线：tests/test_core.py::TestSpiritCache::test_spirit_writes_back_even_on_read_failure
         """
-        today = time.strftime("%Y%m%d")
+        today = self.clock.today()
         if not picks:
             return ""
         card, upright = picks[0]["card"], picks[0]["upright"]
