@@ -2,7 +2,7 @@
 ——牌面是牌灵的脸，画不好看怎么见人？"""
 import asyncio
 import os
-import tempfile
+import time
 import types
 
 import pytest
@@ -188,18 +188,135 @@ class TestTempCleanup:
         for fn in (card_render._delayed_remove, card_render._schedule_image_cleanup):
             assert inspect.signature(fn).parameters["delay"].default == card_render.IMAGE_TTL_SECONDS
 
-    def test_stale_cleanup_only_tarot(self, tmp_path, monkeypatch):
-        save_dir = tmp_path / "star_feather"
-        save_dir.mkdir()
-        (save_dir / "tarot_123.png").write_bytes(b"img")
-        (save_dir / "tarot_456.png").write_bytes(b"img")
-        (save_dir / "keep.txt").write_bytes(b"keep")
-        # 把 gettempdir 指到 tmp_path，避免碰真实临时目录
-        monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+class TestStaleCleanup:
+    """启动清理（①实例隔离的配套动作）：只删「命名合规 + 确认过期」的残骸。
+
+    旧用例断言的是「父目录里所有 tarot_*.png 一律删」——那正是被修掉的行为：
+    新实例启动时把旧实例还在等发送的图删掉，与 Issue #2 同一条死法。
+    所以这一组把三条新契约逐条钉住：新鲜的一律不碰、不合规的一律不碰、
+    别人的过期目录才回收（自己的免死）。
+    """
+
+    @staticmethod
+    def _root(tmp_path, monkeypatch):
+        """把根目录换到 tmp_path。
+
+        注意打在模块常量上而不是 tempfile.gettempdir：IMAGE_DIR_ROOT 是导入时
+        算好的字符串，再改 tempfile 已经晚了（旧用例就是那样打空的——它当时能
+        过只是因为旧实现恰好删了真目录里的东西）。
+        """
+        root = tmp_path / "star_feather"
+        root.mkdir()
+        monkeypatch.setattr(card_render, "IMAGE_DIR_ROOT", str(root))
+        return root
+
+    @staticmethod
+    def _age(path, seconds):
+        old = time.time() - seconds
+        os.utime(path, (old, old))
+
+    def test_fresh_files_survive(self, tmp_path, monkeypatch):
+        """刚写出来的图必须活着：旧实例可能还在等平台取走它。"""
+        root = self._root(tmp_path, monkeypatch)
+        fresh = [root / "tarot_a.png", root / "daily_b.png"]
+        for p in fresh:
+            p.write_bytes(b"img")
         card_render.cleanup_stale_images()
-        assert not (save_dir / "tarot_123.png").exists()
-        assert not (save_dir / "tarot_456.png").exists()
-        assert (save_dir / "keep.txt").exists()
+        assert all(p.exists() for p in fresh)
+
+    def test_stale_scattered_pngs_removed_but_irregular_kept(self, tmp_path, monkeypatch):
+        """旧布局散图过期才删；不合规的文件哪怕放烂了也不动（父目录不是自家后院）。"""
+        root = self._root(tmp_path, monkeypatch)
+        stale_png = root / "tarot_old.png"
+        stale_png.write_bytes(b"img")
+        junk = root / "keep.txt"
+        junk.write_bytes(b"keep")
+        odd = root / "tarot_old.jpg"
+        odd.write_bytes(b"img")
+        for p in (stale_png, junk, odd):
+            self._age(p, card_render.STALE_INSTANCE_DIR_AGE + 60)
+        card_render.cleanup_stale_images()
+        assert not stale_png.exists()
+        assert junk.exists() and odd.exists()
+
+    def test_stale_instance_dir_reaped_fresh_kept(self, tmp_path, monkeypatch):
+        """实例目录按同一条过期判据回收：三天没写过新东西才动它。"""
+        root = self._root(tmp_path, monkeypatch)
+        stale = root / "inst_4242_1_deadbeef"
+        fresh = root / "inst_4242_2_cafebabe"
+        for d in (stale, fresh):
+            d.mkdir()
+            (d / "tarot_x.png").write_bytes(b"img")
+        self._age(stale, card_render.STALE_INSTANCE_DIR_AGE + 60)
+        card_render.cleanup_stale_images()
+        assert not stale.exists()
+        assert fresh.exists() and (fresh / "tarot_x.png").exists()
+
+    def test_own_dir_never_reaped(self, tmp_path, monkeypatch):
+        """自己的目录免死：时钟被往回调也不许删——里面的图可能正被发送。"""
+        root = self._root(tmp_path, monkeypatch)
+        mine = root / "inst_4242_3_0badc0de"
+        mine.mkdir()
+        (mine / "tarot_mine.png").write_bytes(b"img")
+        self._age(mine, card_render.STALE_INSTANCE_DIR_AGE * 10)
+        card_render.cleanup_stale_images(str(mine))
+        assert (mine / "tarot_mine.png").exists()
+
+    def test_irregular_names_untouched(self, tmp_path, monkeypatch):
+        """命名不合规的目录/文件一律不碰：判据要能挡住手改、截断、别的程序。"""
+        root = self._root(tmp_path, monkeypatch)
+        odd_dir = root / "inst_abc"
+        odd_dir.mkdir()
+        (odd_dir / "tarot_x.png").write_bytes(b"img")
+        short_hex = root / "inst_1_1_deadbee"          # 7 位十六进制
+        short_hex.mkdir()
+        self._age(odd_dir, card_render.STALE_INSTANCE_DIR_AGE * 10)
+        self._age(short_hex, card_render.STALE_INSTANCE_DIR_AGE * 10)
+        card_render.cleanup_stale_images()
+        assert odd_dir.exists() and short_hex.exists()
+
+    def test_missing_root_is_noop(self, tmp_path, monkeypatch):
+        """根目录不存在（装机首启）：静默返回，不抛也不建。"""
+        monkeypatch.setattr(card_render, "IMAGE_DIR_ROOT", str(tmp_path / "nope"))
+        card_render.cleanup_stale_images()
+
+
+class TestInstanceImageDir:
+    """实例目录命名（①的承重墙）：同一进程内两代实例必须不同名。
+
+    热重载正是「同 pid、两代实例」——只靠 pid 区分不了，靠的正是进程内序号。
+    """
+
+    def test_two_instances_never_share_a_name(self, tmp_path, monkeypatch):
+        root = tmp_path / "star_feather"
+        monkeypatch.setattr(card_render, "IMAGE_DIR_ROOT", str(root))
+        a = card_render.new_instance_image_dir()
+        b = card_render.new_instance_image_dir()
+        assert a != b, "同进程两代实例拿到同一个目录＝新实例会踩旧实例的图"
+        for path in (a, b):
+            assert os.path.isdir(path)
+            assert card_render._INSTANCE_DIR_RE.match(os.path.basename(path))
+            assert os.path.dirname(path) == str(root)
+
+    def test_regex_rejects_same_pid_only_names(self):
+        """判据本身：光有 pid 的名字不是合法实例目录（那正是分不开的那一类）。"""
+        assert card_render._INSTANCE_DIR_RE.match("inst_123_1_0a1b2c3d")
+        assert not card_render._INSTANCE_DIR_RE.match("inst_123")
+        assert not card_render._INSTANCE_DIR_RE.match("inst_123_")
+        assert not card_render._INSTANCE_DIR_RE.match("inst_123_1_0A1B2C3D")  # 大写不是本格式
+
+    def test_core_and_daily_share_the_instance_dir(self, tmp_path, monkeypatch):
+        """装配口径：核心开目录，今日牌运卡跟着用同一个——别落到共享父目录去。"""
+        from stubs import FakeContext
+
+        from daily import DailyFortune
+        from tarot_core import StarTarot
+
+        monkeypatch.setattr(card_render, "IMAGE_DIR_ROOT", str(tmp_path / "star_feather"))
+        a = StarTarot(FakeContext(None), None)
+        b = StarTarot(FakeContext(None), None)
+        assert a.image_dir != b.image_dir, "两代实例拿到同一个目录＝①没生效"
+        assert DailyFortune(FakeContext(None), a).image_dir == a.image_dir
 
 
 class TestWrapAndSignatureLines:

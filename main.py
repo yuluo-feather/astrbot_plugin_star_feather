@@ -196,9 +196,13 @@ class StarFeatherPlugin(Star):
         # 今日牌运卡开关（output.daily_card）：关闭时 /单抽 与运势请求回退普通牌面图
         self.daily_card = self.tarot.daily_card
         # 限流闸门：KV 粘合与拦截文案在 gating.py，纯逻辑在 limiter.py
-        self.gate = LimitGate(self, self.tarot.cmd_rate_limit, self.tarot.daily_count_limit)
-        # 启动清空渲染临时目录：防止上次进程遗留的牌面图无限堆积（磁盘兜底）
-        cleanup_stale_images()
+        # clock 传核心那份：每日计数的日期键与今日牌运必须落在同一个「今天」
+        self.gate = LimitGate(self, self.tarot.cmd_rate_limit, self.tarot.daily_count_limit,
+                              clock=self.tarot.clock)
+        # 启动回收过期残骸（确认过期的实例目录 + 旧布局散图）：
+        # 传自己的目录路径是让「绝不删自己」这条豁免有据可依——即便时钟跳变
+        # 让它看起来过期，也不动（图可能还在发）。见 card_render.cleanup_stale_images
+        cleanup_stale_images(self.tarot.image_dir)
 
     async def initialize(self):
         """实例化后的异步初始化钩子：打印启动横幅，本羽的排面不能少。"""
@@ -452,14 +456,16 @@ class StarFeatherPlugin(Star):
                             positions: list[str], picks: list[dict]) -> str | None:
         """发送前核验牌面图还在不在：不在就重渲染一次，渲染不出来就降级为无图。
 
-        为什么非要有这一道：渲染发生在两次 AI 调用之前（牌灵的话 + 解读），而平台
+        这道核验原本是主力：渲染过去发生在两次 AI 调用之前（牌灵的话 + 解读），而平台
         是在**发送那一刻**才读文件的，中间隔着整段 AI 等待——2026-09-29 实机里一句
         「牌灵的话」的 AI 请求跑了 63 秒，图早被清理定时器删掉，平台读到空，整条消息链
         （图 + 解读 + 牌灵的话）一起被打回（判据与来龙去脉见 card_render.IMAGE_TTL_SECONDS
-        与 Issue #2）。2026-10-12 起 AI 阶段有了总预算（ai.ai_budget_seconds，默认 120s），
-        这段窗口从「没有上界」收成「≤ 预算 + 一次单请求的余量」。
-        但本函数**只判文件在不在、不判图片年龄**：「发送时拿到的总是最近一次渲染的图」
-        靠的是渲染点离发送足够近 + 600 秒保险丝正常在跑，不是靠这一道核验单独保证的。
+        与 Issue #2）。那之后做过两次收窄：2026-10-12 起 AI 阶段有了总预算
+        （ai.ai_budget_seconds，默认 120s），把窗口上界从「没有上界」收到预算量级；
+        同日 ② 图片后置渲染把渲染点搬到两段 AI 之后，窗口进一步收到毫秒级。
+        本函数**只判文件在不在、不判图片年龄**，因此它守的从来不是「图会不会过期」，
+        而是「这一秒钟拿到的图真的能打开」——即清理定时器（600s 保险丝）之外，
+        外部因素（磁盘清理、别的进程、人工 rm）在最后几毫秒里删掉文件也在它的职责内。
 
         所以清理定时器只当保险丝，真正的判据落在发送前这一刻：距离平台读取只剩
         毫秒级，不看任何定时数字。重渲染走 _maybe_render_image（自带清理登记）；
@@ -494,7 +500,10 @@ class StarFeatherPlugin(Star):
                            daily_uid: str = "", fail_note: str = "",
                            empty_fallback: str = "（未提具体问题，请作一般运势解读）",
                            epilogue: bool = False):
-        """统一占卜流程：洗牌提示 → 渲染牌面 → 生成解读 → 分段发送。
+        """统一占卜流程：洗牌提示 → 两段 AI（牌灵的话 + 解读）→ 渲染牌面 → 分段发送。
+
+        渲染排在 AI 之后是 ② 图片后置渲染（2026-10-12）的结果，理由与代价写在下面
+        调用点的注释里；两段 AI 共用同一笔总预算（见 AiBudget）。
 
         解读来源：今日固定且已知用户时走当天解读缓存（没提主题一整天固定）；
         否则 AI 现场解读（失败由 _deliver 回退牌义）。
@@ -515,12 +524,7 @@ class StarFeatherPlugin(Star):
                 logger.warning(f"洗牌提示独立发送失败，降级并入最终结果: {e}")
                 preface = hint
         clean = clean_tool_question(question)  # 送 AI 的问题：剥祈使词+阵名（spreads）
-        # 今日牌运卡：海报卡面印池内固定签文（卡面装饰）；聊天「牌灵的话」由 AI 按
-        # 人设生成（每日牌运与普通占卜共用：同人同日同牌组当天同句）——AI 失败回退
-        # 池内当日句。海报渲染失败或 text_only 时回退普通牌面图（_maybe_render_image
-        # 统一管发送模式）
         sig_text = ""
-        img = None
         # 一次占卜只掷一次骰子：牌灵的话与解读正文必须是同一人格。
         # resolve_persona 在 ai.persona=random 时每次都随机抽——两处各解析一次，
         # 同一签就会「牌灵傲娇、正文温柔」两副腔调；而 v0.6.0 承诺的是一签固定
@@ -529,14 +533,9 @@ class StarFeatherPlugin(Star):
         # 一次占卜一笔 AI 总预算（ai.ai_budget_seconds，默认 120s）：牌灵的话与解读
         # 共用同一个截止点，候选重试、不同供应商回退、结构重试都不得重置它（issue #21 ④）。
         # 它管的是 AI 阶段的等待上界，不是这条消息端到端的上界——图渲染与平台发送
-        # 另有耗时；预算耗尽后的表现是回退本地牌义，加上发送前的那道图片核验。
+        # 另有耗时；预算耗尽后的表现是回退本地牌义。渲染不吃这笔预算（② 之后它整段
+        # 排在预算窗口外面，不占用 AI 的等待时间）。
         budget = self.tarot.new_budget()
-        if is_daily and daily_uid and picks:
-            # 开关 output.daily_card 只控海报渲染：关掉回到普通牌面图，牌灵的话照常
-            if self.daily_card and self.tarot.send_mode != "text_only":
-                img = await self.daily.render_daily_card(["今日牌运"], picks, daily_uid)
-        if not img:
-            img = await self.tarot._maybe_render_image(formation, positions, picks)
         # 牌灵的话：所有占卜路径统一生成（羽签/羽时三刻/羽镜/恋羽十字都有这句
         # 牌灵的开口）——裸句直出，无「牌灵的话：」前缀与引号
         if picks:
@@ -552,8 +551,27 @@ class StarFeatherPlugin(Star):
         if sig_text:
             # 牌灵的话随 preface 进结果：AI 全失败回退牌义时，牌灵的话一句不丢
             preface = f"{preface}\n{sig_text}" if preface else sig_text
-        # 发送前核验牌面图：渲染早于上面两次 AI 调用，平台却是在发送那一刻才读文件，
-        # 中间窗口没有上界——图若已被清理保险丝删掉，就在这里补一张（Issue #2）
+        # ② 图片后置渲染（2026-10-12）：渲染点从「两段 AI 之前」搬到「两段 AI 之后、
+        # 发送之前」。收益是窗口长度——旧顺序下图得在整段 AI 阶段存活（两段 × 每段多
+        # 候选 × 供应商回退，最坏是 ai_budget_seconds 的量级，实机见过一次 63 秒），
+        # 30s 级别的清理保险丝到点就删，平台读到空文件反过来把整条消息打回（Issue #2）。
+        # 新顺序下渲染点到平台读文件只剩毫秒：窗口不是「变小」，是基本不存在了。
+        # 代价照实记：渲染耗时（0.3~2.5s）从「被 AI 等待掩盖」变成「摆在等待末尾」，
+        # 用户在 AI 出结果后还要多等这一段才收到图（洗牌提示早在最前面独立发出，
+        # 这段等待不是静默的）。渲染本身不吃 AI 预算：budget 只管两段 AI 请求。
+        img = None
+        if is_daily and daily_uid and picks:
+            # 今日牌运卡：海报卡面印池内固定签文（卡面装饰）；聊天「牌灵的话」由 AI 按
+            # 人设生成（每日牌运与普通占卜共用：同人同日同牌组当天同句）——AI 失败回退
+            # 池内当日句。开关 output.daily_card 只控海报渲染：关掉回到普通牌面图，
+            # 牌灵的话照常；海报渲染失败或 text_only 时同样走下面的回退
+            if self.daily_card and self.tarot.send_mode != "text_only":
+                img = await self.daily.render_daily_card(["今日牌运"], picks, daily_uid)
+        if not img:
+            img = await self.tarot._maybe_render_image(formation, positions, picks)
+        # 发送前核验牌面图：② 之后它只剩一种情形要管——渲染明明成功、文件却在这几毫秒
+        # 里被外部删掉（磁盘清理、别的进程、人工 rm）。不再是主力兜底，但也不删：
+        # 它守的是「图片问题绝不带走消息」这条出口纪律，与渲染顺序无关。
         img = await self._ensure_image(img, formation, positions, picks)
         epilogue_text = random.choice(RESULT_EPILOGUE) if epilogue else ""
         async for r in self.tarot._deliver(event, interp, img, formation, positions, picks,
