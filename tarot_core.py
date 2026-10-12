@@ -25,7 +25,8 @@ from astrbot.api.all import *
 # all.py 里的 logger 是 from astrbot import logger 那位全局 logger，星导入会把它灌进来。
 from astrbot.api import logger
 
-from card_render import _schedule_image_cleanup, render_cards
+from card_render import _schedule_image_cleanup, new_instance_image_dir, render_cards
+from clock import Clock
 from deliver import Deliverer
 from interpret import AiInterpreter
 from settings import TarotSettings
@@ -54,6 +55,7 @@ class StarTarot:
     ai_max_len: int
     ai_persona: str
     ai_budget: int
+    structure_check: str
 
     def __init__(self, context: Context, config: AstrBotConfig = None):
         self.context = context
@@ -64,16 +66,26 @@ class StarTarot:
                    "disclaimer", "daily_fixed", "daily_card", "ai_timeout", "ai_cooldown",
                    "llm_tool_enabled", "llm_tool_cooldown", "cmd_rate_limit",
                    "daily_count_limit", "ai_provider_id", "ai_max_len", "ai_persona",
-                   # 末两项：牌灵人设（只改口吻，见 prompts.build_system_prompt）
-                   # 与单次占卜的 AI 总预算（见 interpret.AiBudget）
-                   "ai_budget"):
+                   # 末三项：牌灵人设（只改口吻，见 prompts.build_system_prompt）、
+                   # 单次占卜的 AI 总预算（见 interpret.AiBudget）与解读结构校验强度
+                   # （见 interpret.AiInterpreter._accept_structure）
+                   "ai_budget", "structure_check"):
             setattr(self, _k, getattr(st, _k))
+        # 日期边界的唯一来源（⑨）：时区优先取框架全局配置（clock.resolve_timezone），
+        # 拿不到才跟随本地。放在子组件之前——daily / gating 都从这里取同一份，
+        # 「今天是哪一天」在实例内只算一处，别各写各的
+        self.clock = Clock.from_context(context)
+        # 图片产物目录：本实例专属（①实例隔离）。热重载时新实例只在自己的目录里打扫，
+        # 删不到旧实例正在等发送的图——旧实现是「每次构造实例就清空共享父目录」，
+        # 详见 card_render.IMAGE_DIR_ROOT 那段说明。删除交给两处：发送后 TTL 保险丝、
+        # 启动时对过期目录的回收，本实例自己不删自己的目录（图可能还在发）
+        self.image_dir = new_instance_image_dir()
         # 子组件：AI 解读（interpret.py）与结果分发（deliver.py）
         # person 只影响 system_prompt 的口吻前缀：解读内容、输出结构与安全规则一字不动
         self.interpreter = AiInterpreter(context, self.enable_ai, self.ai_timeout,
                                          self.ai_cooldown, self.ai_provider_id,
                                          self.ai_max_len, self.ai_persona,
-                                         self.ai_budget)
+                                         self.ai_budget, self.structure_check)
         self.deliverer = Deliverer(self.segment_size, self.disclaimer,
                                    self.send_mode == "forward")
         # 渲染并发锁（×2）：Pillow 拼图丢线程池执行，见 _maybe_render_image
@@ -126,7 +138,7 @@ class StarTarot:
         # 将来它换实现（None / 空串 / bytes），在此挡下比让坏值流到发送侧便宜。
         # （2026-10-02 复核：当前恒真，按追注处理，写法不动。）
         try:
-            path = render_cards(positions, picks, formation)
+            path = render_cards(positions, picks, formation, save_dir=self.image_dir)
         except Exception as e:
             logger.warning(f"牌面图片渲染失败，回退文字版: {e}")
             return None
@@ -151,10 +163,11 @@ class StarTarot:
 
         清理在 card_render 的图片产生点（渲染成功后）注册而非发送出口：
         任何入口、任何路径（AI 成功/兜底/异常中断）都无需关心删除。
-        但清理只是防堆积的保险丝——渲染与平台读文件之间隔着两次 AI 调用，
-        窗口本身没有保证（ai_budget_seconds 落地后 AI 阶段有了总预算上界，图中途
-        被保险丝删掉仍属正常），「图还在不在」由发送前的核验兜底（main._ensure_image；
-        它只判文件在不在，不判图片年龄）。"""
+        清理只是防堆积的保险丝，不是「图上什么时候还在」的判据：② 图片后置渲染
+        落地后（2026-10-12），本方法的调用点排在两段 AI 之后、发送之前，渲染点到
+        平台读文件只剩毫秒级——图不会再像旧顺序那样，在 AI 阶段被保险丝删掉。
+        「图还在不在」仍由发送前的核验兜底（main._ensure_image），那条核验现在是
+        纯兜底（覆盖文件在这几毫秒里被外部删掉的极端情形），不再是主力。"""
         if self.send_mode == "text_only":
             return None
         async with self._render_lock:

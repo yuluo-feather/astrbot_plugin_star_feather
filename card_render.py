@@ -10,9 +10,12 @@
 """
 import asyncio
 import functools
+import itertools
 import os
 import random
+import re
 import secrets
+import shutil
 import tempfile
 import time
 
@@ -95,21 +98,118 @@ def _schedule_image_cleanup(img: str | None, delay: int = IMAGE_TTL_SECONDS) -> 
         logger.warning(f"牌面图清理登记失败（保险丝失效，图留待启动清理）: {e}")
 
 
-def cleanup_stale_images() -> None:
-    """启动时清空渲染临时目录：上次进程可能残留下没删的牌面图，
-    只清 tarot_*.png / daily_*.png（不动目录里其他文件）。旧图留着也只是占地方。"""
+# ---------- 实例图片目录：每个插件实例一份，互不打扫对方 ----------
+IMAGE_DIR_ROOT = os.path.join(tempfile.gettempdir(), "star_feather")
+"""图片根目录。实例目录是它的子目录（见 new_instance_image_dir）。
+
+【为什么要把「一个共享目录」拆成「每实例一份」，2026-10-12 ①】
+旧实现每次构造插件实例都清空这个根目录。单体运行看不出问题，热重载就露馅：
+新实例在 __init__ 里打扫，旧实例可能还活着——它刚渲染完、图还在等发送，
+被新实例一删，平台读到空文件，整条消息链一起被打回（与 Issue #2 同一条死法，
+只是这次的凶手不是保险丝超时，而是隔壁那个刚出生的自己）。
+静态审查称它为「理论竞争窗口」，实际路径是确定性顺序：热重载 → 新实例清扫父目录
+→ 删掉旧实例正在用的图。改成按实例分目录后，打扫者只看得见自己的目录。
+"""
+
+_INSTANCE_DIR_RE = re.compile(r"^inst_\d+_\d+_[0-9a-f]{8}$")
+"""实例目录命名：inst_<pid>_<进程内序号>_<随机 8 位十六进制>。
+
+三段各有职责：pid 区分进程（重启后的残骸一眼能认）；序号区分**同一进程内**
+先后或并存的两代实例（热重载正是同 pid——只靠 pid 的名字区分不了它们，
+而它们恰恰是本案的主角）；随机尾防撞名。
+"""
+
+STALE_INSTANCE_DIR_AGE = 3 * 24 * 3600
+"""目录「确认过期」的判据（秒）：三天。只用来决定回收残骸，不参与正确性。
+
+判据取目录自身的 mtime，即「里面最后一次新增/删除文件距今多久」。这条判据够硬的理由：
+图片是一次性产物，渲染到发送的间隔以分钟计；一个三天没写过新东西的目录里，不可能还
+躺着一条「正在等发送」的图。所以就算某个老实例还活着，删掉它的旧目录也打断不了任何
+进行中的发送；反过来，活着的实例只要还在渲染，目录 mtime 就一直被刷新，不会被别人扫中。
+为什么不设更短：判错一次的代价是删掉别人可能正在用的图——正是本案要修的东西；
+多留几天的代价只是几十 MB 磁盘。这个不对称决定宁可宽松。
+"""
+
+_INSTANCE_SEQ = itertools.count(1)
+"""进程内实例序号：只增不减。热重载一次 +1，两代实例因此永远不同名。"""
+
+
+def new_instance_image_dir() -> str:
+    """为当前插件实例开一份专属图片目录，返回其路径。
+
+    建不出来时退回根目录：宁可少一层隔离，也不能让渲染卡死——隔离是修复项，
+    渲染是主流程，修复项不该在极端磁盘/权限故障里变成新的故障源。
+    """
     try:
-        save_dir = os.path.join(tempfile.gettempdir(), "star_feather")
-        if not os.path.isdir(save_dir):
-            return
-        for name in os.listdir(save_dir):
-            if (name.startswith("tarot_") or name.startswith("daily_")) and name.endswith(".png"):
-                try:
-                    os.remove(os.path.join(save_dir, name))
-                except OSError:
+        os.makedirs(IMAGE_DIR_ROOT, exist_ok=True)
+    except OSError as e:
+        logger.warning(f"图片根目录不可用（{IMAGE_DIR_ROOT}），本次实例改用系统临时目录: {e}")
+        return tempfile.gettempdir()
+    for _ in range(8):
+        name = f"inst_{os.getpid()}_{next(_INSTANCE_SEQ)}_{secrets.token_hex(4)}"
+        path = os.path.join(IMAGE_DIR_ROOT, name)
+        try:
+            os.makedirs(path, exist_ok=False)  # 撞名就换一个：绝不复用别人的目录
+            return path
+        except FileExistsError:
+            continue
+        except OSError as e:
+            logger.warning(f"实例图片目录创建失败（{path}），本次实例退回根目录: {e}")
+            return IMAGE_DIR_ROOT
+    logger.warning("实例图片目录连续撞名，本次实例退回根目录")
+    return IMAGE_DIR_ROOT
+
+
+def _is_stale(path: str, max_age: int) -> bool:
+    """是否「确认过期」：mtime 距今超过 max_age。stat 失败一律当不过期（保守放行）。"""
+    try:
+        return (time.time() - os.stat(path).st_mtime) > max_age
+    except OSError:
+        return False
+
+
+def cleanup_stale_images(current_dir: str | None = None) -> None:
+    """启动时回收**确认过期**的残骸，别的什么都不碰。
+
+    两条判据缺一不可：
+    1. 命名合规（旧布局的 tarot_*.png / daily_*.png，或 _INSTANCE_DIR_RE 匹配的实例目录）；
+    2. mtime 超过 STALE_INSTANCE_DIR_AGE（确认没人在写）。
+    外带一条豁免：current_dir 是当前实例自己的目录，永不删——即使系统时钟被往回调、
+    让它的 mtime 看起来已经过期。
+
+    与旧实现的关键差别就一句：**旧版清空整个父目录，本版只删判据允许的部分**。
+    父目录里不合规的文件（用户或别的程序放的）一律不动：这不是「顺手不删」，
+    而是判据的一部分——一个插件没资格替宿主决定哪些文件算垃圾。
+
+    契约：本函数永不抛（启动清理失败不该挡住插件加载），失败只留 warning。
+    """
+    if not os.path.isdir(IMAGE_DIR_ROOT):
+        return
+    try:
+        entries = os.listdir(IMAGE_DIR_ROOT)
+    except OSError as e:
+        logger.warning(f"图片目录枚举失败，跳过启动清理: {e}")
+        return
+
+    reaped = 0
+    for name in entries:
+        path = os.path.join(IMAGE_DIR_ROOT, name)
+        try:
+            if name.startswith("tarot_") or name.startswith("daily_"):
+                # 旧布局散图（本版起生产路径不再往父目录写图）：同样「确认过期才删」
+                if name.endswith(".png") and os.path.isfile(path) \
+                        and _is_stale(path, STALE_INSTANCE_DIR_AGE):
+                    os.remove(path)
+            elif _INSTANCE_DIR_RE.match(name) and os.path.isdir(path):
+                if current_dir and os.path.abspath(path) == os.path.abspath(current_dir):
                     continue
-    except Exception:
-        pass
+                if _is_stale(path, STALE_INSTANCE_DIR_AGE):
+                    shutil.rmtree(path, ignore_errors=True)
+                    reaped += 1
+        except OSError as e:
+            logger.warning(f"清理残留图片/目录失败（{path}）: {e}")
+    if reaped:
+        logger.info(f"启动清理：回收了 {reaped} 个过期实例图片目录")
 
 # ---------- 配色（官方牌背调亮 + 深色文字，白卡层次） ----------
 CAPSULE_TEXT = (248, 249, 252)     # 胶囊内文字 白（标题与位置标签共用）
@@ -363,7 +463,10 @@ def render_cards(positions, picks, formation, save_dir=None) -> str:
         _draw_card(canvas, x, y + label_h, pick["card"], pick["upright"])
 
     if save_dir is None:
-        save_dir = os.path.join(tempfile.gettempdir(), "star_feather")
+        # 生产路径一律显式传实例目录（StarTarot.image_dir，见 new_instance_image_dir）；
+        # 这里只是「没有实例上下文」的兜底（离线脚本、单函数测试），
+        # 落回根目录的文件由启动清理按过期判据回收
+        save_dir = IMAGE_DIR_ROOT
     os.makedirs(save_dir, exist_ok=True)
     path = os.path.join(save_dir, f"tarot_{int(time.time())}_{secrets.token_hex(4)}.png")
     canvas.save(path, "PNG")
@@ -460,7 +563,10 @@ def _render_daily_card_img(card, upright, signature, date_text, save_dir=None) -
                  _load_font(21, text="星羽塔罗 Star Feather"), _DAILY_FOOT_TEXT)
 
     if save_dir is None:
-        save_dir = os.path.join(tempfile.gettempdir(), "star_feather")
+        # 生产路径一律显式传实例目录（StarTarot.image_dir，见 new_instance_image_dir）；
+        # 这里只是「没有实例上下文」的兜底（离线脚本、单函数测试），
+        # 落回根目录的文件由启动清理按过期判据回收
+        save_dir = IMAGE_DIR_ROOT
     os.makedirs(save_dir, exist_ok=True)
     out_path = os.path.join(save_dir, f"daily_{int(time.time())}_{secrets.token_hex(4)}.png")
     canvas.convert("RGB").save(out_path, "PNG")
