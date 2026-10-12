@@ -6,8 +6,7 @@ import time
 import types
 
 import pytest
-
-import card_render
+from data.plugins.astrbot_plugin_star_feather import card_render
 
 
 def _mk(suit, num, cn, en, up, down):
@@ -21,7 +20,7 @@ def _mk(suit, num, cn, en, up, down):
 class TestRenderSmoke:
     @pytest.fixture(autouse=True)
     def _reset_font_cache(self):
-        import fonts
+        from data.plugins.astrbot_plugin_star_feather import fonts
         fonts._FONT_CACHE.clear()
         yield
 
@@ -123,9 +122,8 @@ class TestRenderSmoke:
 
     def test_split_signature_lines_by_punctuation(self):
         # 签文分行：优先在标点后断（标点留行尾），单句超宽才逐字回落；不丢字不截断
+        from data.plugins.astrbot_plugin_star_feather import fonts
         from PIL import Image, ImageDraw
-
-        import fonts
         d = ImageDraw.Draw(Image.new("RGB", (10, 10)))
         # 取字不带 text：必中内置子集，字宽因此与平台无关。
         # 第一版本羽写的是 `_load_font(24, text="测")`，「测」不在内置子集里 ——
@@ -307,10 +305,9 @@ class TestInstanceImageDir:
 
     def test_core_and_daily_share_the_instance_dir(self, tmp_path, monkeypatch):
         """装配口径：核心开目录，今日牌运卡跟着用同一个——别落到共享父目录去。"""
+        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
         from stubs import FakeContext
-
-        from daily import DailyFortune
-        from tarot_core import StarTarot
 
         monkeypatch.setattr(card_render, "IMAGE_DIR_ROOT", str(tmp_path / "star_feather"))
         a = StarTarot(FakeContext(None), None)
@@ -362,11 +359,21 @@ class TestDailyCardLayoutInvariants:
     """
 
     def test_card_height_is_derived_not_literal(self):
-        from card_render import CARD_H, INFO_H, INNER_H, PAD_X
+        from data.plugins.astrbot_plugin_star_feather.card_render import (
+            CARD_H,
+            INFO_H,
+            INNER_H,
+            PAD_X,
+        )
         assert CARD_H == PAD_X * 2 + INNER_H + INFO_H
 
     def test_quote_block_sits_between_card_and_watermark(self):
-        from card_render import CARD_H, DAILY_CARD_H, DAILY_CARD_QUOTE_Y, DAILY_CARD_Y
+        from data.plugins.astrbot_plugin_star_feather.card_render import (
+            CARD_H,
+            DAILY_CARD_H,
+            DAILY_CARD_QUOTE_Y,
+            DAILY_CARD_Y,
+        )
         card_bottom = DAILY_CARD_Y + CARD_H
         assert card_bottom < DAILY_CARD_QUOTE_Y, "签文块与卡片重叠"
         assert DAILY_CARD_QUOTE_Y < DAILY_CARD_H - 58, "签文块压到水印上"
@@ -383,10 +390,9 @@ class TestDrawCardFontReuse:
     """
 
     def test_same_size_loaded_once_per_card(self, monkeypatch):
+        from data.plugins.astrbot_plugin_star_feather import card_render
+        from data.plugins.astrbot_plugin_star_feather.tarot_data import TAROT_CARDS
         from PIL import Image
-
-        import card_render
-        from tarot_data import TAROT_CARDS
 
         calls = []
         orig = card_render._load_font
@@ -415,13 +421,13 @@ class TestBackgroundCacheSizing:
     """
 
     def test_maxsize_covers_largest_spread(self):
-        import card_render
+        from data.plugins.astrbot_plugin_star_feather import card_render
         assert card_render._background_cached.cache_info().maxsize >= 4, (
             "maxsize 小于最大牌阵的候选底牌数：填满缓存所需的渲染次数会超过牌阵规模")
 
     def test_same_key_hits_second_time(self):
-        import card_render
-        from tarot_data import TAROT_CARDS
+        from data.plugins.astrbot_plugin_star_feather import card_render
+        from data.plugins.astrbot_plugin_star_feather.tarot_data import TAROT_CARDS
         card_render._background_cached.cache_clear()
         c = TAROT_CARDS[0]
         args = (c["suit"], c["num"], c["cn"], 1148, 986)

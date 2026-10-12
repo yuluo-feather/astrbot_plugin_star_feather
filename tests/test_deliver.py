@@ -3,10 +3,13 @@
 import asyncio
 import types
 
+from data.plugins.astrbot_plugin_star_feather.deliver import (
+    Deliverer,
+    split_sections,
+    split_text,
+)
+from data.plugins.astrbot_plugin_star_feather.tarot_data import meaning_text
 from stubs import PICK
-
-from deliver import Deliverer, split_sections, split_text
-from tarot_data import meaning_text
 
 
 class TestSplitText:

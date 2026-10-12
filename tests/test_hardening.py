@@ -1,6 +1,6 @@
 """Prompt 防护单测：越狱句式剥除 / 问题截断 / 输出结构校验（纯函数）。
 ——想往牌灵嘴里塞怪东西？先过这一关。"""
-from hardening import (
+from data.plugins.astrbot_plugin_star_feather.hardening import (
     clip_question,
     normalize_injection_input,
     strip_injection_fragments,

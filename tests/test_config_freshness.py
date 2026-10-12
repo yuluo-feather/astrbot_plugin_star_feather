@@ -21,7 +21,7 @@ import asyncio
 import logging
 import types
 
-from main import (
+from data.plugins.astrbot_plugin_star_feather.main import (
     _ACTIVE_INSTANCE_ATTR,
     _CFG_FIELD_NAMES,
     StarFeatherPlugin,
@@ -125,7 +125,7 @@ class TestLoadRegistration:
         指纹求值在 logger 之前，logging 的 handleError 兜不到这一步；它抛出去跟登记失败
         是同一个后果——框架判「插件加载失败」。降级行是给排查人的：不能让人以为没加载过。
         """
-        import main as main_mod
+        from data.plugins.astrbot_plugin_star_feather import main as main_mod
 
         def boom(_plugin):
             raise RuntimeError("指纹算不出来")

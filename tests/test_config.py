@@ -1,6 +1,14 @@
 """配置读取工具单测：分组优先 / 扁平回退 / None 兜底 / int 下限。
 ——配置乱来？牌灵宁愿给默认值也不炸。"""
-from config import _cfg_bool, _cfg_get, _cfg_int
+import ast
+import json
+import os
+
+from data.plugins.astrbot_plugin_star_feather.config import (
+    _cfg_bool,
+    _cfg_get,
+    _cfg_int,
+)
 
 
 class TestCfgGet:
@@ -69,9 +77,6 @@ class TestCfgBool:
 # type 写成 JSON Schema 风格的 "integer" 会让插件直接加载失败，而单测全绿。
 # 这里把框架的校验口径前置到单测：type 白名单 / default 类型相容 / select 选项 /
 # 描述齐全 / 无重复键 / schema 字段与代码取键双向对账。
-import ast
-import json
-import os
 
 _PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCHEMA_PATH = os.path.join(_PLUGIN_ROOT, "_conf_schema.json")

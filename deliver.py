@@ -6,7 +6,7 @@
 """
 from astrbot.api.message_components import Image, Node, Nodes, Plain
 
-from prompts import SECTION_MARK_RE
+from .prompts import SECTION_MARK_RE
 
 
 def split_text(text: str, size: int) -> list[str]:

@@ -18,16 +18,14 @@ test_kv_utils 管「无记录 vs 存储故障」、test_gating 管 KV 挂掉放�
 import asyncio
 import gc
 import os
-import sys
 import time
 import types
 import warnings
 
 import pytest
+from data.plugins.astrbot_plugin_star_feather import daily as daily_mod
+from data.plugins.astrbot_plugin_star_feather.dailylines import pick_signature
 from stubs import PICK, FakeContext
-
-import daily as daily_mod
-from dailylines import pick_signature
 
 TODAY = time.strftime("%Y%m%d")
 UID = "u_fault"
@@ -301,7 +299,7 @@ def test_spirit_never_returns_empty(mode):
 
 # ================= ④ LimitGate：存储挂了宁可不限流 =================
 def _gate(kv, cmd_rate_limit=0, daily_count_limit=5):
-    from gating import LimitGate
+    from data.plugins.astrbot_plugin_star_feather.gating import LimitGate
     return LimitGate(kv, cmd_rate_limit, daily_count_limit)
 
 
@@ -483,8 +481,8 @@ class TestImageGoneBeforeSend:
         这里而不是 AI 里，是因为 ② 之后「图在渲染与发送之间不见」只剩这一种可达
         路径——删图的手不再是清理保险丝，而是外部因素，它落在渲染刚收工那一瞬。
         """
-        from main import StarFeatherPlugin
-        from tarot_core import StarTarot
+        from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
+        from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
         t = StarTarot(FakeContext(None), None)
         # 非转发：结果合并成一条链，链首即牌面图。注意 Deliverer 在构造期就把
         # send_mode 解析成 forward_result 了，改字段得连它一起改，否则断言看的是别的分支
@@ -630,8 +628,8 @@ class TestRenderAfterBothAI:
         return asyncio.run(run())
 
     def _timeline(self):
-        from main import StarFeatherPlugin
-        from tarot_core import StarTarot
+        from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
+        from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
         t = StarTarot(FakeContext(None), None)
         t.send_mode = "plain"
         t.deliverer.forward_result = False
@@ -691,13 +689,11 @@ class TestRenderAfterBothAI:
 
 # ---------------- 窄口子：保险丝登记失败，不许带走主流程 ----------------
 #
-# 【取「本代」模块别靠 import 顺序】main.py 顶部会把自己的子模块从 sys.modules 里 pop 掉
-# 再导入（重载防御，见该文件注释）。于是「先 import tarot_core，再 import main」会拿到旧一代
-# 副本：运行时对象图里的 class 方法 globals 指向新一代，补丁却打在旧那份上——静默打空、
-# 用例假绿。本羽第一版就栽在这里（三条用例里唯一「过」的那条是假的）。
-# 第一版把这条规矩压在两个 import 语句的先后上，结果 ruff 的 I001 要把 import 按字母重排——
-# 顺序承载语义的写法在 lint 面前本来就是脆的。改法：过一遍 main 换代，之后按名字从
-# sys.modules 取（见 _live_modules），语义变成显式的、与语句顺序无关。
+# 【这里为什么不再有「取本代模块」的机关】2026-10-12 第 ⑥ 轮之前，main.py 顶部会把
+# 子模块从 sys.modules 里 pop 掉再导入（重载防御），于是同一个文件在进程里可能有两份
+# 身份：「先 import tarot_core、再 import main」拿到的是旧一代副本，补丁打在旧那份上
+# ——静默打空、用例假绿（本羽第一版就栽在这里）。现在插件模块只有包名一个身份，谁先
+# 导入都是同一份，机关连同它的注释一起退役。
 
 # 复用同形事件桩：就地再写一份只会多一个会过时的点。
 # 名字必须带前缀——第一版顺手写成 _evt，把本文件顶部的模块级 _evt(uid) 覆盖掉了，
@@ -708,20 +704,18 @@ _gone_collect = TestImageGoneBeforeSend._collect
 
 
 def _live_modules():
-    """返回（StarFeatherPlugin, tarot_core, card_render, daily）——都取「本代」，并自检同代。
+    """返回（StarFeatherPlugin, tarot_core, card_render, daily）——同一份模块对象。
 
-    自检不是洁癖：这个前提一旦不成立，补丁会静默落空、用例变成永远绿的假证据，
-    比红更难查（本条窄口子就是被这种假绿骗过一次才回头查出来的）。
+    插件内模块之间是包内相对导入，一条链上只有一个 tarot_core、一个 card_render，
+    按包路径直接 import 即得。末尾仍留一条同源自检：万一将来有人把它拆回「一份文件
+    两个身份」的形状，补丁会静默落空、用例变成永远绿的假证据，比红更难查。
     """
-    from main import StarFeatherPlugin  # 先过一遍入口：它负责把子模块换代
-
-    tarot_core = sys.modules["tarot_core"]  # 再从 sys.modules 按名字取本代：与语句顺序无关
-    card_render = sys.modules["card_render"]
-    daily = sys.modules["daily"]
+    from data.plugins.astrbot_plugin_star_feather import card_render, daily, tarot_core
+    from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
 
     fuse = tarot_core._schedule_image_cleanup
     assert fuse.__globals__ is card_render.__dict__, \
-        "补丁会打空：tarot_core 与 card_render 不是同一代（导入顺序错了）"
+        "补丁会打空：tarot_core 与 card_render 不是同一份模块"
     assert daily._schedule_image_cleanup is fuse, "daily 引的不是同一个函数对象"
     return StarFeatherPlugin, tarot_core, card_render, daily
 

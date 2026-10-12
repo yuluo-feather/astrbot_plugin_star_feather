@@ -12,21 +12,21 @@ from collections import Counter
 
 from astrbot.api import logger
 
-from hardening import (
+from .hardening import (
     clip_question,
     normalize_injection_input,
     strip_injection_fragments,
     validate_interpret_structure,
     validate_interpret_structure_strict,
 )
-from prompts import (
+from .prompts import (
     SYSTEM_PROMPT_DIVINE,
     build_reading_prompt,
     build_spirit_line_prompt,
     build_system_prompt,
     resolve_persona,
 )
-from settings import (
+from .settings import (
     AI_BUDGET_MIN_ATTEMPT,
     DEFAULT_AI_BUDGET,
     DEFAULT_AI_PERSONA,

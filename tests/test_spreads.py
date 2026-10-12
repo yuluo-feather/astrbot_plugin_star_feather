@@ -1,6 +1,10 @@
 """牌阵与问题清洗单测：选阵 / 阵名剥离 / 祈使词剥离（spreads 纯函数）。
 ——牌灵挑阵的规矩，全在这了。"""
-from spreads import clean_tool_question, select_formation, strip_alias
+from data.plugins.astrbot_plugin_star_feather.spreads import (
+    clean_tool_question,
+    select_formation,
+    strip_alias,
+)
 
 
 class TestSelectFormation:
@@ -86,12 +90,15 @@ class TestRelationWordsDerived:
     """
 
     def test_relation_words_covers_keyword_map_emotion_group(self):
-        from spreads import KEYWORD_MAP, RELATION_WORDS
+        from data.plugins.astrbot_plugin_star_feather.spreads import (
+            KEYWORD_MAP,
+            RELATION_WORDS,
+        )
         missing = [w for w in KEYWORD_MAP[0][0] if w not in RELATION_WORDS]
         assert not missing, f"KEYWORD_MAP 情感组有词没进 RELATION_WORDS：{missing}"
 
     def test_emotion_plus_timeline_upgrades_to_relation_spread(self):
-        from spreads import select_formation
+        from data.plugins.astrbot_plugin_star_feather.spreads import select_formation
         # 唯一能暴露漏词的形状：时间线词 2 个 > 情感词 1 个，且不含「他/她/我们」
         assert select_formation("情感过去未来") == "恋羽十字"
         assert select_formation("情感未来时间线") == "恋羽十字"

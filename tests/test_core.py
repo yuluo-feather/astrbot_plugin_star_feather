@@ -12,12 +12,13 @@ import logging
 import types
 
 from astrbot.api.message_components import Plain
-from stubs import CARD, EVENT, OK_INTERP, PICK, FakeContext, FakeProvider
-
-from daily import _daily_pick, _is_daily_request
-from dailylines import pick_signature
-from main import StarFeatherPlugin
-from prompts import (
+from data.plugins.astrbot_plugin_star_feather.daily import (
+    _daily_pick,
+    _is_daily_request,
+)
+from data.plugins.astrbot_plugin_star_feather.dailylines import pick_signature
+from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
+from data.plugins.astrbot_plugin_star_feather.prompts import (
     PERSONA_POOL,
     PERSONA_PROFILES,
     SHUFFLE_LINES,
@@ -28,8 +29,12 @@ from prompts import (
     build_system_prompt,
     resolve_persona,
 )
-from tarot_core import StarTarot
-from tarot_data import TAROT_CARDS, meaning_text
+from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
+from data.plugins.astrbot_plugin_star_feather.tarot_data import (
+    TAROT_CARDS,
+    meaning_text,
+)
+from stubs import CARD, EVENT, OK_INTERP, PICK, FakeContext, FakeProvider
 
 T = StarTarot.__new__(StarTarot)  # 绕过 __init__（不依赖 Context），供抽牌/编排用例复用
 
@@ -103,7 +108,7 @@ class TestMaybeRenderAsync:
             return str(tmp_path / "tarot_async_test.png")
 
         monkeypatch.setattr(t, "_render_image", fake_render)
-        import tarot_core
+        from data.plugins.astrbot_plugin_star_feather import tarot_core
         # 打在调用点实际读的那份引用上：tarot_core 用 `from card_render import
         # _schedule_image_cleanup` 绑定，改 card_render 的模块属性对调用点无效
         # （真实函数照跑、还挂了延迟删除任务）；fake 也要接得下真实签名的 delay
@@ -124,7 +129,7 @@ class TestAiInterpret:
         t.ai_timeout = timeout
         t.ai_cooldown = cooldown
         t.ai_provider_id = ""
-        from interpret import AiInterpreter
+        from data.plugins.astrbot_plugin_star_feather.interpret import AiInterpreter
         t.interpreter = AiInterpreter(t.context, enable, timeout, cooldown, "", max_len)
         t.segment_size = 300
         return t
@@ -138,7 +143,7 @@ class TestAiInterpret:
 
     def test_persona_applied_to_system_prompt(self):
         # 人设配置透传：interpret 收到的 system_prompt 带有对应风格前缀
-        from interpret import AiInterpreter
+        from data.plugins.astrbot_plugin_star_feather.interpret import AiInterpreter
         p1 = FakeProvider("p1", result=OK_INTERP)
         t = StarTarot.__new__(StarTarot)
         t.context = FakeContext(p1, [])
@@ -155,8 +160,8 @@ class TestAiInterpret:
     def test_random_persona_fixed_within_one_reading(self, monkeypatch):
         # 随机人设的契约：一签从开始到结束固定同一人格（候选链内不中途变脸），
         # 下一签才重新随机——random.choice 一次 interpret 只掷一次骰子
-        import prompts as prompts_mod
-        from interpret import AiInterpreter
+        from data.plugins.astrbot_plugin_star_feather import prompts as prompts_mod
+        from data.plugins.astrbot_plugin_star_feather.interpret import AiInterpreter
         p1 = FakeProvider("p1", result="结构失格没有标记的文本")
         p2 = FakeProvider("p2", result=OK_INTERP)
         t = StarTarot.__new__(StarTarot)
@@ -252,7 +257,7 @@ class TestAiInterpret:
 # ---------- 注入防护：句式剥除 / 结构校验 ----------
 class TestInjectionGuard:
     def _tarot(self, using, others=None):
-        from interpret import AiInterpreter
+        from data.plugins.astrbot_plugin_star_feather.interpret import AiInterpreter
         t = StarTarot.__new__(StarTarot)
         t.context = FakeContext(using, others)
         t.enable_ai = True
@@ -366,7 +371,7 @@ class TestPrompts:
 
     def test_help_text_lives_in_prompts(self):
         # 帮助文案归文案层（main._help 只拼版本头）
-        from prompts import HELP_TEXT
+        from data.plugins.astrbot_plugin_star_feather.prompts import HELP_TEXT
         assert "【占卜 [问题]】" in HELP_TEXT or "占卜 [问题]" in HELP_TEXT
         assert "牌阵" in HELP_TEXT and "78 张牌" in HELP_TEXT
 
@@ -380,7 +385,7 @@ class TestAiProvider:
         t.ai_timeout = 5
         t.ai_cooldown = 60
         t.ai_provider_id = provider_id
-        from interpret import AiInterpreter
+        from data.plugins.astrbot_plugin_star_feather.interpret import AiInterpreter
         t.interpreter = AiInterpreter(t.context, True, 5, 60, provider_id)
         t.segment_size = 300
         return t
@@ -429,7 +434,7 @@ class TestProviderCandidateSilentFailure:
     """
 
     def test_each_source_failure_keeps_a_trace(self, caplog):
-        from interpret import AiInterpreter
+        from data.plugins.astrbot_plugin_star_feather.interpret import AiInterpreter
         interp = AiInterpreter(_BrokenProviderContext(), True, 5, 60, "")
         with caplog.at_level(logging.WARNING):
             out = asyncio.run(interp._provider_candidates("umo"))
@@ -439,7 +444,7 @@ class TestProviderCandidateSilentFailure:
             assert any(tag in m for m in msgs), f"{tag} 来源故障没留痕"
 
     def test_healthy_context_stays_silent(self, caplog):
-        from interpret import AiInterpreter
+        from data.plugins.astrbot_plugin_star_feather.interpret import AiInterpreter
         p = FakeProvider("p1")
         interp = AiInterpreter(FakeContext(p, [p]), True, 5, 60, "")
         with caplog.at_level(logging.WARNING):
@@ -569,7 +574,7 @@ class _FakeTarot:
     def new_budget(self):
         # 真实现委托 AiInterpreter（tarot_core.StarTarot.new_budget）：桩只需要「有个
         # 对象可传」，各阶段桩都不读它——但 main 的「一次占卜共用一笔」接线照旧成立
-        from interpret import AiBudget
+        from data.plugins.astrbot_plugin_star_feather.interpret import AiBudget
         return AiBudget(120)
 
     async def _maybe_render_image(self, *a):
@@ -665,7 +670,7 @@ class TestRunReading:
         eff，解读却在 interpret 内部再 resolve 一次——两次各掷各的骰子，同一签会
         出现「牌灵傲娇、正文温柔」两副腔调（v0.6.0 承诺的是一签固定同一人格）。
         """
-        import main as main_mod
+        from data.plugins.astrbot_plugin_star_feather import main as main_mod
         seen = {}
 
         def counting_resolve(persona):
@@ -702,7 +707,7 @@ class TestRunReading:
         # 签文与牌同源确定性：同人同日同牌同一句（preface 机制：AI 全失败也不丢）
         from time import strftime
 
-        from dailylines import pick_signature
+        from data.plugins.astrbot_plugin_star_feather.dailylines import pick_signature
         p = self._plugin(hint=False)
         out = self._collect(p._run_reading(self._evt(), "羽签", ["你的当下"], [PICK],
                                            "今日运势", is_daily=True, daily_uid="u1"))
@@ -933,9 +938,9 @@ class TestRunReadingRealChain:
         return evt
 
     def test_command_epilogue_sent_separately_not_in_nodes(self):
-        from main import StarFeatherPlugin
-        from prompts import RESULT_EPILOGUE
-        from tarot_core import StarTarot
+        from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
+        from data.plugins.astrbot_plugin_star_feather.prompts import RESULT_EPILOGUE
+        from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
         t = StarTarot(FakeContext(None), None)
         assert t.send_mode == "forward"  # 默认合并转发，走 forward 分支
         async def fake_interp(event, formation, positions, picks, clean, persona_eff=None, budget=None):
@@ -969,8 +974,8 @@ class TestRunReadingRealChain:
     def test_tool_path_no_epilogue(self):
         # 工具入口不传 epilogue：最终链末尾不出现 ✨ 收尾句（LLM 收尾承担），
         # 也不独立发送收尾消息
-        from main import StarFeatherPlugin
-        from tarot_core import StarTarot
+        from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
+        from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
         t = StarTarot(FakeContext(None), None)
         async def fake_interp(event, formation, positions, picks, clean, persona_eff=None, budget=None):
             return "【第1张·过去】一段过去。\
@@ -991,7 +996,7 @@ class TestRunReadingRealChain:
         self._collect(p._run_reading(evt, "羽时三刻", ["过去"], [PICK], "问感情"))
         nodes = evt.result[0].nodes
         # 末节点不应是收尾句（工具收尾由 LLM 承担）；免责声明以 ✨ 开头，需按文案池精确判定
-        from prompts import RESULT_EPILOGUE
+        from data.plugins.astrbot_plugin_star_feather.prompts import RESULT_EPILOGUE
         tail = "".join(getattr(c, "text", "") for c in nodes[-1].content)
         assert tail not in RESULT_EPILOGUE, f"工具路径不应有收尾句，实际末节点: {tail!r}"
         assert evt.sent_chain is None, "工具路径不应独立发送收尾句"
@@ -1000,7 +1005,10 @@ class TestRunReadingRealChain:
 # ---------- 收尾文案池（一处维护，两入口共用） ----------
 class TestEpiloguePool:
     def test_tool_epilogue_derived_from_result_pool(self):
-        from prompts import RESULT_EPILOGUE, TOOL_EPILOGUE
+        from data.plugins.astrbot_plugin_star_feather.prompts import (
+            RESULT_EPILOGUE,
+            TOOL_EPILOGUE,
+        )
         assert len(RESULT_EPILOGUE) == 7
         assert len(TOOL_EPILOGUE) == len(RESULT_EPILOGUE)
         for t in TOOL_EPILOGUE:
@@ -1041,7 +1049,7 @@ class TestDivineToolDirect:
 
     @staticmethod
     def _evt(text="帮我算一卦"):
-        from main import MessageChain
+        from data.plugins.astrbot_plugin_star_feather.main import MessageChain
         e = types.SimpleNamespace(message_str=text, unified_msg_origin="g1")
         e.sent = []
         async def send(chain):
@@ -1073,7 +1081,7 @@ class TestDivineToolDirect:
         框架侧读取的字段；拆出 chain 再套一层会静默把它们丢回默认值。
         桩给结果对象打上标记属性：直发保真才留得住，重装必丢。
         """
-        from main import MessageChain
+        from data.plugins.astrbot_plugin_star_feather.main import MessageChain
         p = self._plugin()
         evt = self._evt()
         result = MessageChain(chain=[Plain("按规矩洗牌")])
@@ -1171,7 +1179,7 @@ class TestDivineToolDirect:
         """E 防回归：事件缺 unified_msg_origin 属性时，工具节流键必须回退
         sf_tool_cd_global（与命令入口 gating.check 的 or "global" 口径一致），
         不得拼出 sf_tool_cd_None 把不同来源锁到同一个孤儿键上。"""
-        from main import StarFeatherPlugin
+        from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
         p = StarFeatherPlugin.__new__(StarFeatherPlugin)
         p.tarot = types.SimpleNamespace(llm_tool_cooldown=30, llm_tool_enabled=True)
         seen = []
@@ -1198,7 +1206,7 @@ class TestDivineToolDirect:
         async def send(chain):
             evt.sent.append(chain)
         evt.send = send
-        from main import MessageChain
+        from data.plugins.astrbot_plugin_star_feather.main import MessageChain
         evt.chain_result = lambda chain: MessageChain(chain=chain)
         out = self._collect(p.divine_tool(evt))
         assert seen and seen[0] == "sf_tool_cd_global"
@@ -1211,14 +1219,20 @@ class TestStartupBanner:
     """fishing 同款启动横幅：initialize() 时 logger.info 打印 ASCII + 版本行。"""
 
     def test_initialize_logs_banner(self, monkeypatch):
-        from main import VERSION, StarFeatherPlugin
+        from data.plugins.astrbot_plugin_star_feather import main as main_mod
+        from data.plugins.astrbot_plugin_star_feather.main import (
+            VERSION,
+            StarFeatherPlugin,
+        )
         records = []
 
         class FakeLogger:
             def info(self, msg, *a, **k):
                 records.append(msg)
 
-        monkeypatch.setattr("main.logger", FakeLogger())
+        # 目标必须是模块对象：字符串写法 "main.logger" 按顶层名解析，落到 AstrBot 根目录
+        # 的 main.py（launcher 入口）或压根不存在，两种都静默打空
+        monkeypatch.setattr(main_mod, "logger", FakeLogger())
         p = StarFeatherPlugin.__new__(StarFeatherPlugin)
 
         async def run():
@@ -1250,7 +1264,7 @@ class TestDailyCacheMerge:
     @staticmethod
     def _plugin(kv_store):
         p = StarFeatherPlugin.__new__(StarFeatherPlugin)
-        from daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
 
         class _Ctx:
             async def get_kv_data(self, key, default=None):
@@ -1309,7 +1323,7 @@ class TestDailyCachedCardAnchor:
 
     @staticmethod
     def _fortune(kv_store):
-        from daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
 
         class _Ctx:
             async def get_kv_data(self, key, default=None):
@@ -1332,9 +1346,8 @@ class TestDailyCachedCardAnchor:
         assert drifted not in TAROT_CARDS           # 前提：旧判据在这份副本上确实失配
         kv = {"sf_daily_u1": {"date": today, "card": drifted, "upright": True}}
         _formation, _positions, picks = asyncio.run(self._fortune(kv).pick_cached("u1"))
-        # 比牌 id 而不是对象身份：main.py 的「重载防御」会在导入时把 daily / tarot_data
-        # 等子模块 pop 出 sys.modules，同一进程内同名模块可能分裂成两份（谁先导入决定），
-        # 跨模块的对象身份断言于是不可靠——牌 id 才是这里真正要断言的东西
+        # 比牌 id 而不是对象身份：牌库对象会在 deepcopy 与缓存里往返，id 才是这里真正
+        # 要断言的东西（「同名模块两份」那类身份问题已由包内相对导入收口）
         assert picks[0]["card"]["id"] == cached_card["id"]   # 命中缓存：返回的是缓存那张牌
         assert picks[0]["card"]["id"] != det_card["id"]      # 而不是「落回重算」出的确定性牌
         assert isinstance(picks[0]["card"]["num"], str)       # 返回的是牌库权威对象：num 仍是 str，
@@ -1371,7 +1384,7 @@ class TestDailyInterpTopic:
 
     @staticmethod
     def _daily(kv):
-        from daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
         calls = []
 
         class _Ctx:
@@ -1395,7 +1408,11 @@ class TestDailyInterpTopic:
         「今天运势」共用解读，或被踢出每日牌运、每问重抽。拆表后两者兼得——
         牌仍是当天同一张（_is_daily_request 为真），解读各归各（topic 不同）。
         """
-        from daily import _GENERIC_TOPIC, _is_daily_request, _norm_topic
+        from data.plugins.astrbot_plugin_star_feather.daily import (
+            _GENERIC_TOPIC,
+            _is_daily_request,
+            _norm_topic,
+        )
 
         assert _is_daily_request("今天财运怎么样")
         assert _norm_topic("今天财运怎么样") != _GENERIC_TOPIC
@@ -1445,7 +1462,10 @@ class TestDailyInterpTopic:
         加锁 + 写回前重读之前，两条协程各自读旧值再写回，后写的会把先写的整个覆盖
         （实测 KV 里只剩一个分桶，另一个主题白花一次 AI 调用）。
         """
-        from daily import DailyFortune, _norm_topic
+        from data.plugins.astrbot_plugin_star_feather.daily import (
+            DailyFortune,
+            _norm_topic,
+        )
         kv = {}
 
         class _SlowCtx:
@@ -1483,7 +1503,7 @@ class TestDailyInterpTopic:
         stale = {"最近事业运": "昨天的解读"}
         kv = {"sf_daily_u1": {"date": "19700101", "card": None, "upright": True,
                               "interps": dict(stale)}}
-        from daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
         calls = []
 
         class _FlakyCtx:
@@ -1554,7 +1574,7 @@ class TestDailyInterpCap:
 
     @classmethod
     def _daily(cls, kv):
-        from daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
         calls = []
 
         async def fake_ai(event, formation, positions, picks, clean,
@@ -1574,7 +1594,7 @@ class TestDailyInterpCap:
 
     def test_the_cap_is_the_documented_number(self):
         """口径对账：实现里的上限就是本文件写死的那个数。"""
-        from daily import DAILY_INTERP_MAX
+        from data.plugins.astrbot_plugin_star_feather.daily import DAILY_INTERP_MAX
         assert DAILY_INTERP_MAX == self.CAP
 
     def test_fills_up_to_the_cap_without_evicting_anything(self):
@@ -1654,7 +1674,7 @@ class TestDailyKvFallback:
 
     @staticmethod
     def _daily(kv):
-        from daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
         return DailyFortune(kv, T)
 
     def test_context_like_no_kv_interface(self):
@@ -1695,7 +1715,7 @@ class TestDailyPoisonedCacheValue:
 
     @staticmethod
     def _daily(kv):
-        from daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
         calls = []
 
         class _Ctx:
@@ -1715,7 +1735,7 @@ class TestDailyPoisonedCacheValue:
         """truthy 非 dict：既不抛异常，也要把坏值覆盖成合法结构（真正自愈）。"""
         import time as _time
 
-        from daily import _norm_topic
+        from data.plugins.astrbot_plugin_star_feather.daily import _norm_topic
         today = _time.strftime("%Y%m%d")
         topic = "今天感情运势"
         for poison in (["a"], "abc", 123):
@@ -1753,7 +1773,7 @@ class TestDailyNullInterp:
 
     @staticmethod
     def _daily(kv, ret):
-        from daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
         calls = []
 
         class _Ctx:
@@ -1772,7 +1792,7 @@ class TestDailyNullInterp:
     def test_none_interp_not_written_into_slots(self):
         import time as _time
 
-        from daily import _norm_topic
+        from data.plugins.astrbot_plugin_star_feather.daily import _norm_topic
         today = _time.strftime("%Y%m%d")
         topic = _norm_topic("今天感情运势")
         for ret in (None, ""):
@@ -1792,7 +1812,7 @@ class TestDailyNullInterp:
         """AI 失败只影响本主题：别的主题已缓存内容不得被清掉或改写。"""
         import time as _time
 
-        from daily import _norm_topic
+        from data.plugins.astrbot_plugin_star_feather.daily import _norm_topic
         today = _time.strftime("%Y%m%d")
         other = _norm_topic("最近事业运")
         kv = {"sf_daily_u1": {"date": today, "interps": {other: "事业解读"}}}
@@ -1812,7 +1832,7 @@ class TestSpiritCache:
 
     @staticmethod
     def _daily(kv, line="AI 说的那句"):
-        from daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
         calls = []
 
         class _Ctx:
@@ -1850,7 +1870,7 @@ class TestSpiritCache:
         v/date/sign/line，不读旧值），读故障不影响写入正确性。机械地「统一」成门住，会让
         故障恢复前的重复查询重新生成，AI 措辞可能不同，破坏「当日同牌组同一句」的承诺。
         """
-        from daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
         kv = {}
         calls = []
 
@@ -1936,7 +1956,7 @@ class TestSpiritCache:
 # ---------- 牌灵的话：interpret.spirit_line 生成 ----------
 class TestSpiritLine:
     def _interp(self, provider, enable=True):
-        from interpret import AiInterpreter
+        from data.plugins.astrbot_plugin_star_feather.interpret import AiInterpreter
         return AiInterpreter(FakeContext(provider, [provider]), enable, 5, 60, "", 200)
 
     def test_success_returns_cleaned_line(self):
@@ -1982,7 +2002,7 @@ class TestSpiritLine:
         spirit_line 原本零条——「牌灵的话为何老回退池内签文」在日志里查不出原因。
         「只有换行使首行剥完为空」走同一条不合规分支，共用这一行日志。
         """
-        from interpret import AiInterpreter
+        from data.plugins.astrbot_plugin_star_feather.interpret import AiInterpreter
         long_text = "这句话故意写得很长，长到超过四十个字，专门用来触发那条不合规分支" * 2
         p1 = FakeProvider("p1", result=long_text)
         p2 = FakeProvider("p2", result="短句就位。")
@@ -2030,7 +2050,7 @@ class TestSpiritPrompt:
         旧实现是手工常量配「改文案记得 +1」的注释——靠人记着的隐性契约，迟早
         漏改，漏了就是旧句复活。
         """
-        import prompts
+        from data.plugins.astrbot_plugin_star_feather import prompts
         assert prompts.SPIRIT_PROMPT_V == prompts._spirit_prompt_fingerprint()
         base = prompts.SPIRIT_PROMPT_V
         monkeypatch.setattr(prompts, "_SPIRIT_TEMPLATE", prompts._SPIRIT_TEMPLATE + "改一笔")
@@ -2047,14 +2067,20 @@ class TestRenderTextNoSuitDuplicate:
 
     def test_minor_arcana_names_all_carry_their_suit(self):
         """前提断言：哪天出现不带花色的牌名，说明花色标注不能再省，这条先红。"""
-        from tarot_data import SUIT_CN, TAROT_CARDS
+        from data.plugins.astrbot_plugin_star_feather.tarot_data import (
+            SUIT_CN,
+            TAROT_CARDS,
+        )
         missing = [(c["suit"], c["cn"]) for c in TAROT_CARDS
                    if c["suit"] != "major" and SUIT_CN[c["suit"]] not in c["cn"]]
         assert not missing, f"有牌名不含花色，需恢复花色标注：{missing}"
 
     def test_render_text_does_not_repeat_suit(self):
-        import tarot_core
-        from tarot_data import SUIT_CN, TAROT_CARDS
+        from data.plugins.astrbot_plugin_star_feather import tarot_core
+        from data.plugins.astrbot_plugin_star_feather.tarot_data import (
+            SUIT_CN,
+            TAROT_CARDS,
+        )
         stub = tarot_core.StarTarot.__new__(tarot_core.StarTarot)
         for suit in ("major", "cups", "pentacles"):
             card = next(c for c in TAROT_CARDS if c["suit"] == suit)
@@ -2069,8 +2095,8 @@ class TestRenderTextNoSuitDuplicate:
         对缩进回归是盲的。这段兜底文案只在「无图 + AI 失败」时露出（deliver 的
         not img 分支），text_only 用户拿到的就是它，少一张就是少一张的牌义。
         """
-        import tarot_core
-        from tarot_data import TAROT_CARDS
+        from data.plugins.astrbot_plugin_star_feather import tarot_core
+        from data.plugins.astrbot_plugin_star_feather.tarot_data import TAROT_CARDS
         stub = tarot_core.StarTarot.__new__(tarot_core.StarTarot)
         positions = ["过去", "现在", "未来"]
         picks = [{"card": TAROT_CARDS[i], "upright": i % 2 == 0} for i in (0, 8, 21)]
@@ -2117,9 +2143,9 @@ class TestCommandEntryEpilogueEndToEnd:
         return evt
 
     def test_command_entry_sends_epilogue(self):
-        from main import StarFeatherPlugin
-        from prompts import RESULT_EPILOGUE
-        from tarot_core import StarTarot
+        from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
+        from data.plugins.astrbot_plugin_star_feather.prompts import RESULT_EPILOGUE
+        from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
         t = StarTarot(FakeContext(None), None)
         async def fake_interp(event, formation, positions, picks, clean, persona_eff=None, budget=None):
             return "【第1张·过去】一段过去。\

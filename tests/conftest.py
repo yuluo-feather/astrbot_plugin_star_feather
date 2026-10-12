@@ -12,20 +12,22 @@ test_judgement_corpus（判定语料回归）/
 test_stub_signatures（打桩与真实签名一致性）/ test_docs_consistency（测试清单对账）/
 test_release_gates（发布红线：版本四件套与市场包体）/
 test_config_freshness（配置新鲜度自证：进门读数与陈旧实例告警）/
-test_astrbot_contract（AstrBot 契约守卫：真框架面存活，没有框架时跳过），
+test_astrbot_contract（AstrBot 契约守卫：真框架面存活，没有框架时跳过）/
+test_import_model（导入模型红线：一份文件一个身份、插件根不碰 sys 机关、框架前缀清理删得干净），
 共享桩（FakeProvider / FakeContext / 牌常量）在 stubs.py。
 
-【导入约定】测试文件一律用插件根相对导入（from daily import ...），
-不要用 data.plugins.astrbot_plugin_star_feather.xxx 全路径——那是 AstrBot
-运行时的包路径，独立跑 pytest 时 data 包不存在，会在收集阶段直接
-ModuleNotFoundError（踩过：test_dailylines 曾全路径导入导致整个测试收集中断）。
-从 launcher 根目录跑 AstrBot 测试同理：脚本内部 import 也走插件根。
+【导入约定】测试文件一律用 AstrBot 运行时的包路径（from data.plugins.
+astrbot_plugin_star_feather.daily import ...）——那是插件模块唯一的身份，包链由本文件
+在收集前搭好（见 _install_plugin_package）。别退回「插件目录进 sys.path + 顶层名」：
+同一个文件会因此出现两份模块对象，补丁打空、断言比错对象，全是静默假绿的形状
+（2026-10-12 第 ⑥ 轮把插件侧改成包内相对导入，测试侧跟着换成了包路径）。
 
 conftest 只提供最小名字桩：@register / @command / @llm_tool 装饰器与消息组件类
 （At / Plain / Node 等），不需要模拟行为；事件对象与插件实例另由各测试文件构造。
 
 说人话：没有 AstrBot 的机器上，靠这些桩把戏把插件骗起来跑测试——本羽的牌灵得有个地方练手。
 """
+import importlib.machinery
 import logging
 import os
 import sys
@@ -33,9 +35,38 @@ import types
 
 import pytest
 
-_PLUGIN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if _PLUGIN_DIR not in sys.path:
-    sys.path.insert(0, _PLUGIN_DIR)
+_PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# 插件在框架里的真实包路径（AstrBot 就是这么加载它的）。测试替它把包链搭起来：
+# 插件内模块之间是包内相对导入（from .daily import ...），脱离包就导不动；
+# 而「把插件目录塞进 sys.path + 顶层名导入」那套老办法会让同一个文件出现两个模块
+# 身份（daily 与 data.plugins....daily），补丁打在哪个上全看运气，静默假绿。
+_PLUGIN_PKG = "data.plugins.astrbot_plugin_star_feather"
+
+
+def _install_plugin_package(pkg: str = _PLUGIN_PKG, path: str = _PLUGIN_DIR) -> None:
+    """把插件目录挂成 `data.plugins.<目录名>`（namespace 包），并接好父级属性链。
+
+    父级（data、data.plugins）没有真实目录可依，就自己造——它们只是命名空间，
+    不承载内容。属性链也要显式接上：`import data.plugins.X.daily` 靠父级属性解析，
+    而已经预注册在 sys.modules 里的模块不会被 import 机制自动挂到父模块上。
+    """
+    parts = pkg.split(".")
+    parent = None
+    for i, part in enumerate(parts):
+        name = ".".join(parts[:i + 1])
+        mod = sys.modules.get(name)
+        if mod is None:
+            mod = types.ModuleType(name)
+            mod.__path__ = [path] if i == len(parts) - 1 else []
+            mod.__package__ = name
+            mod.__spec__ = importlib.machinery.ModuleSpec(name, None, is_package=True)
+            sys.modules[name] = mod
+        if parent is not None:
+            setattr(parent, part, mod)
+        parent = mod
+
+
+_install_plugin_package()
 
 
 @pytest.fixture(autouse=True)
@@ -48,7 +79,7 @@ def _isolate_font_cache():
     _font_candidates 不清：它只依赖 bold 参数、内容是平台路径常量，
     不随用例变化（清了对结果无影响，属无意义操作）。
     """
-    import fonts
+    from data.plugins.astrbot_plugin_star_feather import fonts
     fonts._FONT_CACHE.clear()
     fonts._FONT_CMAP.clear()
     fonts._load_static_cmap.cache_clear()

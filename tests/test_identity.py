@@ -1,6 +1,9 @@
 """事件身份标识单测：发送者用户标识两级降级（群聊不用会话 ID 兜底）。
 ——牌灵认人，认人的规矩只写这一遍。"""
-from identity import raw_sender_id, resolve_sender_uid
+from data.plugins.astrbot_plugin_star_feather.identity import (
+    raw_sender_id,
+    resolve_sender_uid,
+)
 
 
 class TestResolveSenderUid:
