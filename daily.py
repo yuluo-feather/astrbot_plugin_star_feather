@@ -298,7 +298,7 @@ class DailyFortune:
 
     async def interp_cached(self, event, uid: str, formation: str, positions: list[str],
                             picks: list[dict], clean: str,
-                            persona_eff=None) -> str | None:
+                            persona_eff=None, budget=None) -> str | None:
         """今日牌运的解读缓存：按主题指纹（_norm_topic）分桶缓存。
 
         泛问（无具体主题）统一归为当日牌运，当天固定同一段解读，防止
@@ -309,6 +309,9 @@ class DailyFortune:
         主题分桶依赖 limit.daily_count 启用才受每日次数间接约束；默认 0=关闭时
         主题分桶无硬上界，仅靠跨天 pop（pick_cached 的 interps 清理）回收，
         同日换主题不回收。
+
+        budget：调用方（一次占卜）传的 AI 总预算对象，原样透传给解读器——缓存命中的
+        路径根本不碰 AI，也就无所谓预算；未命中而现场生成时才吃这笔预算。
         """
         topic = _norm_topic(clean)
         key, today = f"sf_daily_{uid}", time.strftime("%Y%m%d")
@@ -322,7 +325,7 @@ class DailyFortune:
         interp = await _ai_output(
             self.tarot._ai_interpret(
                 event, formation, positions, picks, clean or "（今日牌运）",
-                persona_eff=persona_eff),
+                persona_eff=persona_eff, budget=budget),
             "AI 解读", uid)
         if ok:
             async with self._kv_lock:
@@ -364,7 +367,7 @@ class DailyFortune:
         return interp
 
     async def spirit_cached(self, event, uid: str, picks: list, clean: str,
-                            persona_eff) -> str:
+                            persona_eff, budget=None) -> str:
         """牌灵的话：AI 按人设生成（贴合本次牌面+主题），当日同牌组缓存同一句；
         AI 失败回退池内当日签文（不写缓存，下次恢复后重新生成）。
 
@@ -408,7 +411,7 @@ class DailyFortune:
         line = await _ai_output(
             self.tarot.interpreter.spirit_line(
                 event, [(p["card"], p["upright"]) for p in picks],
-                _norm_topic(clean), persona_eff),
+                _norm_topic(clean), persona_eff, budget=budget),
             "牌灵的话", uid)
         if not line:
             return fallback  # AI 失败：池内当日句；不写缓存，下次再试 AI

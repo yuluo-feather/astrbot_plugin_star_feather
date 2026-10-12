@@ -114,12 +114,12 @@ READ_FAIL_MODES = ["read_down", "no_interface"]
 def _fake_tarot(interp="AI解读文本", spirit="AI牌灵的话", exc=None, render_lock=None):
     t = types.SimpleNamespace(_render_lock=render_lock)
 
-    async def _ai_interpret(event, formation, positions, picks, clean, persona_eff=None):
+    async def _ai_interpret(event, formation, positions, picks, clean, persona_eff=None, budget=None):
         if exc:
             raise exc
         return interp
 
-    async def spirit_line(event, pairs, topic, persona_eff):
+    async def spirit_line(event, pairs, topic, persona_eff, budget=None):
         if exc:
             raise exc
         return spirit
@@ -490,7 +490,7 @@ class TestImageGoneBeforeSend:
         p.daily_card = False
         p._shuffle_hint = lambda: None
 
-        async def fake_spirit(event, uid, picks, clean, persona_eff):
+        async def fake_spirit(event, uid, picks, clean, persona_eff, budget=None):
             if on_spirit:
                 on_spirit()  # 就夹在渲染与发送之间：真实窗口正是「牌灵的话」那次请求
             return "牌灵今天懒得开口"
@@ -688,7 +688,7 @@ class TestCleanupFuseNeverCarriesTheReading:
         p.daily_card = False
         p._shuffle_hint = lambda: None
 
-        async def fake_spirit(event, uid, picks, clean, persona_eff):
+        async def fake_spirit(event, uid, picks, clean, persona_eff, budget=None):
             return "牌灵今天懒得开口"
         p.daily = types.SimpleNamespace(spirit_cached=fake_spirit)
         return p, path

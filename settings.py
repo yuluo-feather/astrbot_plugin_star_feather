@@ -13,6 +13,9 @@ DEFAULT_SEGMENT_SIZE = 300      # 无标记文本兜底分段长度
 MIN_SEGMENT_SIZE = 50           # 分段长度下限
 DEFAULT_AI_TIMEOUT = 30         # 单次 AI 解读超时（秒）
 MIN_AI_TIMEOUT = 5              # 超时配置下限，避免配置成 0 秒自残
+DEFAULT_AI_BUDGET = 120         # 单次占卜的 AI 总预算（秒，ai.ai_budget_seconds）：所有 AI 阶段共用一个截止点
+AI_BUDGET_MIN_ATTEMPT = 1.0     # 剩余预算不足此值（秒）就不再发起新请求——注定超时，只是白等一次
+DEFAULT_SPIRIT_STAGE_BUDGET = 20  # 牌灵的话的阶段上限（秒）：次要内容不许独吞整笔预算
 DEFAULT_DISCLAIMER = "✨ 占卜仅供娱乐参考，选择权永远在你手里。"  # 免责声明默认文案（output.disclaimer，空字符串=不显示）
 DEFAULT_AI_COOLDOWN = 60        # AI 解读失败后的冷却（秒），按 Provider 粒度：挂掉的模型只冷却自己，其余照常服务
 DEFAULT_AI_PERSONA = "random"   # 牌灵人设（ai.persona）：off=中立 / tsundere 傲娇 / gentle 温柔 / mystic 神秘 / random 每次随机
@@ -74,6 +77,10 @@ class TarotSettings:
         self.ai_timeout = _cfg_int(config, "ai", "ai_timeout", DEFAULT_AI_TIMEOUT,
                                    floor=MIN_AI_TIMEOUT)
         self.ai_cooldown = _cfg_int(config, "ai", "ai_fail_cooldown", DEFAULT_AI_COOLDOWN)
+        # 单次占卜的 AI 总预算（秒）：0 = 不限制（显式关掉总预算保护，AiInterpreter
+        # 构造时会打一条 warning）。管的是「AI 阶段」的等待上界，不是整条消息端到端
+        # 的上界——图片渲染、框架调度、平台发送各有各的耗时。
+        self.ai_budget = _cfg_int(config, "ai", "ai_budget_seconds", DEFAULT_AI_BUDGET, floor=0)
         # 自然语言入口开关：默认值在 settings，工具注册是静态的，开关只在运行期判断（见 main.divine_tool）
         self.llm_tool_enabled = _cfg_bool(config, "tool", "llm_tool_enabled", True)
         self.llm_tool_cooldown = _cfg_int(config, "tool", "llm_tool_cooldown",
