@@ -7,6 +7,7 @@ gating（限流闸门）/ card_render（字体与渲染冒烟）/ deliver（分�
 
 说人话：各管各的模块都有自家单测，这里专盯「牌灵连招」——跨模块的活，一个都不能漏。"""
 import asyncio
+import json
 import logging
 import types
 
@@ -1514,6 +1515,136 @@ class TestDailyInterpTopic:
         assert a == "解读:今天感情运势"
         assert b == "解读:最近事业运"              # 昨天的分桶已作废：现场重生成
         assert len(calls) == 2
+
+
+class TestDailyInterpCap:
+    """解读分桶的硬上界（⑧）：DAILY_INTERP_MAX = 20，淘汰「最早插入」的那一桶（FIFO）。
+
+    没有上界时桶只增不减——跨天由 pick_cached 的 interps 清理整体作废，当天换主题
+    不回收，KV 条目随主题数线性长大。
+    口径是 FIFO 不是 LRU：命中路径根本不写回（见 interp_cached 的命中判定），读过
+    的桶不会因此变「新」，被挤掉的永远是**最早插入**的那一桶。
+
+    KV 桩按宿主真实形状写：落进去的是 JSON 文本（宿主 Preference.value 就是 JSON
+    列），读出来的是重新解析的对象。「插入顺序能不能活过落盘」只能这样验——拿
+    一个内存 dict 自证，验的其实是 Python 的 dict 而不是缓存的行为。
+    """
+
+    TOPIC = "今天财运{}怎么样"
+    KEY = "sf_daily_u1"
+    # 20 这个数**写死在这儿是故意的**：它是产品口径（一天换 20 个话题仍留得住），
+    # 不是实现细节。若哪天实现动了这个数，本文件当场红、逼一次显式确认。
+    # 更实际的理由：下面几条「挤掉最早那桶」的用例若拿被测常量当尺子，把常量改成
+    # 999 也照样全绿——那等于没验（实测过，所以才有这一行）。
+    CAP = 20
+
+    class _JsonKv:
+        def __init__(self):
+            self.raw = {}
+
+        async def get_kv_data(self, key, default=None):
+            text = self.raw.get(key)
+            return default if text is None else json.loads(text)
+
+        async def put_kv_data(self, key, value):
+            self.raw[key] = json.dumps(value)
+
+        def record(self, key="sf_daily_u1"):
+            return json.loads(self.raw[key]) if key in self.raw else None
+
+    @classmethod
+    def _daily(cls, kv):
+        from daily import DailyFortune
+        calls = []
+
+        async def fake_ai(event, formation, positions, picks, clean,
+                          persona_eff=None, budget=None):
+            calls.append(clean)
+            return f"解读:{clean}"
+
+        return DailyFortune(kv, types.SimpleNamespace(_ai_interpret=fake_ai)), calls
+
+    def _ask(self, df, nums):
+        """按顺序问这些编号的主题（同一事件循环内串行，与真实问答同形）。"""
+        async def go():
+            for n in nums:
+                await df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK],
+                                       self.TOPIC.format(n))
+        asyncio.run(go())
+
+    def test_the_cap_is_the_documented_number(self):
+        """口径对账：实现里的上限就是本文件写死的那个数。"""
+        from daily import DAILY_INTERP_MAX
+        assert DAILY_INTERP_MAX == self.CAP
+
+    def test_fills_up_to_the_cap_without_evicting_anything(self):
+        """刚好装满：一桶不少、一桶不多，也没有白白多发一次请求。"""
+        kv = self._JsonKv()
+        df, calls = self._daily(kv)
+        self._ask(df, range(1, self.CAP + 1))
+        slots = kv.record()["interps"]
+        assert list(slots) == [self.TOPIC.format(n) for n in range(1, self.CAP + 1)]
+        assert len(calls) == self.CAP
+
+    def test_the_earliest_inserted_bucket_goes_when_full(self):
+        """第 21 个主题挤掉第 1 桶：留下的 20 桶仍是插入顺序（FIFO 的形状）。"""
+        kv = self._JsonKv()
+        df, _ = self._daily(kv)
+        self._ask(df, range(1, self.CAP + 2))
+        slots = kv.record()["interps"]
+        assert list(slots) == [self.TOPIC.format(n) for n in range(2, self.CAP + 2)]
+        assert self.TOPIC.format(1) not in slots
+
+    def test_a_cache_hit_does_not_make_a_bucket_younger(self):
+        """FIFO ≠ LRU：回头读过的那一桶不会因此排到后面去。
+
+        问满 20 桶 → 回头读第 1 桶（命中、不写回）→ 问第 21 个主题。挤掉的必须仍是
+        最早插入的第 1 桶；换成「按最近使用淘汰」，被挤掉的会是第 2 桶、而第 1 桶
+        反而留下——这条就是两者的分界。
+        """
+        kv = self._JsonKv()
+        df, calls = self._daily(kv)
+        self._ask(df, range(1, self.CAP + 1))
+        hit = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK],
+                                           self.TOPIC.format(1)))
+        assert hit == f"解读:{self.TOPIC.format(1)}"      # 命中：复用旧桶
+        assert len(calls) == self.CAP                     # 命中不花 AI 调用
+        self._ask(df, [self.CAP + 1])
+        slots = kv.record()["interps"]
+        assert self.TOPIC.format(1) not in slots
+        assert self.TOPIC.format(2) in slots
+
+    def test_trim_touches_only_the_bucket_bag(self):
+        """裁剪只动 interps：记录里的日期与当天抽好的牌一律不动。
+
+        若实现是「顺手重造一条记录」，当天已经确定的牌会被抹掉——当场看不出来，
+        要等下一次问运势时牌面换了张才发现。
+        """
+        kv = self._JsonKv()
+        df, _ = self._daily(kv)
+        today = df.clock.today()
+        kv.raw[self.KEY] = json.dumps({"date": today, "card": PICK["card"],
+                                       "upright": True, "interps": {}})
+        self._ask(df, range(1, self.CAP + 2))
+        rec = kv.record()
+        assert rec["date"] == today
+        assert rec["card"] == PICK["card"] and rec["upright"] is True
+
+    def test_eviction_order_survives_a_json_round_trip(self):
+        """落盘再读回后淘汰顺序与内存一致——选 FIFO 的前提就是这一条。
+
+        宿主 KV 的 value 是 JSON 列：dict 的插入顺序必须活过 dumps/loads。本桩每次
+        put 都序列化、每次 get 都重新解析，再换一个 DailyFortune 实例接着问（同进程
+        换实例／重启后的形状），第 22 桶挤掉的仍该是第 2 桶。顺序若是靠内存 dict 才
+        成立，这里会当场红。
+        """
+        kv = self._JsonKv()
+        df, _ = self._daily(kv)
+        self._ask(df, range(1, self.CAP + 2))             # 此时盘上是第 2..21 桶
+        df2, _ = self._daily(kv)                          # 换一代实例，只认盘上那份
+        self._ask(df2, [self.CAP + 2])
+        slots = kv.record()["interps"]
+        assert list(slots) == [self.TOPIC.format(n) for n in range(3, self.CAP + 3)]
 
 
 class TestDailyKvFallback:
