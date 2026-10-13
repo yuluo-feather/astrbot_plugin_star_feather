@@ -267,8 +267,11 @@ class DailyFortune:
         # 一致）；桩对象没有就自建一份跟随本地时区——不因诊断/装配形态让日期键失联
         self.clock = getattr(tarot, "clock", None) or Clock()
         # 图片目录同样取自核心那份（①实例隔离：海报卡别落到共享父目录去）；
-        # 桩对象没有就退回根目录——诊断/装配形态不该让渲染无处可放
-        self.image_dir = getattr(tarot, "image_dir", None) or IMAGE_DIR_ROOT
+        # 桩对象没有这个属性才退回根目录（诊断/装配形态不该让渲染无处可放）。
+        # 用 isinstance 而不是 `or`：核心的图片退路彻底失败时会给出空串，那是
+        # 「降级为无图」的信号——`or` 会把它悄悄换成共享根目录，破坏①的每实例一份。
+        _img_dir = getattr(tarot, "image_dir", None)
+        self.image_dir = _img_dir if isinstance(_img_dir, str) else IMAGE_DIR_ROOT
         # 缓存读-判-写串行化（gating 同款防线）：并发占卜时两条协程各自读旧值再写回，
         # 后写的会把先写的分桶整个覆盖掉（实测：并发问两个主题，KV 里只剩一个）
         self._kv_lock = asyncio.Lock()

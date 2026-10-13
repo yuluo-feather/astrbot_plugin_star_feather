@@ -260,6 +260,34 @@ class TestStaleCleanup:
         card_render.cleanup_stale_images(str(mine))
         assert (mine / "tarot_mine.png").exists()
 
+    def test_same_pid_other_instance_dir_never_reaped(self, tmp_path, monkeypatch):
+        """同进程的另一代实例目录免删：热重载的新实例不许回收旧实例还在等发送的图。
+
+        这是①最危险的那一类：名字合规、确实过期、而且 pid 就是本进程——旧写法只跳过
+        传入的 current_dir，于是刚出生的新实例会把隔壁老实例的目录整个删掉
+        （2026-10-13 外部复现已确认）。判据取 PID 解析：本进程的任何实例目录都不碰。
+        """
+        root = self._root(tmp_path, monkeypatch)
+        old = root / f"inst_{os.getpid()}_1_deadbeef"
+        new = root / f"inst_{os.getpid()}_2_cafebabe"
+        for d in (old, new):
+            d.mkdir()
+            (d / "tarot_x.png").write_bytes(b"img")
+        self._age(old, card_render.STALE_INSTANCE_DIR_AGE * 10)
+        card_render.cleanup_stale_images(str(new))   # 只传自己：旧实例目录仍须免删
+        assert old.exists() and (old / "tarot_x.png").exists()
+        assert new.exists()
+
+    def test_other_pid_stale_dir_is_still_reaped(self, tmp_path, monkeypatch):
+        """反向一格：别的 PID 的过期目录照旧回收——① 改的是豁免面，不是停掉回收。"""
+        root = self._root(tmp_path, monkeypatch)
+        foreign = root / f"inst_{os.getpid() + 1}_1_deadbeef"
+        foreign.mkdir()
+        (foreign / "tarot_x.png").write_bytes(b"img")
+        self._age(foreign, card_render.STALE_INSTANCE_DIR_AGE * 10)
+        card_render.cleanup_stale_images()
+        assert not foreign.exists()
+
     def test_irregular_names_untouched(self, tmp_path, monkeypatch):
         """命名不合规的目录/文件一律不碰：判据要能挡住手改、截断、别的程序。"""
         root = self._root(tmp_path, monkeypatch)
@@ -314,6 +342,97 @@ class TestInstanceImageDir:
         b = StarTarot(FakeContext(None), None)
         assert a.image_dir != b.image_dir, "两代实例拿到同一个目录＝①没生效"
         assert DailyFortune(FakeContext(None), a).image_dir == a.image_dir
+
+    def test_root_failure_uses_a_private_unique_dir(self, tmp_path, monkeypatch):
+        """根目录建不出来时不退回共享目录：退路也必须是「每实例一份」（①的严格保证）。
+
+        旧写法退回 `tempfile.gettempdir()` 或共享根目录，两代实例又挤回同一处——
+        ①修的正是这个，异常分支不能把它放回去。
+        """
+        broken = tmp_path / "blocked"
+        sys_tmp = tmp_path / "sys_tmp"
+        sys_tmp.mkdir()
+        monkeypatch.setattr(card_render, "IMAGE_DIR_ROOT", str(broken))
+        monkeypatch.setattr(card_render.tempfile, "gettempdir", lambda: str(sys_tmp))
+        real_makedirs = os.makedirs
+
+        def fail_root(path, *a, **kw):
+            if os.path.abspath(str(path)) == os.path.abspath(str(broken)):
+                raise OSError("模拟根目录不可写")
+            return real_makedirs(path, *a, **kw)
+        monkeypatch.setattr(os, "makedirs", fail_root)
+
+        a = card_render.new_instance_image_dir()
+        b = card_render.new_instance_image_dir()
+        assert a and b and a != b, "退路也必须每实例一份，不许两代共用"
+        assert os.path.isdir(a) and os.path.isdir(b)
+        assert os.path.abspath(a) != os.path.abspath(str(broken))
+
+    def test_all_fallbacks_failing_degrades_to_no_image(self, tmp_path, monkeypatch):
+        """连唯一临时目录都建不出来：返回空串＝降级为无图，绝不悄悄改回共享目录。"""
+        monkeypatch.setattr(card_render, "IMAGE_DIR_ROOT", str(tmp_path / "blocked"))
+
+        def boom(*a, **kw):
+            raise OSError("磁盘不可用")
+        monkeypatch.setattr(os, "makedirs", boom)
+        monkeypatch.setattr(card_render.tempfile, "mkdtemp", boom)
+        assert card_render.new_instance_image_dir() == ""
+
+    def test_daily_keeps_empty_image_dir_instead_of_shared_root(self, tmp_path, monkeypatch):
+        """空路径是「本次降级为无图」的信号：不许用 `or` 换成共享根目录（①的边界）。"""
+        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        monkeypatch.setattr(card_render, "IMAGE_DIR_ROOT", str(tmp_path / "star_feather"))
+        tarot = types.SimpleNamespace(image_dir="")
+        assert DailyFortune(None, tarot).image_dir == ""
+
+
+class TestReloadIsolationEndToEnd:
+    """① 端到端：新实例启动清理不许回收同进程旧实例仍在用的图（2026-10-13 第 4 条补充）。
+
+    危险组合 ＝ 同 PID + 多实例 + 旧目录已过回收年龄，三者缺一都测不出真问题：
+    - 只测新鲜目录：旧实现（本批修之前）在 mtime 未过期时本来就不删，假绿；
+    - 只测别的 PID 的过期目录：那是本就该回收的重启残骸，与本案无关；
+    - 同 PID 但目录新鲜：同样走不到删除分支。
+    所以本组把 A 的目录 mtime 直接压到阈值之外（os.utime 造过期，不真等三天），
+    再让 B 走一遍 StarFeatherPlugin.__init__ 里那句启动清理，断言 A 的图与目录
+    都还在、还打得开。普通牌面图与今日海报各一格（参数化）。
+    """
+
+    @staticmethod
+    def _pair(tmp_path, monkeypatch):
+        """同进程两代实例（真 StarTarot：image_dir 由 new_instance_image_dir 开出）。"""
+        from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
+        from stubs import FakeContext
+        monkeypatch.setattr(card_render, "IMAGE_DIR_ROOT", str(tmp_path / "star_feather"))
+        return StarTarot(FakeContext(None), None), StarTarot(FakeContext(None), None)
+
+    @staticmethod
+    def _age(path, seconds):
+        old = time.time() - seconds
+        os.utime(path, (old, old))
+
+    @pytest.mark.parametrize("kind", ["plain", "daily"])
+    def test_previous_instance_image_survives_reload(self, tmp_path, monkeypatch, kind):
+        from PIL import Image
+        a, b = self._pair(tmp_path, monkeypatch)
+        assert a.image_dir != b.image_dir, "两代实例必须各自一份目录"
+        positions, picks = a._draw("羽签")            # 真抽牌
+        if kind == "plain":
+            img = card_render.render_cards(positions, picks, "羽签", save_dir=a.image_dir)
+        else:
+            pick = picks[0]
+            img = card_render._render_daily_card_img(pick["card"], bool(pick["upright"]),
+                                                     "心之所向，自有回响。", "10月13日·周一",
+                                                     save_dir=a.image_dir)
+        assert os.path.isfile(img), "A 得先真渲染出一张图，后面才谈得上「被误删」"
+        self._age(a.image_dir, card_render.STALE_INSTANCE_DIR_AGE + 60)
+
+        card_render.cleanup_stale_images(b.image_dir)   # StarFeatherPlugin.__init__ 的那一行
+
+        assert os.path.isdir(a.image_dir), "同 PID 旧实例目录被新实例回收了"
+        assert os.path.isfile(img), "旧实例仍在用的图被删了"
+        with Image.open(img) as im:                     # 「A 仍能使用该图片」
+            im.verify()
 
 
 class TestWrapAndSignatureLines:

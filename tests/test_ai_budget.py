@@ -18,6 +18,8 @@ import os
 import time
 import types
 
+from data.plugins.astrbot_plugin_star_feather import card_render
+from data.plugins.astrbot_plugin_star_feather import interpret as interpret_mod
 from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
 from data.plugins.astrbot_plugin_star_feather.interpret import AiBudget, AiInterpreter
 from data.plugins.astrbot_plugin_star_feather.settings import (
@@ -79,12 +81,20 @@ def _spy_chat(monkeypatch, clock, step, results):
 # ---------- 算法层：预算 → 本次超时上限 ----------
 class TestBudgetArithmetic:
     def test_unlimited_keeps_per_call_timeout_and_stage_cap(self):
-        bd = AiBudget(0)
+        clk = Clock()
+        bd = AiBudget(0, clk)
         assert bd.limited is False
         assert bd.remaining() == float("inf")
         assert bd.step_timeout(30) == 30
         # 阶段上限是独立的第二约束：总预算关掉了，牌灵的话照样不许跑满 30 秒
-        assert bd.step_timeout(30, DEFAULT_SPIRIT_STAGE_BUDGET) == float(DEFAULT_SPIRIT_STAGE_BUDGET)
+        bd.open_stage("spirit", DEFAULT_SPIRIT_STAGE_BUDGET)
+        assert bd.step_timeout(30, "spirit") == float(DEFAULT_SPIRIT_STAGE_BUDGET)
+        # 阶段上限是**累计**的：花掉 15 秒后只剩 5 秒，不是又给满 20 秒
+        # （旧写法每个候选各取一次 20 秒，两个候选就能累积等到 40 秒）
+        clk.advance(15)
+        assert bd.step_timeout(30, "spirit") == float(DEFAULT_SPIRIT_STAGE_BUDGET) - 15
+        clk.advance(4.5)                       # 只剩 0.5 秒
+        assert bd.step_timeout(30, "spirit") is None
 
     def test_broken_value_falls_back_to_default_budget(self):
         # 配置写坏了（非数字）：退回默认预算，而不是当成「不限制」把上界取消
@@ -165,6 +175,91 @@ class TestStagesShareTheDeadline:
         asyncio.run(_interp([FakeProvider("s")]).spirit_line(
             EVENT, [(CARD, True)], "感情", None, budget=AiBudget(0)))
         assert seen == [("s", float(DEFAULT_SPIRIT_STAGE_BUDGET))]
+
+
+# ---------- 牌灵的话的阶段上限是「累计」，不是「每次请求」 ----------
+class TestSpiritStageBudgetAccumulates:
+    """牌灵的话的 20 秒是**阶段**上限，不是每次请求的上限（issue #21 ④ 复核）。
+
+    旧写法对每个 Provider 各取一次 20 秒上限，两个连续失败的候选就能累积等到 40 秒；
+    「取候选」那一步还不吃这条上限。本组把四件事分别钉住：累计、阶段用尽后停手且不
+    动总预算、总预算关掉后阶段上限照样生效、取候选本身也受阶段上限约束。
+    全部走假时钟，不睡墙钟（唯一一格真墙钟是 0.3 秒级的「没人被绕开」验证）。
+    """
+
+    SPIRIT = interpret_mod._STAGE_SPIRIT
+
+    @staticmethod
+    def _failing(n):
+        """n 个「回了话但不合规」的候选：单行超过 40 字，判不合规后继续下一个。"""
+        return [FakeProvider(f"p{i}", result="超长" * 30) for i in range(n)]
+
+    @staticmethod
+    def _spirit(it, bd):
+        return asyncio.run(it.spirit_line(EVENT, [(CARD, True)], "感情", None, budget=bd))
+
+    def test_two_failing_candidates_cannot_wait_40_seconds(self, monkeypatch):
+        """每次吃 15 秒、阶段上限 20 秒 → 第二次只剩 5 秒，第三次不发起。
+
+        旧写法下两个候选各拿满 20 秒（假时钟走到 40 秒）；本用例的判据正是「第二次
+        拿到的上限＝阶段上限 − 已用时间」，它一旦被改回「每次各给 20 秒」就红。
+        """
+        clk = Clock()
+        it = _interp(self._failing(3), ai_timeout=30)
+        seen = _spy_chat(monkeypatch, clk, 15, "超长" * 30)
+        assert self._spirit(it, AiBudget(120, clk)) is None
+        # 20 → 已用 15 → 只剩 5：同一阶段累计，不是每次各 20
+        assert seen == [("p0", 20.0), ("p1", 5.0)]
+        assert seen[1][1] == float(DEFAULT_SPIRIT_STAGE_BUDGET) - 15
+        assert len(seen) == 2, "阶段用尽就该停手：第三个候选不许再发起"
+
+    def test_stage_stop_keeps_the_rest_of_the_total_budget(self, monkeypatch, caplog):
+        """阶段上限用尽 ≠ 总预算耗尽：账上剩下的秒数要留给正式解读。
+
+        供应商装死 20 秒（假时钟按真实耗时推进），牌灵的话就此收手；总预算 120 秒
+        应当只被花掉那 20 秒，剩下的 100 秒仍够解读发起一次 30 秒的请求。
+        """
+        clk = Clock()
+        it = _interp(self._failing(3), ai_timeout=30)
+        _spy_chat(monkeypatch, clk, 20, "超长" * 30)
+        bd = AiBudget(120, clk)
+        with caplog.at_level(logging.WARNING):
+            assert self._spirit(it, bd) is None
+        assert self.SPIRIT in bd.stopped
+        assert bd.remaining() == 100.0, "阶段上限用尽后总预算只被花掉那 20 秒"
+        notes = [r.getMessage() for r in caplog.records if "上限" in r.getMessage()]
+        assert notes and "20s 上限" in notes[0], f"日志要说清是阶段上限，实际 {notes}"
+        assert not [r for r in caplog.records if "总预算已耗尽" in r.getMessage()], \
+            "把「阶段上限用尽」写成「总预算耗尽」会误导排查：账上其实还有钱"
+        # 剩下的预算真的还能发一次解读：同一笔预算，30 秒单次超时照给
+        seen = _spy_chat(monkeypatch, clk, 0, {"r": OK_INTERP})
+        it2 = _interp([FakeProvider("r", result=OK_INTERP)], ai_timeout=30)
+        assert asyncio.run(it2.interpret(EVENT, "羽签", ["你的当下"], [PICK], "问感情",
+                                         "详情", budget=bd)) == OK_INTERP
+        assert seen == [("r", 30.0)]
+
+    def test_unlimited_budget_still_honours_the_stage_cap(self, monkeypatch):
+        """ai_budget_seconds=0 关的是总预算保护，牌灵的话那条阶段上限不跟着关。"""
+        clk = Clock()
+        it = _interp(self._failing(3), ai_timeout=30)
+        seen = _spy_chat(monkeypatch, clk, 15, "超长" * 30)
+        assert self._spirit(it, AiBudget(0, clk)) is None
+        assert seen == [("p0", 20.0), ("p1", 5.0)]
+        assert len(seen) == 2
+
+    def test_slow_candidate_source_is_capped_by_the_stage_cap(self, monkeypatch):
+        """取候选本身也在阶段上限之内（总预算关掉也一样），否则阶段上限被绕开。
+
+        真墙钟不可免的理由同 TestRealWallClock：只有墙钟能证明那段等待确实接到了
+        wait_for 上。代价约 0.3 秒。
+        """
+        monkeypatch.setattr(interpret_mod, "DEFAULT_SPIRIT_STAGE_BUDGET", 0.3)
+        it = AiInterpreter(_SlowContext(delay=5.0), ai_timeout=30, ai_budget=0)
+        t0 = time.monotonic()
+        out = self._spirit(it, AiBudget(0))
+        elapsed = time.monotonic() - t0
+        assert out is None
+        assert elapsed < 3.0, f"取候选没被阶段上限收住：等了 {elapsed:.2f}s"
 
 
 # ---------- 真实墙钟：预算确实接到了 wait_for 上 ----------
@@ -455,3 +550,70 @@ class TestCandidateFetchWithinBudget:
         assert self._run(it, AiBudget(1.2)) is None
         assert it._fail_ts_by_provider == {}
 
+
+# ---------- ai_budget_seconds=0 与图片核验的组合（主人 2026-10-13 第 3 条补充） ----------
+class TestUnlimitedBudgetKeepsTheImagePipeline:
+    """关掉总预算只该关掉「AI 等待的上界」，不该顺手关掉渲染与发送前核验。
+
+    判据选最容易被漏掉的那一处：渲染成功后、发送前图被外部删掉——只要有人在两段
+    之间插一句 `if budget.limited:`，补渲染就会跟着被跳过，用户拿到一条空图消息。
+    本用例走真入口（_run_reading），只把渲染换成可控桩，AI 与预算那条链原样保留。
+    """
+
+    def test_zero_budget_rerenders_a_vanished_image(self, tmp_path, monkeypatch):
+        from data.plugins.astrbot_plugin_star_feather import daily as daily_mod
+        from data.plugins.astrbot_plugin_star_feather import tarot_core
+        from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
+
+        monkeypatch.setattr(card_render, "IMAGE_DIR_ROOT", str(tmp_path / "star_feather"))
+        ctx = FakeContext(using=None, others=[FakeProvider("p0", result=OK_INTERP)])
+        t = tarot_core.StarTarot(ctx, None)
+        t.send_mode = "plain"
+        t.deliverer.forward_result = False
+        t.interpreter = AiInterpreter(ctx, ai_timeout=30, ai_budget=0)   # 总预算关掉
+
+        gone = str(tmp_path / "gone.png")     # 渲染给了路径，文件却在这几毫秒里没了
+        alive = str(tmp_path / "alive.png")
+        calls = []
+
+        def fake_render_image(formation, positions, picks):
+            calls.append(1)
+            if len(calls) == 1:
+                return gone
+            open(alive, "wb").write(b"PNG")
+            return alive
+        t._render_image = fake_render_image
+
+        p = StarFeatherPlugin.__new__(StarFeatherPlugin)
+        p.tarot = t
+        p.daily_card = False
+        p._shuffle_hint = lambda: None
+        p.daily = daily_mod.DailyFortune(_KV(), t)
+
+        evt = types.SimpleNamespace()
+        evt.result = None
+        evt.sent = []
+        evt.get_self_id = lambda: "12345"
+
+        def chain_result(chain):
+            evt.result = chain
+            return chain
+        evt.chain_result = chain_result
+
+        async def send(chain):
+            evt.sent.append(chain)
+        evt.send = send
+
+        asyncio.run(self._drain(p, evt))
+
+        assert len(calls) >= 2, "预算 0 却跳过了渲染或发送前的补渲染"
+        assert not os.path.exists(gone)
+        nodes = list(evt.result)
+        imgs = [c for c in nodes if type(c).__name__ == "Image"]
+        assert [i.file for i in imgs] == [alive], "补渲染出来的那张图必须真的发出去"
+        assert os.path.exists(alive)
+
+    @staticmethod
+    async def _drain(plugin, evt):
+        async for _ in plugin._run_reading(evt, "羽签", ["你的当下"], [PICK], "问感情"):
+            pass

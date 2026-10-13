@@ -154,7 +154,7 @@ class TestShadowTally:
             assert _ask(it, ["过去", "现在", "未来"]) == LEGACY_TWO_OF_THREE
         line = [r.getMessage() for r in caplog.records if "影子汇总" in r.getMessage()]
         assert len(line) == 1, f"影子汇总应恰好一行，实际 {line}"
-        assert "候选 1 个" in line[0] and "拒 1 个" in line[0]
+        assert "本次候选拒绝率 1/1 (100.00%)" in line[0]
         assert "缺号" in line[0] and "未观测" in line[0]
 
     def test_summary_denominator_covers_every_checked_candidate(self, caplog):
@@ -170,7 +170,7 @@ class TestShadowTally:
             assert _ask(it, ["过去", "现在", "未来"]) == OK3
         line = [r.getMessage() for r in caplog.records if "影子汇总" in r.getMessage()]
         assert len(line) == 1
-        assert "候选 3 个" in line[0] and "拒 2 个" in line[0]
+        assert "本次候选拒绝率 2/3 (66.67%)" in line[0]
         assert "不降级" in line[0] and "第 3 个候选" in line[0]
 
     def test_summary_reported_even_when_nothing_passes(self, caplog):
@@ -180,7 +180,8 @@ class TestShadowTally:
         with caplog.at_level(logging.INFO):
             assert _ask(it, ["过去", "现在"]) is None
         line = [r.getMessage() for r in caplog.records if "影子汇总" in r.getMessage()]
-        assert len(line) == 1 and "候选 1 个" in line[0] and "降级为本地牌义" in line[0]
+        assert len(line) == 1 and "本次候选拒绝率 1/1 (100.00%)" in line[0] \
+            and "降级为本地牌义" in line[0]
 
     def test_summary_is_not_written_when_nothing_was_checked(self, caplog):
         """没有候选经过校验（全部冷却/预算耗尽）时不落汇总：没有分母的空行只会刷日志。"""
@@ -214,7 +215,7 @@ class TestShadowTally:
             assert _ask(it, ["过去", "现在"]) is None
         line = [r.getMessage() for r in caplog.records if "影子汇总" in r.getMessage()]
         assert len(line) == 1
-        assert "候选 2 个" in line[0] and "拒 2 个" in line[0]
+        assert "本次候选拒绝率 2/2 (100.00%)" in line[0]
         assert "降级为本地牌义" in line[0] and "整条可用候选链已观测完" in line[0]
 
     def test_unknown_branch_is_not_reported_as_degrade(self, caplog):
@@ -242,9 +243,48 @@ class TestShadowTally:
             _ask(it, ["过去", "现在", "未来"])
         line = [r.getMessage() for r in caplog.records if "影子汇总" in r.getMessage()]
         assert len(line) == 1
-        assert "累计：3 签" in line[0] and "不降级 3" in line[0]
+        assert "3 签——不降级 3" in line[0]
         assert "降级 0" in line[0] and "未观测 0" in line[0]
-        assert "判定候选 3 个中会被拒 0 个" in line[0]
+        assert "累计候选拒绝率 0/3 (0.00%)" in line[0]
+
+    def test_summary_percentage_and_scope_are_stated(self, caplog):
+        """单次与累计都要给出「分子/分母 (百分比)」，且累计要写明作用范围。"""
+        # 第一个连宽松都不过（计数后继续），第二个严格通过：分母 2、分子 1 = 50%
+        it = _interp([FakeProvider("p0", result="完全没有结构的一段话。"),
+                      FakeProvider("p1", result=OK3)])
+        with caplog.at_level(logging.INFO):
+            _ask(it, ["过去", "现在", "未来"])
+        line = [r.getMessage() for r in caplog.records if "影子汇总" in r.getMessage()][0]
+        assert "本次候选拒绝率 1/2 (50.00%)" in line
+        assert "累计候选拒绝率 1/2 (50.00%)" in line
+        # 累计口径必须写在行里：实例级、热重载即清零、跨观察期要 Σ拒绝÷Σ候选
+        assert "本解释器实例" in line and "热重载" in line
+        assert "Σ拒绝÷Σ候选" in line and "勿平均各行百分比" in line
+
+    def test_zero_denominator_reports_na_never_zero_percent(self):
+        """分母为零写 N/A，不许写 0%：0/0 是「还没观测量」，不是「没被拒」。"""
+        from data.plugins.astrbot_plugin_star_feather.interpret import _rate_text
+        assert _rate_text(2, 50) == "2/50 (4.00%)"
+        assert _rate_text(0, 3) == "0/3 (0.00%)"
+        assert _rate_text(0, 0) == "0/0 (N/A)"
+        assert "%" not in _rate_text(0, 0), "零分母不许给出百分比，哪怕是 0%"
+
+    def test_cumulative_resets_with_the_interpreter_instance(self, caplog):
+        """热重载＝新的解释器实例：累计从零开始，日志里的累计只覆盖自己这一代。
+
+        这条正是「日志必须写明累计作用范围」的理由：观察期的总体拒绝率只能用
+        各次观测的 Σ拒绝÷Σ候选 汇总，不能把两代实例的累计值拼起来当同一窗口。
+        """
+        with caplog.at_level(logging.INFO):
+            _ask(_interp([FakeProvider("p0", result=LEGACY_TWO_OF_THREE)]),
+                 ["过去", "现在", "未来"])
+            first = [r.getMessage() for r in caplog.records if "影子汇总" in r.getMessage()][0]
+            caplog.clear()
+            _ask(_interp([FakeProvider("p0", result=OK3)]), ["过去", "现在", "未来"])
+            second = [r.getMessage() for r in caplog.records if "影子汇总" in r.getMessage()][0]
+        assert "1 签——" in first and "累计候选拒绝率 1/1 (100.00%)" in first
+        assert "1 签——" in second, "新一代实例的累计必须从零起算，不继承上一代"
+        assert "累计候选拒绝率 0/1 (0.00%)" in second
 
 
 # ---------- 替身样本与真实口径对齐 ----------

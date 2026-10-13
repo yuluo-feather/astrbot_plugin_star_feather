@@ -55,6 +55,18 @@ def _budget_seconds(value) -> float:
         return float(DEFAULT_AI_BUDGET)
 
 
+def _rate_text(numerator: int, denominator: int) -> str:
+    """拒绝率的统一写法：`分子/分母 (xx.xx%)`；分母为 0 输出 `N/A`。
+
+    为什么分母为零不许写 0%：0/0 不是「没有被拒」，而是**还没有观测量**。写成 0%
+    会读成「样本充足、结果良好」，恰好把「没数据」错当成「好数据」——判断要不要
+    收紧时最怕这个。分母为 0 时报 N/A，读数缺失就得看起来像缺失。
+    """
+    if denominator <= 0:
+        return f"{numerator}/{denominator} (N/A)"
+    return f"{numerator}/{denominator} ({numerator / denominator * 100:.2f}%)"
+
+
 class _ShadowTally:
     """影子口径的本次占卜计数：只存数字与原因，不存解读原文。
 
@@ -87,6 +99,10 @@ class AiBudget:
     seconds <= 0 = 不限制（limited=False）：显式的高级选项，等于关掉总预算保护
     （AiInterpreter 构造时会就此留一条 warning）。
 
+    另可开「阶段级上限」（open_stage）：某个次要阶段（牌灵的话）不许独吞整笔预算。
+    这条上限是**阶段内累计**的——候选获取与阶段内每一次请求共用同一个截止点，
+    不会按「上限 × 候选数」翻倍；总预算关掉时它照样生效（独立第二约束）。
+
     clock 可注入：测试用假时钟推进，不睡墙钟。
     """
 
@@ -97,6 +113,10 @@ class AiBudget:
         self.deadline = clock() + self.seconds if self.limited else None
         # 已因预算停手的阶段：同一阶段只报一次日志（多候选各自报一遍会把日志刷满）
         self.stopped: set[str] = set()
+        # 阶段级上限（如牌灵的话的 20 秒）：{阶段名: (截止点, 上限值)}。同名阶段只开
+        # 一次，候选获取与阶段内每一次请求读的都是同一个截止点——连续失败/供应商
+        # 回退不会按「上限 × 候选数」累加（issue #21 ④ 复核：旧写法正是那样累加的）。
+        self._stages: dict[str, tuple[float, float]] = {}
 
     def remaining(self) -> float:
         """剩余预算（秒）；不限制时返回 inf，调用方无需分支。"""
@@ -104,12 +124,36 @@ class AiBudget:
             return float("inf")
         return self.deadline - self.clock()
 
-    def step_timeout(self, per_call, stage_cap: float | None = None) -> float | None:
-        """本次请求的有效超时 = min(单次超时, 剩余预算, 阶段上限)。
+    def open_stage(self, stage: str, stage_cap: float) -> None:
+        """开一个阶段级上限（同名阶段幂等）。
+
+        截止点 = min(总截止点, 现在 + 阶段上限)。总预算不限（limited=False）时只受
+        阶段上限约束——阶段上限是独立的第二约束，不因 ai_budget_seconds=0 而失效。
+        """
+        if stage in self._stages:
+            return
+        cap = float(stage_cap)
+        cap_deadline = self.clock() + cap
+        deadline = min(self.deadline, cap_deadline) if self.limited else cap_deadline
+        self._stages[stage] = (deadline, cap)
+
+    def stage_left(self, stage: str) -> float | None:
+        """该阶段的剩余上限（秒）；未开过该阶段返回 None。"""
+        rec = self._stages.get(stage)
+        return None if rec is None else rec[0] - self.clock()
+
+    def stage_cap(self, stage: str) -> float | None:
+        """该阶段的上限值（秒，仅用于日志）；未开过返回 None。"""
+        rec = self._stages.get(stage)
+        return None if rec is None else rec[1]
+
+    def step_timeout(self, per_call, stage: str | None = None) -> float | None:
+        """本次请求的有效超时 = min(单次超时, 剩余总预算, 阶段剩余)。
 
         返回 None = 不再发起新请求：预算耗尽，或剩下的不够跑一次有意义的请求
         （低于 AI_BUDGET_MIN_ATTEMPT，硬发出去就是白等一次超时）。
-        不限制时返回 per_call（阶段上限照样生效）。
+        stage：已开阶段上限的阶段名（见 open_stage）；None 表示本阶段无独立上限。
+        总预算不限时 per_call 照样生效（有阶段上限则再取 min）。
         """
         left = self.remaining()
         if left < AI_BUDGET_MIN_ATTEMPT:
@@ -117,8 +161,12 @@ class AiBudget:
         limit = float(per_call)
         if self.limited:
             limit = min(limit, left)
-        if stage_cap is not None:
-            limit = min(limit, float(stage_cap))
+        if stage is not None:
+            stage_left = self.stage_left(stage)
+            if stage_left is not None:
+                if stage_left < AI_BUDGET_MIN_ATTEMPT:
+                    return None
+                limit = min(limit, stage_left)
         return limit
 
 
@@ -175,18 +223,32 @@ class AiInterpreter:
         """
         return AiBudget(self.ai_budget)
 
-    def _budget_stop(self, budget: AiBudget, stage: str) -> None:
-        """预算让某阶段停手：留一行日志（同一阶段只报一次），随后按 None 回退本地牌义。"""
+    def _stage_stop(self, budget: AiBudget, stage: str) -> None:
+        """本阶段停手：留一行日志（同一阶段只报一次）。
+
+        死因分两种，日志必须分得清：**总预算见底**（该阶段起不了有效请求，回退本地
+        牌义）与**阶段上限用尽**（总预算还留着，只是本阶段不许再用——那份要留给正式
+        解读）。把后者写成「总预算耗尽」会误导排查：日志说没钱了，账上其实还有。
+        """
         if stage in budget.stopped:
             return
         budget.stopped.add(stage)
         left = budget.remaining()
-        if left <= 0:
-            logger.warning(f"AI 总预算已耗尽（{stage}，预算 {budget.seconds:g}s）："
-                           "不再发起新请求，回退本地牌义")
+        if left < AI_BUDGET_MIN_ATTEMPT:
+            if left <= 0:
+                logger.warning(f"AI 总预算已耗尽（{stage}，预算 {budget.seconds:g}s）："
+                               "不再发起新请求，回退本地牌义")
+            else:
+                logger.warning(f"AI 总预算仅剩 {left:.1f}s（{stage}）："
+                               "不够发起一次有效请求，回退本地牌义")
+            return
+        cap = budget.stage_cap(stage)
+        room = "总预算不限" if not budget.limited else f"剩余总预算 {left:.1f}s"
+        if cap is None:
+            logger.warning(f"{stage}阶段停手（{room}）")
         else:
-            logger.warning(f"AI 总预算仅剩 {left:.1f}s（{stage}）："
-                           "不够发起一次有效请求，回退本地牌义")
+            logger.warning(f"{stage}阶段已达 {cap:g}s 上限：本阶段不再尝试后续候选，"
+                           f"{room}留给解读")
 
     def _provider_id(self, provider) -> str:
         try:
@@ -269,30 +331,40 @@ class AiInterpreter:
         ——上游队列卡住时，预算算得再准也压不住它。
 
         口径：
-          - 无预算、或预算不限（`ai_budget_seconds=0`）：原样直取，不给 0 那档新增语义；
+          - 无预算、或（预算不限 `ai_budget_seconds=0` 且该阶段没开阶段上限）：
+            原样直取，不给 0 那档新增语义；
           - 有预算：等待上限 = 剩余预算；剩余不足 AI_BUDGET_MIN_ATTEMPT 就不再取
             （注定超时，白等一次）；
+          - 该阶段开了阶段上限（budget.open_stage，如牌灵的话的 20 秒）：等待上限再取
+            min(阶段剩余)——**取候选这一步本身也在阶段上限之内**，否则「阶段最多 20 秒」
+            会被一段不受约束的取候选等待绕开（issue #21 ④ 复核）；
           - 取候选超时 = 这段等待把预算吃掉了，与「预算见底」按同一个死因记账
-            （`_budget_stop`，同一阶段只报一次），不再自己叠第二条日志；
+            （`_stage_stop`，同一阶段只报一次），不再自己叠第二条日志；
           - 超时只影响这一次占卜，**不**把 provider 记进失败冷却——取不到候选未必是
             模型服务的问题，冻住它只会连累后面的占卜。
         """
-        if budget is None or not budget.limited:
+        if budget is None:
             return await self._provider_candidates(umo)
 
         def _stop_here() -> list:
-            """预算见底就地停手：与阶段内的停手共用同一条账。"""
+            """预算/阶段上限见底就地停手：与阶段内的停手共用同一条账。"""
             if stage is not None:
-                self._budget_stop(budget, stage)
+                self._stage_stop(budget, stage)
             else:
                 logger.warning("AI 总预算见底，不足以取用候选来源：本签回退本地牌义")
             return []
 
-        left = budget.remaining()
-        if left < AI_BUDGET_MIN_ATTEMPT:
+        wait = budget.remaining() if budget.limited else None
+        if stage is not None:
+            stage_left = budget.stage_left(stage)
+            if stage_left is not None:
+                wait = stage_left if wait is None else min(wait, stage_left)
+        if wait is None:
+            return await self._provider_candidates(umo)
+        if wait < AI_BUDGET_MIN_ATTEMPT:
             return _stop_here()
         try:
-            return await asyncio.wait_for(self._provider_candidates(umo), timeout=left)
+            return await asyncio.wait_for(self._provider_candidates(umo), timeout=wait)
         except asyncio.TimeoutError:
             return _stop_here()
         except Exception as e:
@@ -309,6 +381,9 @@ class AiInterpreter:
         整签，一句话锚定整组牌面（贴合本签主题）。与解读共用候选链，但失败
         **不记失败冷却**——牌灵的话挂了自己回退池内签文就行，别把 provider
         冻住拖累解读。返回 None 表示没生成（调用方兜底）。
+
+        另受 DEFAULT_SPIRIT_STAGE_BUDGET 阶段上限：候选获取与每次请求都在同一个
+        阶段截止点之内（累计，不按候选数翻倍），阶段用尽即停，剩余总预算留给解读。
         """
         if not self.enable_ai:
             return None
@@ -316,7 +391,12 @@ class AiInterpreter:
         # spirit_line 的老用法照样有上界，不会因为漏传而变成无界等待。
         # 牌灵的话是次要内容，另受 DEFAULT_SPIRIT_STAGE_BUDGET 阶段上限约束：它不能
         # 独吞整笔预算、把核心解读的时间耗光（但两者仍服从同一个总截止点）。
+        # 这个上限是**阶段级累计**的（open_stage 只开一次，阶段内所有候选获取与请求
+        # 共用同一个截止点）：旧写法对每个 Provider 各取一次 20 秒，两个候选连续失败
+        # 就能累积等到 40 秒，与「牌灵的话阶段最多 20 秒」的意图不符（issue #21 ④ 复核）。
+        # 即使 ai_budget_seconds=0（总预算不限），这条阶段上限照样生效。
         bd = budget if budget is not None else self.new_budget()
+        bd.open_stage(_STAGE_SPIRIT, DEFAULT_SPIRIT_STAGE_BUDGET)
         # 清洗链与 interpret() 一致：归一化先行 → 截断 → 句式剥除（防御深度统一，
         # topic 会整段拼进 prompt，不能只剥不档）
         topic = normalize_injection_input(topic or "")
@@ -333,10 +413,10 @@ class AiInterpreter:
             pid = self._provider_id(provider)
             if self._in_cooldown(pid):
                 continue
-            timeout = bd.step_timeout(self.ai_timeout, DEFAULT_SPIRIT_STAGE_BUDGET)
+            timeout = bd.step_timeout(self.ai_timeout, _STAGE_SPIRIT)
             if timeout is None:
-                self._budget_stop(bd, _STAGE_SPIRIT)
-                break  # 预算见底：候选链剩下的不再试（共享截止点，不重置）
+                self._stage_stop(bd, _STAGE_SPIRIT)
+                break  # 总预算或阶段上限见底：候选链剩下的不再试（共享截止点，不重置）
             text = await self._chat_once(provider, prompt, system, timeout)
             if not text:
                 continue
@@ -452,6 +532,13 @@ class AiInterpreter:
              否则就是把一个我们没量过的数当成结论用。
         逐条判定只回答「哪一条会被拒」，没有分母就没有结论——这也是这行存在的理由。
         不含解读原文：只有数字与原因（隐私与体积都不允许把用户解读长期存盘）。
+
+        统计口径（主人 2026-10-13 第 2 条补充）：
+        - 单次与累计都写「分子/分母 (百分比)」；分母为 0 写 `N/A`，不写 0%；
+        - 累计值**只属于当前 AiInterpreter 实例**（进程重启或插件热重载即清零），
+          所以行内明确写出作用范围；观察期的总体拒绝率要用「各次观测的 Σ拒绝 ÷
+          Σ候选」——**不能**平均各行百分比，也**不能**把多代实例的累计值相加（多代
+          之间不重叠，但那不是同一窗口的样本，加起来会把「同一窗口」的口径搅乱）。
         """
         if self.structure_check != STRUCTURE_CHECK_SHADOW or tally.candidates == 0:
             return
@@ -473,9 +560,11 @@ class AiInterpreter:
         t["candidates"] += tally.candidates
         t["rejected"] += tally.rejected
         logger.info(
-            f"结构校验·影子汇总：候选 {tally.candidates} 个，会被严格口径拒 {tally.rejected} 个"
-            f"（{why}）；{verdict}｜累计：{t['readings']} 签——不降级 {t['no_degrade']}／"
-            f"降级 {t['degrade']}／未观测 {t['unknown']}，判定候选 {t['candidates']} 个中会被拒 {t['rejected']} 个")
+            f"结构校验·影子汇总：本次候选拒绝率 {_rate_text(tally.rejected, tally.candidates)}"
+            f"（原因：{why}）；{verdict}｜累计（本解释器实例自启动/热重载至今，非全局；"
+            f"观察期总体拒绝率请用各次观测的 Σ拒绝÷Σ候选，勿平均各行百分比、勿跨代累加）："
+            f"{t['readings']} 签——不降级 {t['no_degrade']}／降级 {t['degrade']}／"
+            f"未观测 {t['unknown']}，累计候选拒绝率 {_rate_text(t['rejected'], t['candidates'])}")
 
     async def interpret(self, event, formation: str, positions: list[str],
                         picks: list[dict], user_input: str, detail: str,
@@ -518,7 +607,7 @@ class AiInterpreter:
                 continue
             timeout = bd.step_timeout(self.ai_timeout)
             if timeout is None:
-                self._budget_stop(bd, _STAGE_INTERPRET)
+                self._stage_stop(bd, _STAGE_INTERPRET)
                 break  # 预算见底：剩下的候选与供应商回退都不再试（截止点不重置）
             tried += 1
             text = await self._chat_once(provider, prompt, system_prompt, timeout)
@@ -538,7 +627,7 @@ class AiInterpreter:
         if tally is not None:
             self._log_shadow_summary(tally)
         if _STAGE_INTERPRET in bd.stopped:
-            return None  # 预算掐掉的：原因已在 _budget_stop 里写过，别叠一条误导性的「全败」
+            return None  # 预算掐掉的：原因已在 _stage_stop 里写过，别叠一条误导性的「全败」
         if tried == 0:
             logger.info("AI 解读没有可用候选（来源不可用或全部处于失败冷却期），直接使用本地牌义")
             return None
