@@ -4,3 +4,8 @@
 # 上限侧不钉，跟着上游最新 Pillow 跑——新轮子先炸先知道
 pillow>=10.0.0
 fonttools>=4.0
+# tzdata 兜底：Windows 与精简容器不带系统时区库，zoneinfo 只能从这个包取数据；
+# 缺了它 ZoneInfo() 连 UTC 都解析不了，clock 会静默退回系统本地时区——框架里配的
+# timezone 就白配了（CI 的 windows 两格第一次真跑就是这么红的：7 条全在 test_clock.py）。
+# 不挂平台标记：Linux/macOS 走系统时区库，这包在那边空转，但 slim 镜像正好缺它。
+tzdata>=2024.1
