@@ -43,12 +43,14 @@ IMAGE_TTL_SECONDS = 600
 
 判据从来不是「渲染后过了几秒」，而是**发送那一刻文件还在不在**——平台是在发送
 那一刻才读文件的（2026-09-29 实机日志里 WebChat 就在那一步 convert_to_base64），
-而渲染发生在两次 AI 调用之前（牌灵的话 + 解读），窗口由 ai_timeout × 候选数 × 2 段
-决定，没有上界：那次一句「牌灵的话」的 AI 请求实测跑了 63 秒，图早就被删掉了，
-平台读到空，整条消息链（图 + 解读 + 牌灵的话）一起被打回（Issue #2）。
+而渲染曾经发生在两次 AI 调用之前（牌灵的话 + 解读），那时的窗口由 ai_timeout ×
+候选数 × 2 段决定，没有上界：那次一句「牌灵的话」的 AI 请求实测跑了 63 秒，图早就
+被删掉了，平台读到空，整条消息链（图 + 解读 + 牌灵的话）一起被打回（Issue #2）。
+那之后窗口收窄了两轮：AI 阶段有了总预算（ai.ai_budget_seconds）、② 图片后置渲染把
+渲染点搬到两段 AI 之后（2026-10-12），距离平台读文件只剩毫秒级。
 
 所以本常量只管「最坏情况下临时目录里堆多少」——一次占卜一张 2~3MB、600 秒的量级
-在容器里无压力，插件启动时还会整目录清扫；真正的兜底在发送前：main._ensure_image。
+在容器里无压力，插件启动时还会回收过期实例目录；真正的兜底在发送前：main._ensure_image。
 别把它调小去省磁盘，省下的那点空间换不来一次丢消息。
 """
 
@@ -111,21 +113,24 @@ IMAGE_DIR_ROOT = os.path.join(tempfile.gettempdir(), "star_feather")
 → 删掉旧实例正在用的图。改成按实例分目录后，打扫者只看得见自己的目录。
 """
 
-_INSTANCE_DIR_RE = re.compile(r"^inst_\d+_\d+_[0-9a-f]{8}$")
-"""实例目录命名：inst_<pid>_<进程内序号>_<随机 8 位十六进制>。
+_INSTANCE_DIR_RE = re.compile(r"^inst_(\d+)_\d+_[0-9a-f]{8}$")
+"""实例目录命名：inst_<pid>_<进程内序号>_<随机 8 位十六进制>（pid 分组捕获）。
 
 三段各有职责：pid 区分进程（重启后的残骸一眼能认）；序号区分**同一进程内**
 先后或并存的两代实例（热重载正是同 pid——只靠 pid 的名字区分不了它们，
-而它们恰恰是本案的主角）；随机尾防撞名。
+而它们恰恰是本案的主角）；随机尾防撞名。pid 必须可解析：清理时按它跳过**本
+进程的全部实例目录**，见 cleanup_stale_images。
 """
 
 STALE_INSTANCE_DIR_AGE = 3 * 24 * 3600
-"""目录「确认过期」的判据（秒）：三天。只用来决定回收残骸，不参与正确性。
+"""目录「可以回收」的年龄判据（秒）：三天。只用来挑磁盘回收候选，不参与正确性。
 
-判据取目录自身的 mtime，即「里面最后一次新增/删除文件距今多久」。这条判据够硬的理由：
-图片是一次性产物，渲染到发送的间隔以分钟计；一个三天没写过新东西的目录里，不可能还
-躺着一条「正在等发送」的图。所以就算某个老实例还活着，删掉它的旧目录也打断不了任何
-进行中的发送；反过来，活着的实例只要还在渲染，目录 mtime 就一直被刷新，不会被别人扫中。
+判据取目录自身的 mtime，即「里面最后一次新增/删除文件距今多久」。它是个**启发式**，
+不是「进程已退出」「目录已无人使用」的证明：mtime 只说明「最近三天没往这里写过东西」。
+之所以敢据此回收，是因为图片是一次性产物、渲染到发送的间隔以分钟计——一个三天没写过
+新东西的目录里，极少还躺着一条正在等发送的图。它撑不住的正确性由另外两条兜住：
+同进程的其他实例目录一律免删（见 cleanup_stale_images 的 pid 判据），跨进程那份由
+发送前的 main._ensure_image 补渲染兜底。
 为什么不设更短：判错一次的代价是删掉别人可能正在用的图——正是本案要修的东西；
 多留几天的代价只是几十 MB 磁盘。这个不对称决定宁可宽松。
 """
@@ -137,14 +142,16 @@ _INSTANCE_SEQ = itertools.count(1)
 def new_instance_image_dir() -> str:
     """为当前插件实例开一份专属图片目录，返回其路径。
 
-    建不出来时退回根目录：宁可少一层隔离，也不能让渲染卡死——隔离是修复项，
-    渲染是主流程，修复项不该在极端磁盘/权限故障里变成新的故障源。
+    主路径：`IMAGE_DIR_ROOT/inst_<pid>_<序号>_<随机尾>`（撞名就换一个，绝不复用
+    别人的目录）。根目录建不出来时**不退回共享目录**——那正是①要修掉的「共用一份」，
+    新实例在那里读写会把别的实例的图搅在一起；改在系统临时目录下开一个唯一目录
+    （见 `_private_fallback_dir`）。每一档都尽量保住「每实例一份」这条不变量。
     """
     try:
         os.makedirs(IMAGE_DIR_ROOT, exist_ok=True)
     except OSError as e:
-        logger.warning(f"图片根目录不可用（{IMAGE_DIR_ROOT}），本次实例改用系统临时目录: {e}")
-        return tempfile.gettempdir()
+        logger.warning(f"图片根目录不可用（{IMAGE_DIR_ROOT}），本次实例改用进程私有临时目录: {e}")
+        return _private_fallback_dir()
     for _ in range(8):
         name = f"inst_{os.getpid()}_{next(_INSTANCE_SEQ)}_{secrets.token_hex(4)}"
         path = os.path.join(IMAGE_DIR_ROOT, name)
@@ -154,14 +161,32 @@ def new_instance_image_dir() -> str:
         except FileExistsError:
             continue
         except OSError as e:
-            logger.warning(f"实例图片目录创建失败（{path}），本次实例退回根目录: {e}")
-            return IMAGE_DIR_ROOT
-    logger.warning("实例图片目录连续撞名，本次实例退回根目录")
-    return IMAGE_DIR_ROOT
+            logger.warning(f"实例图片目录创建失败（{path}），本次实例改用进程私有临时目录: {e}")
+            return _private_fallback_dir()
+    logger.warning("实例图片目录连续撞名，本次实例改用进程私有临时目录")
+    return _private_fallback_dir()
+
+
+def _private_fallback_dir() -> str:
+    """根目录不可用时的退路：在系统临时目录下开一个**唯一**目录（mkdtemp 保证不撞名）。
+
+    为什么不用 `tempfile.gettempdir()` 或共享的 `IMAGE_DIR_ROOT`：那两个都是「共用
+    一份」，新实例一写就把别的实例的图搅在一起（①的原始病灶）。退路也必须是每实例
+    一份，哪怕它落在根目录之外。它不在 IMAGE_DIR_ROOT 之下，启动清理扫不到，清理
+    靠 600 秒保险丝。
+
+    连这个都建不出来＝磁盘/权限已经彻底不可用，返回空串让渲染安全降级为无图
+    （调用方与渲染器都容得下空路径）：此时「隔离」让位于「别再把整条消息带走」。
+    """
+    try:
+        return tempfile.mkdtemp(prefix=f"star_feather_inst_{os.getpid()}_")
+    except OSError as e:
+        logger.warning(f"实例图片目录的临时退路也不可用（{e}）：本实例图片输出降级为无图")
+        return ""
 
 
 def _is_stale(path: str, max_age: int) -> bool:
-    """是否「确认过期」：mtime 距今超过 max_age。stat 失败一律当不过期（保守放行）。"""
+    """是否超过回收年龄：mtime 距今超过 max_age。stat 失败一律当不过期（保守放行）。"""
     try:
         return (time.time() - os.stat(path).st_mtime) > max_age
     except OSError:
@@ -169,13 +194,20 @@ def _is_stale(path: str, max_age: int) -> bool:
 
 
 def cleanup_stale_images(current_dir: str | None = None) -> None:
-    """启动时回收**确认过期**的残骸，别的什么都不碰。
+    """启动时回收**过期的残骸**（只当磁盘回收，不当作「已无人使用」的证明），别的什么都不碰。
 
     两条判据缺一不可：
     1. 命名合规（旧布局的 tarot_*.png / daily_*.png，或 _INSTANCE_DIR_RE 匹配的实例目录）；
-    2. mtime 超过 STALE_INSTANCE_DIR_AGE（确认没人在写）。
-    外带一条豁免：current_dir 是当前实例自己的目录，永不删——即使系统时钟被往回调、
-    让它的 mtime 看起来已经过期。
+    2. mtime 超过 STALE_INSTANCE_DIR_AGE（三天没写过新东西，只当磁盘回收候选）。
+
+    豁免（按优先级）：
+    - **本进程的全部实例目录一律跳过**——从名字里解析 pid，凡是 os.getpid() 的一律
+      不碰。热重载正是「同进程、两代实例」：新实例启动清理时，旧实例可能还活着、
+      图还在等发送，只跳过传入的 current_dir 是不够的（旧写法就是这么漏的，issue #21
+      ① 复核已复现）。同进程的目录里可能还有图在等发送，宁可留着让保险丝去收。
+    - current_dir 是本次传入的当前实例目录，同样永不删——即便系统时钟被往回调、
+      让它的 mtime 看起来已经过期。
+    跨进程的过期目录照旧回收（那些 pid 与本进程不同，是重启留下的残骸）。
 
     与旧实现的关键差别就一句：**旧版清空整个父目录，本版只删判据允许的部分**。
     父目录里不合规的文件（用户或别的程序放的）一律不动：这不是「顺手不删」，
@@ -191,6 +223,7 @@ def cleanup_stale_images(current_dir: str | None = None) -> None:
         logger.warning(f"图片目录枚举失败，跳过启动清理: {e}")
         return
 
+    own_pid = os.getpid()
     reaped = 0
     for name in entries:
         path = os.path.join(IMAGE_DIR_ROOT, name)
@@ -200,7 +233,12 @@ def cleanup_stale_images(current_dir: str | None = None) -> None:
                 if name.endswith(".png") and os.path.isfile(path) \
                         and _is_stale(path, STALE_INSTANCE_DIR_AGE):
                     os.remove(path)
-            elif _INSTANCE_DIR_RE.match(name) and os.path.isdir(path):
+            else:
+                m = _INSTANCE_DIR_RE.match(name)
+                if m is None or not os.path.isdir(path):
+                    continue
+                if int(m.group(1)) == own_pid:
+                    continue  # 本进程的任何一代实例目录都不碰（热重载的旧实例可能还活着）
                 if current_dir and os.path.abspath(path) == os.path.abspath(current_dir):
                     continue
                 if _is_stale(path, STALE_INSTANCE_DIR_AGE):
