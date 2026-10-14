@@ -11,6 +11,7 @@ import json
 import logging
 import types
 
+import pytest
 from astrbot.api.message_components import Plain
 from data.plugins.astrbot_plugin_star_feather.daily import (
     _daily_pick,
@@ -565,6 +566,18 @@ class TestPickReading:
         assert r[0] is False and r[2] == "羽镜"
 
 
+# ---------- 收尾句窗口：测试里不睡墙钟 ----------
+@pytest.fixture
+def no_epilogue_delay(monkeypatch):
+    """把收尾句窗口清零：走命令入口的用例不必为它白等两秒。
+
+    窗口本身另有专测（TestEpilogueWindow）；这里只是别让每个命令入口用例睡墙钟——
+    那种慢会随用例数线性增长，而且测不到任何行为。
+    """
+    from data.plugins.astrbot_plugin_star_feather import main as sf_main
+    monkeypatch.setattr(sf_main, "_EPILOGUE_DELAY_SECONDS", 0)
+
+
 # ---------- 统一流程 _run_reading ----------
 class _FakeTarot:
     """只实现 _run_reading 依赖的方法；_deliver 同步收拢所有输出。"""
@@ -736,8 +749,9 @@ class TestRunReading:
         assert out == [f"[{sig}]AI:今日运势"]
 
     def test_shuffle_hint_sent_separately_for_multi(self):
-        # hint 不走 yield（框架只保留最后一个 yield），而是用 event.send 独立发送；
-        # yield 结果中不再包含 hint，但牌灵的话照常随结果（preface）
+        # hint 不走 yield（命令入口每个 yield 各发一次、工具入口只取末值），改用
+        # event.send 独立发送，两种入口语义一致；yield 结果中不再包含 hint，
+        # 但牌灵的话照常随结果（preface）
         from time import strftime
         p = self._plugin(hint=True)
         evt = self._evt()
@@ -779,7 +793,7 @@ class TestRunReading:
         sig = pick_signature(PICK["card"], PICK["upright"], "", strftime("%Y%m%d"))
         assert out == [f"[{sig}]AI:（空问题）"]
 
-    def test_epilogue_sent_separately_for_command_entry(self):
+    def test_epilogue_sent_separately_for_command_entry(self, no_epilogue_delay):
         # 命令入口 epilogue=True：收尾句不再传入 _deliver（yield 里无 |epi:），
         # 改为结果之后独立 event.send 一条（与洗牌提示同模式，不进合并转发）
         from time import strftime
@@ -937,7 +951,7 @@ class TestRunReadingRealChain:
         evt.send = send
         return evt
 
-    def test_command_epilogue_sent_separately_not_in_nodes(self):
+    def test_command_epilogue_sent_separately_not_in_nodes(self, no_epilogue_delay):
         from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
         from data.plugins.astrbot_plugin_star_feather.prompts import RESULT_EPILOGUE
         from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
@@ -1091,6 +1105,25 @@ class TestDivineToolDirect:
         assert all(isinstance(x, str) for x in out)
         assert evt.sent and evt.sent[0] is result
         assert evt.sent[0].use_t2i_ is True
+
+    def test_tool_entry_passes_a_fail_note(self):
+        """AI 全挂、解读退回内置牌义时，工具入口也要有一句解释（2026-10-14 补）。
+
+        此前 divine_tool 调 _run_reading 不传 fail_note（默认空串），于是自然语言入口的
+        降级是「安静」的：用户只看到来源换了，没有一句说明。命令入口那条一直有。
+        """
+        p = self._plugin()
+        evt = self._evt()
+        seen = {}
+
+        async def fake_run(event, fmt, pos, picks, question, **kw):
+            seen.update(kw)
+            yield event.chain_result([Plain("按规矩洗牌")])
+        p._run_reading = fake_run
+        out = self._collect(p.divine_tool(evt))
+        assert all(isinstance(x, str) for x in out)
+        assert seen.get("fail_note", "").strip(), (
+            "工具入口没给 fail_note：AI 挂掉时又是一句解释都没有")
 
 
     def test_throttle_hint_sent_direct_and_yield_str(self):
@@ -2142,7 +2175,7 @@ class TestCommandEntryEpilogueEndToEnd:
         evt.send = send
         return evt
 
-    def test_command_entry_sends_epilogue(self):
+    def test_command_entry_sends_epilogue(self, no_epilogue_delay):
         from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
         from data.plugins.astrbot_plugin_star_feather.prompts import RESULT_EPILOGUE
         from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
@@ -2172,3 +2205,75 @@ class TestCommandEntryEpilogueEndToEnd:
         texts = [c.chain[0].text for c in evt.sent if getattr(c, "chain", None)]
         assert texts, "命令入口应当独立直发收尾句"
         assert texts[-1] in RESULT_EPILOGUE, f"末条直发不是收尾句：{texts!r}"
+
+
+# ---------- 收尾句窗口：结果先到、收尾句后到的唯一手段 ----------
+class TestEpilogueWindow:
+    """命令入口的收尾句必须先等一个窗口再直发。
+
+    为什么值得一条红线：2026-10-13 实测命令入口 5/5 倒序（洗牌提示 → 收尾句 → 结果），
+    工具入口 5/5 正常；进程内次序经探针核对是「结果先提交、收尾句后提交」，差别只在
+    合并转发卡的落地慢于紧随其后的纯文本。窗口被删掉或清零，倒序就静默回归——这条锁
+    「窗口存在、值为正、且确实排在收尾句发送之前」。
+    """
+
+    @staticmethod
+    def _collect(agen):
+        async def run():
+            return [x async for x in agen]
+        return asyncio.run(run())
+
+    def test_window_runs_between_result_and_epilogue(self, monkeypatch):
+        from data.plugins.astrbot_plugin_star_feather import main as sf_main
+        from data.plugins.astrbot_plugin_star_feather.prompts import RESULT_EPILOGUE
+        from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
+        assert sf_main._EPILOGUE_DELAY_SECONDS > 0, "窗口为零：收尾句会抢在结果前面到"
+        order = []
+
+        async def fake_sleep(seconds):
+            order.append(("window", seconds))
+
+        # 只换 main 模块里的 asyncio 引用（那边就用在这一处等待），不动全局 asyncio
+        monkeypatch.setattr(sf_main, "asyncio", types.SimpleNamespace(sleep=fake_sleep))
+        t = StarTarot(FakeContext(None), None)
+
+        async def fake_interp(event, formation, positions, picks, clean,
+                              persona_eff=None, budget=None):
+            return "【第1张·过去】一段过去。\
+【总结】结论。"
+
+        async def fake_render(formation, positions, picks, *a):
+            return None
+
+        t._ai_interpret = fake_interp
+        t._maybe_render_image = fake_render
+        p = StarFeatherPlugin.__new__(StarFeatherPlugin)
+        p.tarot = t
+        p._shuffle_hint = lambda: None
+
+        async def fake_spirit(event, uid, picks, clean, persona_eff, budget=None):
+            from time import strftime
+            return pick_signature(picks[0]["card"], picks[0]["upright"],
+                                  uid, strftime("%Y%m%d"))
+
+        p.daily = types.SimpleNamespace(spirit_cached=fake_spirit)
+        evt = types.SimpleNamespace()
+        evt.result = None
+        evt.get_self_id = lambda: "12345"
+
+        def chain_result(chain):
+            evt.result = chain
+            order.append(("yield", None))
+            return chain
+
+        evt.chain_result = chain_result
+
+        async def send(chain):
+            order.append(("send", chain.chain[0].text))
+
+        evt.send = send
+        self._collect(p._run_reading(evt, "羽时三刻", ["过去"], [PICK], "问感情",
+                                     epilogue=True))
+        assert [k for k, _ in order] == ["yield", "window", "send"], f"次序不对：{order!r}"
+        assert order[1][1] == sf_main._EPILOGUE_DELAY_SECONDS
+        assert order[-1][1] in RESULT_EPILOGUE

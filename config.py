@@ -7,8 +7,10 @@ AstrBot 按 _conf_schema.json 的 object 分组存储后，子项落在 group di
 （说白了：配置这玩意儿，宁可给默认值，也不能让它炸。）
 """
 
+from typing import Any
 
-def _cfg_get(config, group: str, key: str, default):
+
+def _cfg_get(config: dict[str, Any] | None, group: str, key: str, default: Any) -> Any:
     """分组配置读取：优先 group.key（新 schema），回退扁平 key（旧配置兼容）。
 
     config 为 None 时回默认；两路都未命中（含值为 None）时回 default，绝不返回 None。
@@ -19,6 +21,9 @@ def _cfg_get(config, group: str, key: str, default):
     grp.get 实际不抛，故合不合并行为等价、零收益，不值得为此重验一遍配置读取。
     （2026-10-02 复核：本条已核、非 bug，按追注处理，代码不动。）
     """
+    if config is None:
+        # 显式短路：给类型收窄用，行为与下面两条 try 的兜底一致
+        return default
     try:
         grp = config.get(group)
         if isinstance(grp, dict):
@@ -36,7 +41,7 @@ def _cfg_get(config, group: str, key: str, default):
     return default
 
 
-def _cfg_int(config, group: str, key: str, default: int, floor: int | None = None) -> int:
+def _cfg_int(config: dict[str, Any] | None, group: str, key: str, default: int, floor: int | None = None) -> int:
     """int 配置读取：非数字回 default；floor 给定时强制下限（如超时下限 5 秒）。
 
     数字读取目前只有 int 一种形态（float 配置无需求），不做泛型抽象——
@@ -50,7 +55,7 @@ def _cfg_int(config, group: str, key: str, default: int, floor: int | None = Non
     return max(floor, value) if floor is not None else value
 
 
-def _cfg_bool(config, group: str, key: str, default: bool) -> bool:
+def _cfg_bool(config: dict[str, Any] | None, group: str, key: str, default: bool) -> bool:
     """bool 配置读取：严格解析，吻合 JSON Schema 语义。
 
     布尔型：原样返回；数值：非 0 为真；字符串：'true/1/yes/on' 为真、

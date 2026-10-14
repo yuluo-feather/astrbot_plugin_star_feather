@@ -20,7 +20,7 @@
   打 card_render 的模块属性对调用点无效（真实函数照跑，还挂了延迟删除任务），
   且 fake 少了 delay 参数。签名宽度由本检查拦下；打错模块请改打在被测模块的
   名字上（如 monkeypatch.setattr(tarot_core, "_schedule_image_cleanup", ...)）。
-  字符串形式（"card_render.f"）自 2026-10-12 第 ⑥ 轮起更要避开：插件模块只有包名
+  字符串形式（"card_render.f"）自 2026-10-12 起更要避开：插件模块只有包名
   一个身份，顶层名解析会落到同名文件上（AstrBot 根目录就摆着一个 main.py），
   一律用模块对象写。
 - 不查语义：fake 返回值对不对、是否被调用，那是各自用例的断言。

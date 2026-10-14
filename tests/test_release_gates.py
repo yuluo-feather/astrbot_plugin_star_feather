@@ -1,10 +1,10 @@
-"""发布红线：仓库侧能机械判定的三条（本地 pytest 与 GitHub CI 共用一把尺子）。
+"""发布红线：仓库侧能机械判定的四条（本地 pytest 与 GitHub CI 共用一把尺子）。
 
 为什么在这里而不写进 workflow YAML：CI 只跑 pytest；YAML 里另抄一套正则与阈值就是
 第二处口径，早晚与发布体检（preflight）漂移。放进测试，本地收工顺带跑，问题在推送
 之前现形，不必等 CI 变红再回头查。
 
-三条红线各自的来历：
+四条红线各自的来历：
 
 - **版本六项一致**：main.VERSION / metadata.version / README 中英各徽章的 src 与
   alt，正则与 preflight.check_versions 同源。GitHub main 是市场与安装器真正拉取的
@@ -14,8 +14,12 @@
 - **运行时代码全部入库**：本地新写了模块却忘了 `git add` ⇒ push 之后 GitHub 上没有
   这个文件，装插件的人直接 ImportError（羽画 v0.2.2 就这么坏过：scanline.py 从未入库）。
 
-边界：发布物（市场 zip、安装器拉下来的插件目录）里没有 .git，依赖 git 的两条跳过——
-同 test_integrity 对 tools/ 的处理，跳过不丢防线：这两条的主场本来就在开发侧。
+- **跟踪集里没有开发侧残留**：`.gitignore` 只挡**未跟踪**文件，早年被 `git add -A` 带进去的
+  缓存照样被跟踪（技能文档 2026-09-10 记过这条），而市场 zip 恰恰按跟踪清单打——`.mypy_cache`
+  本机就 16 MB 级，混进去既是包体虚胖，也是把开发环境当发布物。
+
+边界：发布物（市场 zip、安装器拉下来的插件目录）里没有 .git，依赖 git 的三条跳过——
+同 test_integrity 对 tools/ 的处理，跳过不丢防线：这三条的主场本来就在开发侧。
 """
 import io
 import os
@@ -92,3 +96,22 @@ def test_runtime_modules_are_tracked():
     untracked = [p for p in _git_paths("ls-files", "--others", "--exclude-standard")
                  if p.endswith(".py") and p.split("/")[0] not in _SKIP_TOP_DIRS]
     assert not untracked, f"这些模块在本地却没入库，push 后 GitHub 上不会有：{untracked}"
+
+
+_JUNK_TRACKED_RE = re.compile(
+    r"(^|/)(__pycache__|\.mypy_cache|\.pytest_cache|\.ruff_cache)(/|$)"
+    r"|\.py[co]$"
+    r"|^(tools|audits)/"
+    r"|^changelogs/unreleased\.md$"
+)
+
+
+def test_no_dev_junk_in_tracked_set():
+    """跟踪集里不得出现缓存 / 开发侧产物：市场 zip 按这份清单打，.gitignore 只挡未跟踪文件。"""
+    paths = _git_paths("ls-files")
+    assert paths, "git 说仓库里没有已跟踪文件？路径不对"
+    offenders = sorted(p for p in paths if _JUNK_TRACKED_RE.search(p))
+    assert not offenders, (
+        "这些开发侧残留已被 git 跟踪（.gitignore 只挡未跟踪文件，add 过就照样进包）："
+        + repr(offenders)
+    )

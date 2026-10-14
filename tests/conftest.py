@@ -20,7 +20,7 @@ test_import_model（导入模型红线：一份文件一个身份、插件根不
 astrbot_plugin_star_feather.daily import ...）——那是插件模块唯一的身份，包链由本文件
 在收集前搭好（见 _install_plugin_package）。别退回「插件目录进 sys.path + 顶层名」：
 同一个文件会因此出现两份模块对象，补丁打空、断言比错对象，全是静默假绿的形状
-（2026-10-12 第 ⑥ 轮把插件侧改成包内相对导入，测试侧跟着换成了包路径）。
+（2026-10-12 把插件侧改成包内相对导入，测试侧跟着换成了包路径）。
 
 conftest 只提供最小名字桩：@register / @command / @llm_tool 装饰器与消息组件类
 （At / Plain / Node 等），不需要模拟行为；事件对象与插件实例另由各测试文件构造。

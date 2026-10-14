@@ -94,6 +94,17 @@ class TestTarotSettings:
         assert s.daily_count_limit == 3 and s.disclaimer == "x" and s.daily_fixed is False
         assert s.llm_tool_enabled is False
 
+    def test_ai_timeout_zero_means_no_per_request_cap(self):
+        """0 = 不限制单个请求（2026-10-14 主人定；从前会被静默夹成 5 秒）。
+
+        代价可控的理由：总预算与牌灵阶段上限是独立的第二、第三约束，见 AiBudget。
+        """
+        assert TarotSettings({"ai": {"ai_timeout": 0}}).ai_timeout == 0
+        # 负数按 0 处理（floor=0），别让一个坏值把「不限制」变成别的意思
+        assert TarotSettings({"ai": {"ai_timeout": -3}}).ai_timeout == 0
+        # 偏小值也不再被抬到 5
+        assert TarotSettings({"ai": {"ai_timeout": 3}}).ai_timeout == 3
+
     def test_legacy_flat_still_loads(self):
         # 升级前扁平配置：分组缺失时回退顶层读取
         s = TarotSettings({"show_image": False, "forward_result": True})

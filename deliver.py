@@ -67,8 +67,10 @@ class Deliverer:
         """发送占卜结果。plain_text: callable(formation, positions, picks) -> str，
         生成无 AI 解读时的本地牌义兜底文案。
         preface: 牌面之后的独立前置行（正常路径是「牌灵的话」；亦承接洗牌提示
-        独立发送失败时的降级并入），排在图片之后、解读段之前。框架对 asyncgen
-        型工具只保留最后一个 yield 发送，本方法内容合并进单次 yield。
+        独立发送失败时的降级并入），排在图片之后、解读段之前。产出统一为单次
+        yield——两种入口的 yield 语义不同：工具入口那侧只取最后一个 yield 的值
+        （asyncgen 取末值），命令入口则每个 yield 都会被响应阶段各发一次；
+        单次 yield 在两种语义下推出同一个结果。
         收尾句不带在这里：命令入口在 _run_reading 里独立直发（不入合并转发），
         工具入口收尾由 Agent Loop 的 LLM 回复承担——本分发器只发结果本体。
         """
@@ -113,7 +115,8 @@ class Deliverer:
             nodes.extend(Node(content=[Plain(seg)], name="星羽塔罗", uin=uin) for seg in parts)
             yield event.chain_result([Nodes(nodes)])
         else:
-            # 非转发模式：内容合并进一条链消息（框架只发送最后一个 yield，逐段 yield 会被丢弃）
+            # 非转发模式：内容合并进一条链消息（逐段 yield 在工具入口那侧会被丢掉——
+            # 那边取末值，只看最后一个 yield）
             chain = []
             if img:
                 chain.append(Image(file=img))
