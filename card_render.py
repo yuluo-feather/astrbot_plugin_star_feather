@@ -249,7 +249,7 @@ def cleanup_stale_images(current_dir: str | None = None) -> None:
     if reaped:
         logger.info(f"启动清理：回收了 {reaped} 个过期实例图片目录")
 
-# ---------- 配色（官方牌背调亮 + 深色文字，白卡层次） ----------
+# ---------- 配色（幻星集牌背调亮 + 深色文字，白卡层次） ----------
 CAPSULE_TEXT = (248, 249, 252)     # 胶囊内文字 白（标题与位置标签共用）
 LINE = (130, 140, 170)           # 分隔线 灰蓝
 CAPSULE_BG = (42, 54, 84)        # 胶囊底色 深藏青

@@ -33,7 +33,7 @@
 
 ---
 
-🎀 An AstrBot tarot reading plugin — written by me. All 78 cards built in, official card art rendering, AI deep interpretation with local meanings as fallback — no external image resources needed. Got a question? Ask the deck. Hmph, but read the docs first. Don't make me repeat myself.
+🎀 An AstrBot tarot reading plugin — written by me. All 78 cards built in, card art from the 幻星集 set, AI deep interpretation with local meanings as fallback — no external image resources needed. Got a question? Ask the deck. Hmph, but read the docs first. Don't make me repeat myself.
 
 ## 🌸 Features
 
@@ -44,7 +44,7 @@
 - 🗣️ **A spirit with a personality**: the reading is spoken by the deck's spirit in one of three voices — tsundere, gentle or mystic (`ai.persona`; `off` restores the neutral tone). Each voice comes with its own tone rules and a sample of its signature style, which also shapes the spirit's opening line. `random` locks one voice per reading. Tone only: content and structure stay as they are.
 - 💬 **Ask in plain words**: "帮我算一卦" or "看看我今天的运势" is enough to start a reading (natural-language entry, on when `llm_tool_enabled` is set). Nothing to memorise.
 - 🗓️ **One fixed reading a day**: `/单抽` and requests carrying fortune words (运势 / 运气 / 牌运 …) return the same card and the same reading for the same person, until midnight resets it. Asking again won't reroll it.
-- 🎴 **Official card art**: all 78 faces and the official card back ship inside `assets/` (WebP, with a .png fallback). A white border keeps the look consistent, and a reversed card rotates only the artwork — the frame and the info bar stay upright. Cards that look good are half the reading.
+- 🎴 **Card art**: all 78 faces and the card back ship inside `assets/` (WebP, with a .png fallback). A white border keeps the look consistent, and a reversed card rotates only the artwork — the frame and the info bar stay upright. Cards that look good are half the reading.
 - 🛡️ **Two layers of fallback**: if the AI fails, the built-in meanings take over; if rendering fails, plain text does. Whichever part misbehaves, I won't let you go home empty-handed.
 
 ## 🃏 Commands
@@ -135,11 +135,11 @@ User request (any one of three entry points)【main.py orchestration】
    └─ Generate the reading:
    │     ├─ Fixed daily → the day's cached reading (stays put all day)
    │     └─ Free random → the AI reads it live
-   │           ├─ Provider chain: pinned model → session model → global default → every loaded provider (30s each)
+   │           ├─ Provider chain: pinned model → session model → global default → every loaded provider (a per-request timeout, `ai_timeout`, 30s by default; set it to 0 to leave that stage uncapped)
    │           ├─ The question is cleaned first: clipped to 200 characters (head and tail kept) + injection phrases stripped (hardening)
    │           ├─ Shares one AI budget with the spirit's line (ai_budget_seconds, 120s by default); the deadline is never reset between stages
    │           └─ All providers failed → built-in meanings (+ a 60s cooldown, so nothing waits in vain)
-   ├─ ② Render the card art (deliberately *after* both AI stages, just before sending): official assets, upright or
+   ├─ ② Render the card art (deliberately *after* both AI stages, just before sending): the 幻星集 card art, upright or
    │  reversed (thread pool; one 600s fuse recycles every temp image, and startup recycles stale instance dirs).
    │  A collage background is built from one card picked at random out of *this* reading — cover-fill plus a
    │  deep-navy overlay — and /单抽 and the daily reading get their own poster card (art, date, the day's line from
@@ -239,24 +239,24 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 2. Restart AstrBot, the plugin loads automatically
 3. Send `/占卜 your question` in chat to begin
 
-**Dependency**: card rendering needs [Pillow](https://pypi.org/project/pillow/) (usually bundled with AstrBot; otherwise `pip install -r requirements.txt`). Glyph-coverage fallback verification needs [fonttools](https://pypi.org/project/fonttools/), also listed in `requirements.txt` — those two, and nothing more.
+**Dependency**: card rendering needs [Pillow](https://pypi.org/project/pillow/) (usually bundled with AstrBot; otherwise `pip install -r requirements.txt`). Glyph-coverage fallback verification needs [fonttools](https://pypi.org/project/fonttools/), also listed in `requirements.txt`; timezone resolution needs [tzdata](https://pypi.org/project/tzdata/) (Windows and slim containers ship no system tz database, and without it `ZoneInfo` cannot even parse UTC — the framework's `timezone` setting then silently does nothing), also in `requirements.txt` — those three, and nothing more.
 
 ## 🤍 Technical Details
 
-- **Code structure (18 modules, one-way dependencies)**: `main.py` entry orchestration; `settings.py` config semantics (defaults + legacy migration); `config.py` config-read primitives (grouped-first / flat fallback / type coercion); `identity.py` event identity (2-level user-id fallback, shared by daily & rate limits); `spreads.py` formation selection & question cleaning; `tarot_core.py` draw & card presentation; `interpret.py` + `hardening.py` AI reading & prompt hardening; `deliver.py` delivery orchestration; `gating.py` + `limiter.py` rate-limit gate (KV glue) & pure logic; `kv_utils.py` KV read/write primitives (unified silent degradation); `daily.py` fixed daily reading; `dailylines.py` daily line pool & deterministic pick; `card_render.py` + `fonts.py` card rendering & font subsystem (incl. image lifecycle); `prompts.py` centralized copy (incl. help text); `tarot_data.py` card database — each module has a one-line responsibility, pure logic independently testable
+- **Code structure (19 modules, one-way dependencies)**: `main.py` entry orchestration; `settings.py` config semantics (defaults + legacy migration); `config.py` config-read primitives (grouped-first / flat fallback / type coercion); `clock.py` date boundary (one single source of "today" for the daily card, the spirit's line and the counters; timezone follows the framework config first); `identity.py` event identity (2-level user-id fallback, shared by daily & rate limits); `spreads.py` formation selection & question cleaning; `tarot_core.py` draw & card presentation; `interpret.py` + `hardening.py` AI reading & prompt hardening; `deliver.py` delivery orchestration; `gating.py` + `limiter.py` rate-limit gate (KV glue) & pure logic; `kv_utils.py` KV read/write primitives (unified silent degradation); `daily.py` fixed daily reading; `dailylines.py` daily line pool & deterministic pick; `card_render.py` + `fonts.py` card rendering & font subsystem (incl. image lifecycle); `prompts.py` centralized copy (incl. help text); `tarot_data.py` card database — each module has a one-line responsibility, pure logic independently testable
 - **Module layering (one-way dependencies, no cycles)**:
   - Entry orchestration: `main.py` (three entries, routing only)
   - Glue layer: `tarot_core` / `daily` / `gating` / `deliver` / `interpret` / `card_render` (KV, rate limits, delivery, rendering, AI reading — reads, writes and fallback decisions)
-  - Pure logic layer: `limiter` / `spreads` / `identity` / `hardening` / `kv_utils` / `dailylines` / `tarot_data` / `prompts` / `fonts` / `config` / `settings` (zero or near-zero framework dependencies, independently testable — the criterion is "can it be unit-tested standalone", not "where it lives")
+  - Pure logic layer: `limiter` / `spreads` / `identity` / `hardening` / `kv_utils` / `dailylines` / `tarot_data` / `prompts` / `fonts` / `config` / `settings` / `clock` (zero or near-zero framework dependencies, independently testable — the criterion is "can it be unit-tested standalone", not "where it lives")
 - **Design principles (the three rules I set for myself)**: (1) A failure anywhere — storage, rendering or model — never blocks the reading: kv_utils swallows the exception, rendering falls back to text, the AI falls back to the built-in meanings. (2) Deterministic by default — the same person on the same day gets the same card, the same reading and the same daily line; the surprise belongs to the persona's tone, not to the draw. (3) The reading format protocol (【第N张·位置】 markers) has one source of truth in prompts, and deliver splits on exactly the regex hardening validates.
-- The card database lives inside `tarot_data.py`; the art lives in `assets/` — 78 official faces plus the card back at `Extra/背景.png`, stored as WebP with a .png fallback in the loader.
+- The card database lives inside `tarot_data.py`; the art lives in `assets/` — 78 faces plus the card back at `Extra/背景.png`, stored as WebP with a .png fallback in the loader.
 - `card_render.py` composes the image: the background is a randomly picked card from *this* reading — its face cover-fills the canvas under a deep-navy overlay (same feel as the daily fortune card); unified white-border card style, reversed readings rotate only the card art 180° (frame and info bar stay upright) — the part I'm most proud of: a tarot reading deserves to look good
 - Titles and positions sit in dark navy capsule labels; the info bar carries the orientation (gold for upright, red for reversed), the card name and its meaning keywords.
 - Fonts: the bundled Noto Sans SC subset comes first (`fonts/`, SIL OFL 1.1, branded `StarFeather-*.otf`, covering every fixed string on a card; bold has its own `StarFeather-Bold` subset), with system fonts (Windows / macOS / Linux) behind it — so Chinese renders the same everywhere.
 - Before anything is drawn, the text is checked for glyph coverage. If the bundled subset is missing characters, the renderer falls back to a system font that has them. The check ships a static glyph index of its own, so it still works without `fonttools` (which stays in requirements as the preferred dynamic checker). Today's card texts are fully covered — this is here for the rare character someone adds later.
 - Cards are drawn from the 78 without replacement, and upright or reversed is a straight 50/50.
 - Commands no longer need a `/` prefix. The framework owns the gate (wake words, group @, plain text in private chat), so `占卜 问题` on its own works in private chat. `_require_prefix` trusts that gate instead of second-guessing the WebUI wake-word config, and a regression test covers it.
-- AI readings walk the provider chain in order: the pinned model (`ai.ai_provider`), the current session's provider, the global default, then every loaded provider (deduped by id). Each attempt gets `ai_timeout` (30s by default), and if they all fail the built-in meanings take over. A failure cools down **per provider** (`ai_fail_cooldown`, 60s by default): a dead model sits out while the rest keep serving, so nothing waits on it twice. The whole AI stage also shares a total budget, `ai_budget_seconds` (120s by default): the spirit's line and the reading — including candidate retries, provider fallbacks and the candidate lookup itself — share one deadline, and once it is spent the plugin stops issuing requests and falls back to built-in meanings.
+- AI readings walk the provider chain in order: the pinned model (`ai.ai_provider`), the current session's provider, the global default, then every loaded provider (deduped by id). Each attempt gets `ai_timeout` (30s by default; set it to 0 to leave a single request uncapped — the total budget and the spirit-line stage cap still apply), and if they all fail the built-in meanings take over. A failure cools down **per provider** (`ai_fail_cooldown`, 60s by default): a dead model sits out while the rest keep serving, so nothing waits on it twice. The whole AI stage also shares a total budget, `ai_budget_seconds` (120s by default): the spirit's line and the reading — including candidate retries, provider fallbacks and the candidate lookup itself — share one deadline, and once it is spent the plugin stops issuing requests and falls back to built-in meanings.
 - **Natural-language entry**: ask for a reading in chat and the `star_feather_divine` tool picks it up. The tool description only fires on an explicit request, and `llm_tool_cooldown` (60s per session by default) keeps it from being spammed.
 - **Fixed daily reading**: `/单抽` and fortune-word requests draw deterministically per person and per day — an md5-seeded RNG of their own that never touches the global random. The user id comes from a two-level fallback (the sender id, then `sender.user_id` read raw so int ids work; no session-id fallback in groups, so members never share a reading). The cache is a single KV key overwritten in place, and the card is guaranteed by the pure function even if KV is down. `output.daily_fixed` turns it off.
 - **"Fixed card, topic-aware reading": why it works this way**: an AI reading frees card meanings from the old dictionary mapping in which one card equals one canned text. Traditional tarot pairs a card with fixed wording; here the card and your question both go into the model, so the same card yields a reading fitted to the topic — love, career, study. StarFeather doesn't let that freedom turn into a different answer every time. The variation is fenced in by determinism: the draw is fixed per person and per day, so asking a hundred times gives the same card, and the reading is per topic and holds for the day. With divination, the shakier the answer, the less real it feels.
@@ -434,8 +434,8 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 #### v0.3.0
 
 - Renamed to **Star Feather Tarot** (formerly Cyber Tarot), plugin name `star_feather`.
-- Official 幻星集 assets: all 78 card faces and the card back bundled into `assets/`.
-- A unified white-border card style, with the official card back darkened as the collage background.
+- 幻星集 assets: all 78 card faces and the card back bundled into `assets/`.
+- A unified white-border card style, with the card back darkened as the collage background.
 - Titles and positions became dark navy capsule labels — readable at a glance.
 - **Command prefix required**: in private chat only `/`-prefixed commands respond (`/占卜`, `/单抽`) and bare text does nothing; in groups, @-ing the bot works.
 - Hand-drawn leftovers and unused dependencies removed, rendering simplified.
@@ -465,4 +465,4 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 
 - Like it? A ⭐ on [GitHub](https://github.com/yuluo-feather/astrbot_plugin_star_feather) is all the motivation I need
 - Found a bug or want a feature? [Issues](https://github.com/yuluo-feather/astrbot_plugin_star_feather/issues) and pull requests are always welcome — I read every one of them.
-- **Thanks**: to 幻星集 for the official card art, to the AstrBot framework, and to everyone who filed an issue or left a star. The spirit remembers you.
+- **Thanks**: to 幻星集 for the card art, to the AstrBot framework, and to everyone who filed an issue or left a star. The spirit remembers you.
