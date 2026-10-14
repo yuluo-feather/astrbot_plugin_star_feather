@@ -12,6 +12,7 @@ from .config import _cfg_bool, _cfg_get, _cfg_int
 DEFAULT_SEGMENT_SIZE = 300      # 无标记文本兜底分段长度
 MIN_SEGMENT_SIZE = 50           # 分段长度下限
 DEFAULT_AI_TIMEOUT = 30         # 单次 AI 解读超时（秒）；0 = 不限制单个请求
+MIN_AI_TIMEOUT = 5              # 非 0 取值的下限：不足 5 秒按 5 秒算（0 是特例，表示不限制）
 DEFAULT_AI_BUDGET = 120         # 单次占卜的 AI 总预算（秒，ai.ai_budget_seconds）：所有 AI 阶段共用一个截止点
 AI_BUDGET_MIN_ATTEMPT = 1.0     # 剩余预算不足此值（秒）就不再发起新请求——注定超时，只是白等一次
 DEFAULT_SPIRIT_STAGE_BUDGET = 20  # 牌灵的话的阶段上限（秒）：次要内容不许独吞整笔预算
@@ -85,12 +86,14 @@ class TarotSettings:
         self.daily_fixed = _cfg_bool(config, "output", "daily_fixed", True)
         # 今日牌运卡开关：/单抽 与运势请求输出竖版海报卡，关闭则回退普通牌面图
         self.daily_card = _cfg_bool(config, "output", "daily_card", DEFAULT_DAILY_CARD)
-        # 单次 AI 解读超时（秒）：0 = 不限制单个请求（2026-10-14 主人定）。从前 0 与
-        # 1~4 都会被静默夹成 5 秒，面板上「0 = 不限制」这类直觉读不通；现在 0 就是 0。
-        # 代价可控：总预算（ai_budget_seconds）与牌灵的话的阶段上限都还在，
-        # 它们是独立的第二、第三约束——不会因为一个 0 就让 AI 阶段彻底没有上界。
-        # 负数同样按 0 处理（floor=0，与 ai_budget_seconds 同一口径）。
-        self.ai_timeout = _cfg_int(config, "ai", "ai_timeout", DEFAULT_AI_TIMEOUT, floor=0)
+        # 单次 AI 解读超时（秒）：**0 = 不限制单个请求**（2026-10-14 主人定）；**其余取值
+        # 一律不低于 MIN_AI_TIMEOUT（5 秒）**——1~4 秒那种「请求还没发出去就注定超时」的
+        # 设置不是自由度，是自残；负数更是坏值。下限只对非 0 值生效：别顺手把 0 也夹了，
+        # 0 是「关掉这一档」的开关（同日主人追补的一句）。不限制时仍有总预算
+        # （ai_budget_seconds）与牌灵的话的阶段上限这两道独立约束兜着，最坏耗时照旧有界。
+        _raw_timeout = _cfg_int(config, "ai", "ai_timeout", DEFAULT_AI_TIMEOUT)
+        self.ai_timeout = (_raw_timeout if _raw_timeout == 0
+                           else max(MIN_AI_TIMEOUT, _raw_timeout))
         self.ai_cooldown = _cfg_int(config, "ai", "ai_fail_cooldown", DEFAULT_AI_COOLDOWN)
         # 单次占卜的 AI 总预算（秒）：0 = 不限制（显式关掉总预算保护，AiInterpreter
         # 构造时会打一条 warning）。管的是「AI 阶段」的等待上界，不是整条消息端到端
