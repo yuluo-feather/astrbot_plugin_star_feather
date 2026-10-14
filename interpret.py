@@ -46,6 +46,12 @@ _QUOTE_CHARS = "「」『』“”" + chr(34) + chr(39)
 _STAGE_SPIRIT = "牌灵的话"
 _STAGE_INTERPRET = "AI 解读"
 
+# 单请求超时的「不限制」表示（配置 ai_timeout=0）：用 inf 而**不是** None——
+# None 在这条链上已经是另一个意思（step_timeout 的 None = 预算见底、别再发请求），
+# 两个语义挤在同一个哨兵值上，调用点的 `if timeout is None: break` 会把「不限制」
+# 误判成「停手」。见 AiBudget.step_timeout 与 _chat_once。
+UNLIMITED_TIMEOUT = float("inf")
+
 
 def _budget_seconds(value) -> float:
     """预算配置归一：坏值按默认预算处理——别因为一个坏配置反而取消掉上界。"""
@@ -154,11 +160,14 @@ class AiBudget:
         （低于 AI_BUDGET_MIN_ATTEMPT，硬发出去就是白等一次超时）。
         stage：已开阶段上限的阶段名（见 open_stage）；None 表示本阶段无独立上限。
         总预算不限时 per_call 照样生效（有阶段上限则再取 min）。
+        per_call <= 0（配置 ai_timeout=0）= 不限制单请求：返回 inf，或在有总预算 /
+        阶段上限时返回那个上限——**不**返回 None（None 只表示「别再发了」）。
         """
         left = self.remaining()
         if left < AI_BUDGET_MIN_ATTEMPT:
             return None
-        limit = float(per_call)
+        # per_call <= 0 = 这一档不设单请求上限；总预算与阶段剩余仍是硬约束
+        limit = float(per_call) if float(per_call) > 0 else UNLIMITED_TIMEOUT
         if self.limited:
             limit = min(limit, left)
         if stage is not None:
@@ -444,16 +453,20 @@ class AiInterpreter:
 
         timeout：本次请求的有效超时，由调用方按预算算出（AiBudget.step_timeout）；
         不传则用实例的 ai_timeout——直接调用本方法的老口径不变。
+        两者为 0 或 inf 时视为**不限制单请求**：不加 wait_for。上游若还有总预算或
+        阶段上限，算出来的就不是 inf，这里自然照旧加（不限制 ≠ 整段没有上界）。
         """
-        limit = self.ai_timeout if timeout is None else timeout
+        raw = self.ai_timeout if timeout is None else timeout
+        limit = UNLIMITED_TIMEOUT if raw is None or float(raw) <= 0 else float(raw)
+        call = provider.text_chat(
+            prompt=prompt, session_id=None, contexts=[], image_urls=[],
+            system_prompt=system_prompt,
+        )
         try:
-            resp = await asyncio.wait_for(
-                provider.text_chat(
-                    prompt=prompt, session_id=None, contexts=[], image_urls=[],
-                    system_prompt=system_prompt,
-                ),
-                timeout=limit,
-            )
+            if limit == UNLIMITED_TIMEOUT:
+                resp = await call          # 不限制：让这个请求一直等到模型开口
+            else:
+                resp = await asyncio.wait_for(call, timeout=limit)
         except asyncio.TimeoutError:
             logger.warning(f"AI 解读超时（>{limit:g}s），放弃该提供商")
             return None

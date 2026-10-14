@@ -10,11 +10,12 @@
 """
 # ruff: noqa: F403, F405, I001  # 星导入是 AstrBot 插件惯例，名字进来自框架，静态分析无从溯源；
 # I001 一并豁免：框架 logger 必须排在星导入之后重新绑一次（见下方导入处注释），isort 想对调。
+import asyncio
 import os
 import random
 import re
 
-# 导入模型（2026-10-12 第 ⑥ 轮）：插件内一律包内相对导入（from .daily import ...），
+# 导入模型（2026-10-12）：插件内一律包内相对导入（from .daily import ...），
 # 目录里不留 sys.path.insert、也不留 sys.modules.pop。老那套「顶层平铺名 + 手动清缓存」
 # 有两个洞：
 #   ① 子模块注册成顶层名（daily / prompts ...）后，框架按 data.plugins.<目录名>.* 前缀
@@ -39,6 +40,7 @@ from .daily import DailyFortune, _is_daily_request
 from .gating import LimitGate
 from .identity import resolve_sender_uid
 from .prompts import (
+    FAIL_NOTE_TOOL,
     HELP_TEXT,
     RESULT_EPILOGUE,
     SHUFFLE_LINES,
@@ -53,7 +55,7 @@ VERSION = "0.7.5"
 # —— 配置新鲜度自证：那条「工具入口吃旧配置」孤例的止损手段（2026-10-01）——
 #
 # 现象：面板改配置 + 热重载后，命令入口吃新值，而自然语言入口（star_feather_divine）
-# 疑似仍走旧实例。R7~R12 把三条机制（`filter.llm_tool` 的 callable 未随重载重绑 /
+# 疑似仍走旧实例。当时把三条机制（`filter.llm_tool` 的 callable 未随重载重绑 /
 # 绑了但闭包持旧 self / config 与 tarot 对象跨重载被复用）逐条受控验倒，现象此后再没
 # 复现——**代码侧没有靶子可修**。于是把判据从「输出文案里有没有某句话」换成「每次
 # 进门时当场读到的值」，焊在下面这三处：
@@ -93,6 +95,13 @@ _ACTIVE_INSTANCE_ATTR = "_sf_active_plugin_instance"
 # shuffle_lines 判有没有洗牌句、enable_ai 判发不发 AI 请求、ai_timeout 判降级阈值、
 # llm_tool_enabled 判自然语言入口开没开。不塞全量配置：读数要能一眼比对。
 _CFG_FIELD_NAMES = ("shuffle_lines", "enable_ai", "ai_timeout", "llm_tool_enabled")
+
+# 收尾句独立直发前的等待窗口（秒）。命令入口的结果交给响应阶段下发，而合并转发卡
+# 在协议端还要上传卡内图片、拼多消息，落地比紧随其后的纯文本慢——收尾句会抢在卡片
+# 前面到达（2026-10-13 实测：命令入口 5/5 倒序，工具入口 5/5 正常；进程内次序经探针
+# 核对是「结果先提交、收尾句后提交」，所以差别只在落地这一步）。
+# 现场调参口径：顺序正常 = 窗口够；仍倒序 = 这个值调大（卡片滞后的真实量级尚未测）。
+_EPILOGUE_DELAY_SECONDS = 2.0
 
 
 def _cfg_fingerprint(plugin) -> str:
@@ -408,7 +417,8 @@ class StarFeatherPlugin(Star):
             # 统一抽牌 + 统一流程（与 /占卜 同一套逻辑，行为一致）
             is_daily, daily_uid, formation, positions, picks = await self._pick_reading(event, text)
             async for r in self._run_reading(event, formation, positions, picks, text,
-                                             is_daily=is_daily, daily_uid=daily_uid):
+                                             is_daily=is_daily, daily_uid=daily_uid,
+                                             fail_note=FAIL_NOTE_TOOL):
                 # 直发原结果对象而非拆包重装：它是 MessageChain 的子类（另带 use_t2i_ /
                 # result_content_type），拆出 chain 再套一层会把这些字段静默丢回默认值；
                 # 日后 _run_reading 换产出形态也不会有「探不到 chain 就悄悄不发」的哑路径。
@@ -505,10 +515,11 @@ class StarFeatherPlugin(Star):
         所有配置开关只写在这一处，入口无需感知。
         单张牌阵（羽签/单抽）不发洗牌提示：仪式感只属于多张牌阵。
         """
-        # 注意：洗牌提示不走 yield —— 命令入口框架只保留最后一个 yield（asyncgen 取末值），
-        # 工具入口则由 divine_tool 拦截链结果改 event.send 直发（见 _tool_send），
-        # 但 asyncgen 都会被完整迭代，副作用会执行：hint 用 event.send 直接独立发出，
-        # 转发结果仍走最后一个 yield，由框架发送。send 异常时降级为 preface 并入结果。
+        # 注意：洗牌提示不走 yield，用 event.send 直接独立发出——两种入口对 yield 的
+        # 处置不一样：命令入口每个 yield 都会被响应阶段各发一次，工具入口的 Agent Loop
+        # 只取最后一个 yield 的值（asyncgen 取末值），逐段 yield 在那边会被丢掉。
+        # 直发在两边语义一致，也天然独立成一条、不并入转发结果；asyncgen 都会被完整
+        # 迭代，循环前后的副作用照常执行。send 异常时降级为 preface 并入结果。
         hint = self._shuffle_hint() if len(positions) > 1 else None
         preface = ""
         if hint:
@@ -574,7 +585,11 @@ class StarFeatherPlugin(Star):
         # 收尾句独立直发，不并入合并转发消息（与洗牌提示同模式：asyncgen 被框架
         # 完整迭代，循环后的副作用照常执行）。工具入口 epilogue=False 不触发，
         # 其收尾由 Agent Loop 的 LLM 回复承担。send 失败仅告警，不追加回结果。
+        # 直发前先等一个窗口：结果这一笔「已交给平台」不等于「已经落到群里」——
+        # 合并转发卡落地慢于紧随其后的纯文本，收尾句会抢在前面到（见窗口常量）。
         if epilogue_text:
+            if _EPILOGUE_DELAY_SECONDS > 0:
+                await asyncio.sleep(_EPILOGUE_DELAY_SECONDS)
             try:
                 await event.send(MessageChain([Plain(epilogue_text)]))
             except Exception as e:

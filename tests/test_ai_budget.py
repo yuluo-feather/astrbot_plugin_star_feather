@@ -96,6 +96,21 @@ class TestBudgetArithmetic:
         clk.advance(4.5)                       # 只剩 0.5 秒
         assert bd.step_timeout(30, "spirit") is None
 
+    def test_zero_per_call_means_no_request_level_cap(self):
+        """ai_timeout=0 = 不限制单请求，但绝不等于「整段没有上界」。
+
+        三种约束各判一层：都没有 -> inf（真不加 wait_for）；有总预算 -> 取剩余预算；
+        有阶段上限 -> 取阶段剩余。三种都**不是** None——None 在这条链上是「预算见底、
+        别再发请求」的哨兵，两个语义挤在一个值上会把「不限制」误判成「停手」。
+        """
+        clk = Clock()
+        bd = AiBudget(0, clk)
+        assert bd.step_timeout(0) == float("inf")
+        assert bd.step_timeout(0) is not None
+        bd.open_stage("spirit", DEFAULT_SPIRIT_STAGE_BUDGET)
+        assert bd.step_timeout(0, "spirit") == float(DEFAULT_SPIRIT_STAGE_BUDGET)
+        assert AiBudget(120, clk).step_timeout(0) == 120.0
+
     def test_broken_value_falls_back_to_default_budget(self):
         # 配置写坏了（非数字）：退回默认预算，而不是当成「不限制」把上界取消
         bd = AiBudget("oops")
@@ -279,6 +294,22 @@ class TestRealWallClock:
         assert out is None
         assert prov.calls == 1                 # 预算已耗尽：不会再有第二个候选重来一次
         assert elapsed < 3.0, f"预算 1.2s 却等了 {elapsed:.2f}s 才回退"
+
+    def test_zero_ai_timeout_still_bounded_by_the_total_budget(self):
+        """ai_timeout=0（不限制单请求）时，总预算仍是硬上界——约 1.2 秒回退。
+
+        非真睡不可的理由：0 的实现是「这一档不加 wait_for」，本条要证的恰恰是
+        「没加它也不会跑满供应商那 5 秒」——只有墙钟能证明。代价约 1.2 秒。
+        """
+        prov = FakeProvider("slow", result=OK_INTERP, delay=5.0)
+        it = _interp([prov], ai_timeout=0)
+        t0 = time.monotonic()
+        out = asyncio.run(it.interpret(EVENT, "羽签", ["你的当下"], [PICK], "问感情",
+                                       "详情", budget=AiBudget(1.2)))
+        elapsed = time.monotonic() - t0
+        assert out is None
+        assert prov.calls == 1
+        assert elapsed < 3.0, f"总预算 1.2s 却等了 {elapsed:.2f}s 才回退"
 
 
 # ---------- 回退语义与透传接线 ----------
