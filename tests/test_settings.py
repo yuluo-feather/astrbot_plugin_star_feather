@@ -94,16 +94,19 @@ class TestTarotSettings:
         assert s.daily_count_limit == 3 and s.disclaimer == "x" and s.daily_fixed is False
         assert s.llm_tool_enabled is False
 
-    def test_ai_timeout_zero_means_no_per_request_cap(self):
-        """0 = 不限制单个请求（2026-10-14 主人定；从前会被静默夹成 5 秒）。
+    def test_ai_timeout_semantics_zero_unlimited_others_floored(self):
+        """0 = 不限制单个请求；**非 0 取值一律不低于 5 秒**（2026-10-14 主人定）。
 
-        代价可控的理由：总预算与牌灵阶段上限是独立的第二、第三约束，见 AiBudget。
+        两句话合起来才完整：0 是「关掉这一档」的开关，1~4 秒与负数照旧夹成 5 秒——
+        「还没发出去就注定超时」不是用户想要的自由度，是自残。
+        不限制时仍有总预算与牌灵阶段上限两道独立约束，见 AiBudget。
         """
         assert TarotSettings({"ai": {"ai_timeout": 0}}).ai_timeout == 0
-        # 负数按 0 处理（floor=0），别让一个坏值把「不限制」变成别的意思
-        assert TarotSettings({"ai": {"ai_timeout": -3}}).ai_timeout == 0
-        # 偏小值也不再被抬到 5
-        assert TarotSettings({"ai": {"ai_timeout": 3}}).ai_timeout == 3
+        assert TarotSettings({"ai": {"ai_timeout": 3}}).ai_timeout == 5
+        assert TarotSettings({"ai": {"ai_timeout": -3}}).ai_timeout == 5
+        # 边界：恰好 5 秒与更大的值原样保留
+        assert TarotSettings({"ai": {"ai_timeout": 5}}).ai_timeout == 5
+        assert TarotSettings({"ai": {"ai_timeout": 30}}).ai_timeout == 30
 
     def test_legacy_flat_still_loads(self):
         # 升级前扁平配置：分组缺失时回退顶层读取
