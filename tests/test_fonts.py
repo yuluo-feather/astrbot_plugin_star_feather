@@ -33,7 +33,7 @@ class TestFont:
     def test_unencodable_default_font_is_refused(self, monkeypatch):
         """候补链只剩「编码不了」的默认字体时，要指名报错，不能把字体交出去。
 
-        2026-10-01 下限格实测（CI ubuntu × py3.12 × Pillow 10.0.0）：位图默认字体
+        2026-10-01 旧下限格实测（当时 CI ubuntu × py3.12 × Pillow 10.0.0）：位图默认字体
         在 textlength 上抛 latin-1 UnicodeEncodeError，错是从绘图途中冒出来的，
         调用方只看到一句编解码错、不知道牌面为什么没出。这里用同行为的假默认字体
         版本无关地钉住出口：内置子集缺字 + 本机无系统中文字体 = 明确的 RuntimeError。
@@ -62,7 +62,7 @@ class TestFont:
         生僻字那一步的落点随环境变（本机有系统中文字体 → 回退成功；容器里没有 →
         链尾指名报错，见 _font_encodes），但**缓存口径在两种世界里是同一条**：
         带 text 的选择一律不入 _FONT_CACHE，选不出来也不许留痕。旧写法只写了回退
-        成功那一支，于是 CI 的 ubuntu × py3.12 × Pillow 10.0.0 格上第一行就抛
+        成功那一支，于是当时的 ubuntu × py3.12 × Pillow 10.0.0 格上第一行就抛
         RuntimeError，整条用例红——同一前提的兄弟用例
         （test_load_font_falls_back_for_missing_glyph）那次已按两种世界写开，
         这条漏了，这次补齐。

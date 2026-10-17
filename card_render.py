@@ -33,7 +33,7 @@ _RNG = random.Random()
 
 # 缩放重采样口径：用 Resampling 枚举（9.1 起），不用模块级别名 Image.LANCZOS——
 # 别名在 Pillow 12 的类型标注里已经不在（运行期还在，纯静态报错），枚举写法在
-# 本仓库声明的 Pillow 底线 10.0.0 上就有，走它省得每次升级被静态检查咬一口。
+# 本仓库声明的 Pillow 安全底线 12.3.0 上就有，走它省得每次升级被静态检查咬一口。
 _RESAMPLE = Image.Resampling.LANCZOS
 
 

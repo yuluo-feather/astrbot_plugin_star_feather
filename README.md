@@ -228,6 +228,8 @@
 
 **依赖**：牌面渲染需要 [Pillow](https://pypi.org/project/pillow/)（AstrBot 环境通常自带；若缺失可执行 `pip install -r requirements.txt`）。字体缺字回退校验需要 [fonttools](https://pypi.org/project/fonttools/)，已一并列入 `requirements.txt`；时区解析需要 [tzdata](https://pypi.org/project/tzdata/)（Windows 与精简容器不带系统时区库，缺它 `ZoneInfo` 连 UTC 都解析不了，框架里配的 `timezone` 会静默失效），也在 `requirements.txt` 里——就这三样，本羽没往里塞多余的。
 
+> Pillow 安全下限为 `>=12.3.0`：12.3.0 是 OSV 现查无已知条目的最低版本，10.x / 11.x 仍带已知 CVE。
+
 ## 🤍 技术实现
 
 - **代码结构（19 个模块，依赖单向）**：`main.py` 入口编排；`settings.py` 配置语义层（默认值 + 旧配置迁移）；`config.py` 配置读取原语（分组优先 / 扁平回退 / 类型转换）；`clock.py` 日期边界（「今天」只有一种算法——今日牌运 / 牌灵签文 / 每日计数同源，时区优先跟随框架配置）；`identity.py` 事件身份标识（用户标识两级降级，牌运与限流共用）；`spreads.py` 选阵与问题清洗；`tarot_core.py` 抽牌与牌义呈现；`interpret.py` + `hardening.py` AI 解读与 Prompt 防护；`deliver.py` 发送编排；`gating.py` + `limiter.py` 限流闸门（KV 粘合）与纯逻辑；`kv_utils.py` KV 读写原语（统一异常静默降级，区分存储故障与无记录、降级策略留在调用点，daily 与 gating 共用）；`daily.py` 今日固定牌运；`dailylines.py` 每日签文池与确定性挑选；`card_render.py` + `fonts.py` 牌面渲染与字体子系统（含图片生命周期）；`prompts.py` 文案集中（含帮助文案）；`tarot_data.py` 牌库——每个模块一句话说清职责，纯逻辑均可独立单测
