@@ -416,8 +416,14 @@ class TestDailyInterpCap:
         legacy = {self.TOPIC.format(n): f"旧解读{n}" for n in range(1, extra + 1)}
         kv.raw[self.KEY] = json.dumps({"date": df.clock.today(), "interps": legacy})
 
-        hit = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK],
-                                           self.TOPIC.format(1)))
+        async def go():
+            hit = await df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK],
+                                         self.TOPIC.format(1))
+            for task in list(df._trim_tasks):      # 等后台整理落地（生产上不等它）
+                await task
+            return hit
+
+        hit = asyncio.run(go())
         assert hit == "旧解读1"                  # 命中的就是最早那桶：照旧返回
         assert calls == []                       # 命中不花 AI 调用
         record = kv.record()
@@ -425,6 +431,36 @@ class TestDailyInterpCap:
         assert len(record["interps"]) == self.CAP
         assert list(record["interps"]) == [
             self.TOPIC.format(n) for n in range(extra - self.CAP + 1, extra + 1)]
+
+    def test_the_trim_rereads_and_keeps_a_topic_written_after_the_hit(self):
+        """命中后、后台裁剪运行前并发写进来的新主题，不许被旧快照盖掉。
+
+        这是「命中时先拿旧 data、锁外再写回」那个版本的回归：旧快照会把并发写入
+        整段覆盖。现在任务里重新读 KV，只裁分桶本身。
+        """
+        kv = self._JsonKv()
+        df, calls = self._daily(kv)
+        extra = self.CAP + 5
+        legacy = {self.TOPIC.format(n): f"旧解读{n}" for n in range(1, extra + 1)}
+        kv.raw[self.KEY] = json.dumps({"date": df.clock.today(), "interps": legacy})
+
+        async def go():
+            hit = await df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK],
+                                         self.TOPIC.format(1))
+            # 后台任务还没跑：先把「另一个协程」写回的新主题落进去
+            concurrent = kv.record()
+            concurrent["interps"][self.TOPIC.format(extra + 1)] = "并发写进来的新主题"
+            kv.raw[self.KEY] = json.dumps(concurrent)
+            for task in list(df._trim_tasks):
+                await task
+            return hit
+
+        hit = asyncio.run(go())
+        assert hit == "旧解读1"
+        assert calls == []
+        slots = kv.record()["interps"]
+        assert len(slots) == self.CAP
+        assert self.TOPIC.format(extra + 1) in slots
 
     def test_a_hung_trim_write_does_not_strand_the_cache_hit(self, monkeypatch):
         """命中后的裁剪写回有上限：KV 写挂住也不许把用户卡在缓存命中上。"""
