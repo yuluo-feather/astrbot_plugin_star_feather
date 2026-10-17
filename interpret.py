@@ -234,7 +234,7 @@ class AiInterpreter:
         占卜的全部 AI 阶段（牌灵的话 + 解读，含候选重试与供应商回退）——阶段之间
         不许重置截止点，这正是本预算存在的意义。
         """
-        return AiBudget(self.ai_budget)
+        return AiBudget(self.ai_budget, self._clock)
 
     def _stage_stop(self, budget: AiBudget, stage: str) -> None:
         """本阶段停手：留一行日志（同一阶段只报一次）。
@@ -462,11 +462,13 @@ class AiInterpreter:
         """
         raw = self.ai_timeout if timeout is None else timeout
         limit = UNLIMITED_TIMEOUT if raw is None or float(raw) <= 0 else float(raw)
-        call = provider.text_chat(
-            prompt=prompt, session_id=None, contexts=[], image_urls=[],
-            system_prompt=system_prompt,
-        )
         try:
+            # 调用本身也放进 try：同步抛异常（签名不匹配、参数校验失败）同样
+            # 只是「这个候选失败」，不许绕过 AI 失败的兜底边界带走整条卦
+            call = provider.text_chat(
+                prompt=prompt, session_id=None, contexts=[], image_urls=[],
+                system_prompt=system_prompt,
+            )
             if limit == UNLIMITED_TIMEOUT:
                 resp = await call          # 不限制：让这个请求一直等到模型开口
             else:

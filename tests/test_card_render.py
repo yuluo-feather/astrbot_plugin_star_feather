@@ -172,6 +172,20 @@ class TestTempCleanup:
         card_render._schedule_image_cleanup("C:/not/exist/tarot_x.png")
         card_render._schedule_image_cleanup(None)
 
+    def test_cleanup_task_is_referenced_until_it_finishes(self, tmp_path):
+        """任务必须留强引用：asyncio 只持弱引用，没人引用时可能被 GC，保险丝静默失效。"""
+        f = tmp_path / "tarot_keep.png"
+        f.write_bytes(b"x")
+
+        async def go():
+            card_render._schedule_image_cleanup(str(f), delay=0)
+            assert card_render._CLEANUP_TASKS, "任务应被集合引用"
+            await asyncio.sleep(0.05)
+            return not card_render._CLEANUP_TASKS
+
+        assert asyncio.run(go())
+        assert not f.exists()
+
     def test_ttl_is_one_number_and_it_is_a_fuse(self):
         """保险丝时长只有一份，且不许回落到「牌灵的话」都能跑过的量级。
 

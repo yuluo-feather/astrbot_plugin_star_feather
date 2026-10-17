@@ -95,10 +95,16 @@ class TarotSettings:
         self.ai_timeout = (_raw_timeout if _raw_timeout == 0
                            else max(MIN_AI_TIMEOUT, _raw_timeout))
         self.ai_cooldown = _cfg_int(config, "ai", "ai_fail_cooldown", DEFAULT_AI_COOLDOWN)
-        # 单次占卜的 AI 总预算（秒）：0 = 不限制（显式关掉总预算保护，AiInterpreter
-        # 构造时会打一条 warning）。管的是「AI 阶段」的等待上界，不是整条消息端到端
-        # 的上界——图片渲染、框架调度、平台发送各有各的耗时。
-        self.ai_budget = _cfg_int(config, "ai", "ai_budget_seconds", DEFAULT_AI_BUDGET, floor=0)
+        # 单次占卜的 AI 总预算（秒）：**只有显式 0 = 不限制**（关掉总预算保护，
+        # AiInterpreter 构造时会打一条 warning）；负数与非数字回退默认值——把 -10
+        # 夹成 0 等于用一条写错的配置悄悄取消保护（2026-10-17 复核）。管的是
+        # 「AI 阶段」的等待上界，不是整条消息端到端的上界。
+        _raw_budget = _cfg_get(config, "ai", "ai_budget_seconds", DEFAULT_AI_BUDGET)
+        try:
+            _budget = int(_raw_budget)
+        except (TypeError, ValueError):
+            _budget = DEFAULT_AI_BUDGET
+        self.ai_budget = DEFAULT_AI_BUDGET if _budget < 0 else _budget
         # 自然语言入口开关：默认值在 settings，工具注册是静态的，开关只在运行期判断（见 main.divine_tool）
         self.llm_tool_enabled = _cfg_bool(config, "tool", "llm_tool_enabled", True)
         self.llm_tool_cooldown = _cfg_int(config, "tool", "llm_tool_cooldown",
