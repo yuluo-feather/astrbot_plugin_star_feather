@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-<img src="https://img.shields.io/badge/version-v0.8.1-f8a5c2" alt="v0.8.1"/>
+<img src="https://img.shields.io/badge/version-v0.8.2-f8a5c2" alt="v0.8.2"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -270,6 +270,10 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 
 ## 📜 Changelog
 
+#### v0.8.2
+
+- Fixed: a cache hit no longer writes anything back — on a KV store without compare-and-swap, the read-modify-write trim could overwrite a concurrently generated topic and could also pin the cache lock; hits are now read-only, and an oversized legacy bucket bag is trimmed to 20 on the next new topic (a real write)
+
 #### v0.8.1
 
 - Fixed: an upgraded user's topic cache that already holds more than 20 entries is now trimmed on the next cache hit and written back — the write happens outside the cache lock with a 2-second bound, so a stalled KV store cannot strand the hit, and the reading the user is waiting for is still returned.
@@ -297,12 +301,7 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 
 - Fixed a few known bugs.
 
-#### v0.7.2
-
-- Fixed: a reading that lands right on a plugin reload or shutdown is no longer lost whole — at that moment the card image had been drawn and the text written, yet the whole reading could fail to arrive; that closing step now absorbs its own failure and the reading comes through
-- Fixed: text starting with a long run of 「说说说说…」 no longer holds up the reply — it used to leave the message unanswered for a long time, getting worse the longer the run went, with a few dozen characters enough to stall it; such text is now handled like any other message
-
-> Full per-version details for v0.7.1 and earlier live in [CHANGELOG.md](CHANGELOG.md) and the `changelogs/` directory — this page keeps only the six most recent releases.
+> Full per-version details for v0.7.2 and earlier live in [CHANGELOG.md](CHANGELOG.md) and the `changelogs/` directory — this page keeps only the six most recent releases.
 
 ---
 

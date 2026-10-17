@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-<img src="https://img.shields.io/badge/version-v0.8.1-f8a5c2" alt="v0.8.1"/>
+<img src="https://img.shields.io/badge/version-v0.8.2-f8a5c2" alt="v0.8.2"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -257,6 +257,10 @@
 
 ## 📜 更新记录
 
+#### v0.8.2
+
+- 修复：命中缓存时不再做任何写回——无 CAS 的 KV 上「读-改-写」维护可能覆盖并发生成的新主题，也会占住缓存锁；现在命中只读，超限的旧分桶在下一次问新主题（真正写入）时收口到 20 条
+
 #### v0.8.1
 
 - 修复：升级用户的旧解读缓存超过 20 条主题时，现在会在下一次命中就把多余的最早分桶裁掉并写回——写回放在缓存锁外、最长等 2 秒，KV 挂住也不会拖住这次命中，本次命中的解读照旧返回
@@ -284,10 +288,7 @@
 
 - 修复了一些已知 bug
 
-#### v0.7.2
-
-- 修复：起卦正好撞上插件重载或进程收尾时，不再整条丢掉——那一刻牌面图已经画好、解读也写好了，却可能一条都收不到；现在这一步失败只影响它自己，卦照常送到你手上
-- 修复：一长串「说说说说…」这样的开头不再拖住回复——从前这类文本会让消息迟迟没有回音，越长越糟，几十个字就够把这一条卡住；现在它按普通消息处理，该占卜的照常占卜
+> 更早版本（v0.7.2 及以前）的逐条明细见 [CHANGELOG.md](CHANGELOG.md) 与 `changelogs/` 目录——这里只保留最近 6 个版本的摘要。
 
 > 更早版本（v0.7.1 及以前）的逐条明细见 [CHANGELOG.md](CHANGELOG.md) 与 `changelogs/` 目录——这里只保留最近 6 个版本的摘要。
 
