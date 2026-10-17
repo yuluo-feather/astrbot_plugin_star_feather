@@ -326,6 +326,11 @@ class TestDailyInterpCap:
     # 999 也照样全绿——那等于没验（实测过，所以才有这一行）。
     CAP = 20
 
+    @staticmethod
+    def _sign(picks):
+        """与实现同口径的牌指纹（牌 id + 正逆）：命中要求 date + sign + topic 一致。"""
+        return "|".join(f"{p['card']['id']}:{1 if p['upright'] else 0}" for p in picks)
+
     class _JsonKv:
         def __init__(self):
             self.raw = {}
@@ -414,7 +419,9 @@ class TestDailyInterpCap:
         df, calls = self._daily(kv)
         extra = self.CAP + 5
         legacy = {self.TOPIC.format(n): f"旧解读{n}" for n in range(1, extra + 1)}
-        kv.raw[self.KEY] = json.dumps({"date": df.clock.today(), "interps": legacy})
+        kv.raw[self.KEY] = json.dumps({"date": df.clock.today(),
+                                       "sign": self._sign([PICK]),
+                                       "interps": legacy})
 
         hit = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK],
                                            self.TOPIC.format(1)))
@@ -429,7 +436,9 @@ class TestDailyInterpCap:
         df, calls = self._daily(kv)
         extra = self.CAP + 5
         legacy = {self.TOPIC.format(n): f"旧解读{n}" for n in range(1, extra + 1)}
-        kv.raw[self.KEY] = json.dumps({"date": df.clock.today(), "interps": legacy})
+        kv.raw[self.KEY] = json.dumps({"date": df.clock.today(),
+                                       "sign": self._sign([PICK]),
+                                       "interps": legacy})
 
         new_topic = self.TOPIC.format(extra + 1)
         out = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], new_topic))
@@ -438,6 +447,23 @@ class TestDailyInterpCap:
         slots = kv.record()["interps"]
         assert len(slots) == self.CAP
         assert new_topic in slots
+
+    def test_a_card_change_invalidates_the_days_interpretations(self):
+        """同一天换牌（升级 / 修 KV / 牌库变动）：旧解读不再命中，旧分桶整体作废。"""
+        kv = self._JsonKv()
+        df, calls = self._daily(kv)
+        kv.raw[self.KEY] = json.dumps({
+            "date": df.clock.today(), "sign": self._sign([PICK]),
+            "interps": {self.TOPIC.format(1): "旧解读"}})
+
+        other = {"card": {**PICK["card"], "id": "another_card"}, "upright": False}
+        out = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [other],
+                                           self.TOPIC.format(2)))
+        assert out == f"解读:{self.TOPIC.format(2)}"
+        record = kv.record()
+        assert record["sign"] == self._sign([other])
+        assert self.TOPIC.format(1) not in record["interps"], "牌变了，旧解读不能留着"
+        assert self.TOPIC.format(2) in record["interps"]
 
     def test_trim_touches_only_the_bucket_bag(self):
         """裁剪只动 interps：记录里的日期与当天抽好的牌一律不动。
@@ -620,7 +646,9 @@ class TestDailyNullInterp:
         from data.plugins.astrbot_plugin_star_feather.daily import _norm_topic
         today = _time.strftime("%Y%m%d")
         other = _norm_topic("最近事业运")
-        kv = {"sf_daily_u1": {"date": today, "interps": {other: "事业解读"}}}
+        sig = "|".join(f"{p['card']['id']}:{1 if p['upright'] else 0}" for p in [PICK])
+        kv = {"sf_daily_u1": {"date": today, "sign": sig,
+                              "interps": {other: "事业解读"}}}
         df, calls = self._daily(kv, None)
         out = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], "今天感情运势"))
         assert out is None

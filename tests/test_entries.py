@@ -440,7 +440,7 @@ class TestCommandEntry:
         evt = self._evt()
         out = self._collect(p._command_entry(evt, "帮助",
                                              err_tpl="占卜断了，换个时候再来。", helpable=True))
-        assert out and isinstance(out[0], str) and "星羽塔罗" in out[0]
+        assert out == [p._help()], "帮助页只能产出一条，别在它后面再补一次抽牌"
         assert ("should_call_llm", True) in evt.calls
         assert ("stop_event",) not in evt.calls
 
@@ -463,6 +463,13 @@ class TestCommandEntry:
             err_tpl="占卜断了，换个时候再来。", helpable=True))
         assert out and out[0] == "res"  # 走正常抽牌流程而非帮助文本
         assert "星羽塔罗" not in out[0]
+
+    def test_single_help_returns_help_page(self):
+        """/单抽 帮助 与 /占卜 一样走帮助页，而不是真抽一张牌。"""
+        p = self._plugin()
+        evt = self._evt()
+        out = self._collect(p.single(evt, "帮助"))
+        assert out == [p._help()], f"帮助页应当只产出这一条，实际 {len(out)} 条"
 
     def test_error_path_hides_exception_details(self):
         # 安全回归：异常（路径/内部结构）只进日志，用户提示保持友好文案
@@ -700,12 +707,15 @@ class TestCommandEntryEpilogueEndToEnd:
 
 # ---------- 收尾句窗口：结果先到、收尾句后到的唯一手段 ----------
 class TestEpilogueWindow:
-    """命令入口的收尾句必须先等一个窗口再直发。
+    """命令入口的收尾句必须先等一个窗口再直发，而且这个窗口不能挡住 handler。
 
     为什么值得一条红线：2026-10-13 实测命令入口 5/5 倒序（洗牌提示 → 收尾句 → 结果），
     工具入口 5/5 正常；进程内次序经探针核对是「结果先提交、收尾句后提交」，差别只在
     合并转发卡的落地慢于紧随其后的纯文本。窗口被删掉或清零，倒序就静默回归——这条锁
     「窗口存在、值为正、且确实排在收尾句发送之前」。
+
+    2026-10-17 起窗口搬进后台任务：命令处理协程在结果提交后立刻收尾，不再为用户多挂
+    两秒；后台任务仍按原次序「先等窗口、再直发」。
     """
 
     @staticmethod
@@ -714,18 +724,19 @@ class TestEpilogueWindow:
             return [x async for x in agen]
         return asyncio.run(run())
 
-    def test_window_runs_between_result_and_epilogue(self, monkeypatch):
+    def test_window_runs_in_background_between_result_and_epilogue(self, monkeypatch):
         from data.plugins.astrbot_plugin_star_feather import main as sf_main
         from data.plugins.astrbot_plugin_star_feather.prompts import RESULT_EPILOGUE
         from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
         assert sf_main._EPILOGUE_DELAY_SECONDS > 0, "窗口为零：收尾句会抢在结果前面到"
         order = []
 
-        async def fake_sleep(seconds):
-            order.append(("window", seconds))
+        async def fake_epilogue(event, text, delay):
+            order.append(("window", delay))
+            await event.send(types.SimpleNamespace(chain=[types.SimpleNamespace(text=text)]))
 
-        # 只换 main 模块里的 asyncio 引用（那边就用在这一处等待），不动全局 asyncio
-        monkeypatch.setattr(sf_main, "asyncio", types.SimpleNamespace(sleep=fake_sleep))
+        # 只换「等窗口 + 直发」这个后台协程，调度与 drain 仍走真实 asyncio
+        monkeypatch.setattr(sf_main, "_send_epilogue_after_window", fake_epilogue)
         t = StarTarot(FakeContext(None), None)
 
         async def fake_interp(event, formation, positions, picks, clean,
@@ -763,11 +774,57 @@ class TestEpilogueWindow:
             order.append(("send", chain.chain[0].text))
 
         evt.send = send
-        self._collect(p._run_reading(evt, "羽时三刻", ["过去"], [PICK], "问感情",
-                                     epilogue=True))
+        async def run():
+            out = [x async for x in p._run_reading(evt, "羽时三刻", ["过去"], [PICK],
+                                                  "问感情", epilogue=True)]
+            assert [k for k, _ in order] == ["yield"], \
+                f"handler 在窗口结束前就返回了：{order!r}"
+            while sf_main._EPILOGUE_TASKS:
+                await asyncio.gather(*list(sf_main._EPILOGUE_TASKS), return_exceptions=True)
+                await asyncio.sleep(0)
+            return out
+
+        asyncio.run(run())
         assert [k for k, _ in order] == ["yield", "window", "send"], f"次序不对：{order!r}"
         assert order[1][1] == sf_main._EPILOGUE_DELAY_SECONDS
         assert order[-1][1] in RESULT_EPILOGUE
+        assert not sf_main._EPILOGUE_TASKS, "后台任务结束后应从强引用集合自摘"
+
+    def test_background_task_sleeps_before_sending(self, monkeypatch):
+        """窗口真的睡在发送之前：次序由后台协程自己保证，不靠调度先后碰运气。"""
+        from data.plugins.astrbot_plugin_star_feather import main as sf_main
+        order = []
+
+        async def fake_sleep(seconds, result=None):   # 与 asyncio.sleep 同宽
+            order.append(("window", seconds))
+
+        evt = types.SimpleNamespace(send=self._recorder(order))
+        monkeypatch.setattr(sf_main.asyncio, "sleep", fake_sleep)
+        asyncio.run(sf_main._send_epilogue_after_window(evt, "尾句", 2.0))
+        assert order == [("window", 2.0), ("send", "尾句")], f"次序不对：{order!r}"
+
+    @staticmethod
+    def _recorder(order):
+        async def send(chain):
+            order.append(("send", chain.chain[0].text))
+        return send
+
+    def test_background_task_swallows_send_failure(self, monkeypatch):
+        """收尾句发送失败只告警：任务不能把异常写进 loop 的未处理异常里。"""
+        from data.plugins.astrbot_plugin_star_feather import main as sf_main
+
+        async def boom(chain):
+            raise RuntimeError("平台断了")
+
+        async def run():
+            task = asyncio.create_task(
+                sf_main._send_epilogue_after_window(
+                    types.SimpleNamespace(send=boom), "尾句", 0))
+            await asyncio.gather(task, return_exceptions=True)
+            return task
+
+        task = asyncio.run(run())
+        assert task.exception() is None, "收尾句失败不该冒泡"
 
     @staticmethod
     def _harness(monkeypatch, interp_text):

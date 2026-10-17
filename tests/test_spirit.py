@@ -7,6 +7,7 @@ import asyncio
 import logging
 import types
 
+import pytest
 from data.plugins.astrbot_plugin_star_feather.dailylines import pick_signature
 from data.plugins.astrbot_plugin_star_feather.prompts import (
     SPIRIT_PROMPT_V,
@@ -54,6 +55,150 @@ class TestSpiritCache:
         assert cache["date"] == strftime("%Y%m%d") and cache["line"] == "AI 说的那句"
         assert cache["sign"] == f"{PICK['card']['cn']}:1"  # 牌组指纹（卡名:正逆）
         assert cache["v"] == SPIRIT_PROMPT_V  # prompt 版本号：文案迭代旧缓存自动失效
+
+    def test_concurrent_misses_share_one_generated_line(self):
+        """同一（用户, 牌组）并发 miss：只调一次 AI，等待者拿到同一句。"""
+        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        kv, calls = {}, []
+
+        class _Ctx:
+            async def get_kv_data(self, key, default=None):
+                return kv.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                kv[key] = value
+
+        async def slow_spirit(event, cards, topic, persona_eff, budget=None):
+            calls.append(1)
+            await asyncio.sleep(0.02)   # 制造重叠窗口：两条协程都会 miss
+            return "并发同一句"
+
+        tarot = types.SimpleNamespace(interpreter=types.SimpleNamespace(spirit_line=slow_spirit))
+        df = DailyFortune(_Ctx(), tarot)
+
+        async def go():
+            return await asyncio.gather(
+                df.spirit_cached(EVENT, "u1", [PICK], "今日运势", None),
+                df.spirit_cached(EVENT, "u1", [PICK], "今日运势", None))
+
+        a, b = asyncio.run(go())
+        assert a == b == "并发同一句"
+        assert len(calls) == 1, f"并发 miss 应只调用一次 AI，实际 {len(calls)}"
+
+    def test_two_instances_share_the_inflight_registry(self):
+        """同一进程里两代 DailyFortune 并存：并发 miss 也只调一次 AI。
+
+        登记表若退化成实例属性，热重载期间新旧实例各问一次 AI，会给出两句
+        不同的话并互相覆盖缓存。
+        """
+        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        kv, calls = {}, []
+
+        class _Ctx:
+            async def get_kv_data(self, key, default=None):
+                return kv.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                kv[key] = value
+
+        async def slow_spirit(event, cards, topic, persona_eff, budget=None):
+            calls.append(1)
+            await asyncio.sleep(0.02)
+            return "跨实例同一句"
+
+        tarot = types.SimpleNamespace(interpreter=types.SimpleNamespace(spirit_line=slow_spirit))
+        a, b = DailyFortune(_Ctx(), tarot), DailyFortune(_Ctx(), tarot)
+
+        async def go():
+            return await asyncio.gather(
+                a.spirit_cached(EVENT, "u1", [PICK], "今日运势", None),
+                b.spirit_cached(EVENT, "u1", [PICK], "今日运势", None))
+
+        l1, l2 = asyncio.run(go())
+        assert l1 == l2 == "跨实例同一句"
+        assert len(calls) == 1, f"跨实例并发 miss 应只调用一次 AI，实际 {len(calls)}"
+
+    def test_cancelled_waiter_does_not_cancel_the_shared_future(self):
+        """等待者被取消不能把共享 Future 一起取消：否则所有者 set_result 抛
+        InvalidStateError，整条占卜一起失败。"""
+        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        kv, calls = {}, []
+
+        class _Ctx:
+            async def get_kv_data(self, key, default=None):
+                return kv.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                kv[key] = value
+
+        async def slow_spirit(event, cards, topic, persona_eff, budget=None):
+            calls.append(1)
+            await asyncio.sleep(0.05)
+            return "共享那句"
+
+        tarot = types.SimpleNamespace(interpreter=types.SimpleNamespace(spirit_line=slow_spirit))
+        df = DailyFortune(_Ctx(), tarot)
+
+        async def go():
+            owner = asyncio.create_task(df.spirit_cached(EVENT, "u1", [PICK], "今日运势", None))
+            await asyncio.sleep(0.01)          # 让 owner 先登记 in-flight
+            waiter = asyncio.create_task(df.spirit_cached(EVENT, "u1", [PICK], "今日运势", None))
+            await asyncio.sleep(0.01)          # 让 waiter 进入等待
+            waiter.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await waiter
+            return await owner
+
+        assert asyncio.run(go()) == "共享那句"
+        assert len(calls) == 1
+
+    def test_new_day_does_not_join_yesterdays_inflight(self):
+        """跨午夜的生成属于昨天：新一天的请求必须重新生成，不能拿昨天的文案。"""
+        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        kv, calls = {}, []
+
+        class _Clock:
+            day = "20261017"
+
+            def today(self):
+                return self.day
+
+            def date_text(self):
+                return "2026.10.17"
+
+        class _Ctx:
+            async def get_kv_data(self, key, default=None):
+                return kv.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                kv[key] = value
+
+        clock = _Clock()
+        started, release = asyncio.Event(), asyncio.Event()
+
+        async def slow_spirit(event, cards, topic, persona_eff, budget=None):
+            calls.append(clock.today())
+            if len(calls) == 1:
+                started.set()
+                await release.wait()
+                return "昨天那句"
+            return "今天那句"
+
+        tarot = types.SimpleNamespace(interpreter=types.SimpleNamespace(spirit_line=slow_spirit),
+                                      clock=clock)
+        df = DailyFortune(_Ctx(), tarot)
+
+        async def go():
+            first = asyncio.create_task(df.spirit_cached(EVENT, "u1", [PICK], "今日运势", None))
+            await started.wait()
+            clock.day = "20261018"             # 跨午夜
+            second = await df.spirit_cached(EVENT, "u1", [PICK], "今日运势", None)
+            release.set()
+            return await first, second
+
+        l1, l2 = asyncio.run(go())
+        assert (l1, l2) == ("昨天那句", "今天那句")
+        assert calls == ["20261017", "20261018"]
 
     def test_spirit_writes_back_even_on_read_failure(self):
         """读故障仍写回——方向与 pick/interp 的 if ok 门相反，是有意的。

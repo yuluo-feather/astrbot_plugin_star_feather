@@ -36,6 +36,7 @@ from .settings import (
     STRUCTURE_CHECK_LOOSE,
     STRUCTURE_CHECK_SHADOW,
     STRUCTURE_CHECK_STRICT,
+    _budget_seconds_float,
 )
 
 # 输出清洗用的引号集：中英引号 + 直角引号 + 单引号。用码点拼出，避开源码里的转义
@@ -51,14 +52,6 @@ _STAGE_INTERPRET = "AI 解读"
 # 两个语义挤在同一个哨兵值上，调用点的 `if timeout is None: break` 会把「不限制」
 # 误判成「停手」。见 AiBudget.step_timeout 与 _chat_once。
 UNLIMITED_TIMEOUT = float("inf")
-
-
-def _budget_seconds(value) -> float:
-    """预算配置归一：坏值按默认预算处理——别因为一个坏配置反而取消掉上界。"""
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return float(DEFAULT_AI_BUDGET)
 
 
 def _rate_text(numerator: int, denominator: int) -> str:
@@ -113,7 +106,7 @@ class AiBudget:
     """
 
     def __init__(self, seconds, clock=time.monotonic):
-        self.seconds = _budget_seconds(seconds)
+        self.seconds = _budget_seconds_float(seconds)
         self.clock = clock
         self.limited = self.seconds > 0
         self.deadline = clock() + self.seconds if self.limited else None
@@ -222,7 +215,7 @@ class AiInterpreter:
         }
         # 0 = 不限制：显式的高级选项，但别让它静默生效——面板上看不出这个值的后果，
         # 日志里至少留一次（构造期一次，不往每次占卜里刷）
-        if _budget_seconds(ai_budget) <= 0:
+        if _budget_seconds_float(ai_budget) <= 0:
             logger.warning(
                 f"ai_budget_seconds={ai_budget}：本次运行不设 AI 总预算上限，"
                 "AI 阶段的等待时长将没有上界（该选项关闭了总预算保护）")
@@ -234,7 +227,7 @@ class AiInterpreter:
         占卜的全部 AI 阶段（牌灵的话 + 解读，含候选重试与供应商回退）——阶段之间
         不许重置截止点，这正是本预算存在的意义。
         """
-        return AiBudget(self.ai_budget)
+        return AiBudget(self.ai_budget, self._clock)
 
     def _stage_stop(self, budget: AiBudget, stage: str) -> None:
         """本阶段停手：留一行日志（同一阶段只报一次）。
@@ -462,11 +455,13 @@ class AiInterpreter:
         """
         raw = self.ai_timeout if timeout is None else timeout
         limit = UNLIMITED_TIMEOUT if raw is None or float(raw) <= 0 else float(raw)
-        call = provider.text_chat(
-            prompt=prompt, session_id=None, contexts=[], image_urls=[],
-            system_prompt=system_prompt,
-        )
         try:
+            # 调用本身也放进 try：同步抛异常（签名不匹配、参数校验失败）同样
+            # 只是「这个候选失败」，不许绕过 AI 失败的兜底边界带走整条卦
+            call = provider.text_chat(
+                prompt=prompt, session_id=None, contexts=[], image_urls=[],
+                system_prompt=system_prompt,
+            )
             if limit == UNLIMITED_TIMEOUT:
                 resp = await call          # 不限制：让这个请求一直等到模型开口
             else:

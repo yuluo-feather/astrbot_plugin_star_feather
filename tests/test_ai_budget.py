@@ -80,6 +80,15 @@ def _spy_chat(monkeypatch, clock, step, results):
 
 # ---------- 算法层：预算 → 本次超时上限 ----------
 class TestBudgetArithmetic:
+    def test_new_budget_inherits_the_injected_clock(self):
+        """构造时注入的时钟要传给新预算——否则测试与实机各用一只表。"""
+        clk = Clock()
+        it = _interp([], clock=clk)
+        bd = it.new_budget()
+        assert bd.clock is clk
+        clk.advance(5)
+        assert bd.remaining() == float(DEFAULT_AI_BUDGET) - 5
+
     def test_unlimited_keeps_per_call_timeout_and_stage_cap(self):
         clk = Clock()
         bd = AiBudget(0, clk)
@@ -116,6 +125,12 @@ class TestBudgetArithmetic:
         bd = AiBudget("oops")
         assert bd.limited is True
         assert bd.seconds == float(DEFAULT_AI_BUDGET)
+
+    def test_huge_but_finite_budget_does_not_break_deadline(self):
+        # "1e308" 是有限数字，但 int 之后加不进 float 时钟：构造期必须挡住
+        bd = AiBudget("1e308")
+        assert bd.seconds == float(DEFAULT_AI_BUDGET)
+        assert bd.deadline is not None
 
     def test_remaining_shrinks_timeout_then_stops_before_min_attempt(self):
         clk = Clock()

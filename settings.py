@@ -6,6 +6,9 @@ StarTarot / AiInterpreter / Deliverer 只消费解析后的数值，不碰配置
 
 ——默认值、迁移规则都只在这里维护，其他地方别自作主张。
 """
+import decimal
+import math
+
 from .config import _cfg_bool, _cfg_get, _cfg_int
 
 # ---- 默认值常量：集中管理散落的默认值 / 间隔（改默认值只找这一处） ----
@@ -14,6 +17,7 @@ MIN_SEGMENT_SIZE = 50           # 分段长度下限
 DEFAULT_AI_TIMEOUT = 30         # 单次 AI 解读超时（秒）；0 = 不限制单个请求
 MIN_AI_TIMEOUT = 5              # 非 0 取值的下限：不足 5 秒按 5 秒算（0 是特例，表示不限制）
 DEFAULT_AI_BUDGET = 120         # 单次占卜的 AI 总预算（秒，ai.ai_budget_seconds）：所有 AI 阶段共用一个截止点
+MAX_AI_BUDGET = 24 * 3600       # 预算上限（秒）：一次占卜超过一天没有意义，再大也只会让截止点算不出来
 AI_BUDGET_MIN_ATTEMPT = 1.0     # 剩余预算不足此值（秒）就不再发起新请求——注定超时，只是白等一次
 DEFAULT_SPIRIT_STAGE_BUDGET = 20  # 牌灵的话的阶段上限（秒）：次要内容不许独吞整笔预算
 DEFAULT_DISCLAIMER = "✨ 占卜仅供娱乐参考，选择权永远在你手里。"  # 免责声明默认文案（output.disclaimer，空字符串=不显示）
@@ -65,6 +69,52 @@ def resolve_send_mode(config) -> str:
     return mode if mode in SEND_MODES else DEFAULT_SEND_MODE
 
 
+def _budget_seconds_float(raw, default: int = DEFAULT_AI_BUDGET) -> float:
+    """AI 总预算归一的浮点版：**只有显式 0 = 不限制**，其余坏值一律回退默认值。
+
+    坏值的完整清单（2026-10-17 两轮复核）：负数（含下溢成 ``-0.0`` 的极小负数）、
+    NaN / inf、布尔、超大整数（``float()`` 溢出）、超出 MAX_AI_BUDGET 的值、
+    非数字。下溢成正零的极小正数（``"1e-9999"``）同样回退默认：它看着是正数，
+    float() 却给出 0.0，只有「真的写成 0」才是显式不限制。
+
+    这里保留小数精度：内部预算对象（AiBudget）的 1.2 秒就是 1.2 秒；
+    「至少 1 秒」是配置层的口径，落在下面的 _budget_seconds 里。
+    """
+    if isinstance(raw, bool):
+        return float(default)
+    try:
+        num = float(raw)
+    except (TypeError, ValueError, OverflowError):
+        return float(default)
+    if math.isnan(num) or math.isinf(num):
+        return float(default)
+    # -0.0 要单独判：`-0.0 < 0` 是 False，漏掉就会把极小负数当成显式 0
+    if num < 0 or (num == 0 and math.copysign(1.0, num) < 0):
+        return float(default)
+    if num == 0:
+        # 区分「显式 0」与「下溢成 0」：字符串交给 Decimal 看原值。
+        if isinstance(raw, str):
+            try:
+                if decimal.Decimal(raw.strip()) != 0:
+                    return float(default)
+            except (decimal.InvalidOperation, ValueError):
+                return float(default)
+        return 0.0
+    # 有限但巨大的值（如 "1e308"）转成整数后加不进 float 时钟：
+    # AiBudget 构造时 clock() + seconds 会 OverflowError，把所有占卜一起带走。
+    if num > MAX_AI_BUDGET:
+        return float(default)
+    return num
+
+
+def _budget_seconds(raw, default: int = DEFAULT_AI_BUDGET) -> int:
+    """配置层归一：浮点校验 + 「非 0 至少按 1 秒算」（0.5 秒不能截成 0=不限制）。"""
+    num = _budget_seconds_float(raw, default)
+    if num <= 0:
+        return 0
+    return max(1, int(num))
+
+
 class TarotSettings:
     """一份配置的解析结果：字段即插件运行所需的全部配置值。
 
@@ -95,10 +145,10 @@ class TarotSettings:
         self.ai_timeout = (_raw_timeout if _raw_timeout == 0
                            else max(MIN_AI_TIMEOUT, _raw_timeout))
         self.ai_cooldown = _cfg_int(config, "ai", "ai_fail_cooldown", DEFAULT_AI_COOLDOWN)
-        # 单次占卜的 AI 总预算（秒）：0 = 不限制（显式关掉总预算保护，AiInterpreter
-        # 构造时会打一条 warning）。管的是「AI 阶段」的等待上界，不是整条消息端到端
-        # 的上界——图片渲染、框架调度、平台发送各有各的耗时。
-        self.ai_budget = _cfg_int(config, "ai", "ai_budget_seconds", DEFAULT_AI_BUDGET, floor=0)
+        # 单次占卜的 AI 总预算（秒）：归一规则全在 _budget_seconds 里——只有显式 0
+        # 表示「不限制」，其余坏值一律回退默认，别让取整/溢出把保护悄悄关掉
+        self.ai_budget = _budget_seconds(
+            _cfg_get(config, "ai", "ai_budget_seconds", DEFAULT_AI_BUDGET))
         # 自然语言入口开关：默认值在 settings，工具注册是静态的，开关只在运行期判断（见 main.divine_tool）
         self.llm_tool_enabled = _cfg_bool(config, "tool", "llm_tool_enabled", True)
         self.llm_tool_cooldown = _cfg_int(config, "tool", "llm_tool_cooldown",

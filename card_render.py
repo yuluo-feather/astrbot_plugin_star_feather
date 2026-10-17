@@ -64,6 +64,11 @@ async def _delayed_remove(path: str, delay: int = IMAGE_TTL_SECONDS) -> None:
         pass  # 已被启动清理/其他路径处理，无需管
 
 
+# 清理任务的强引用集合：asyncio 只对任务持弱引用，没人引用时任务可能被 GC 掉，
+# 保险丝就静默失效了。任务结束（含取消/异常）由 done callback 自摘。
+_CLEANUP_TASKS: set = set()
+
+
 def _schedule_image_cleanup(img: str | None, delay: int = IMAGE_TTL_SECONDS) -> None:
     """图片产生点即绑定清理（而不是绑定发送出口）：无论后续走 AI 成功、
     文字兜底还是异常中断，任务都已在渲染成功后注册完毕；
@@ -88,16 +93,19 @@ def _schedule_image_cleanup(img: str | None, delay: int = IMAGE_TTL_SECONDS) -> 
         asyncio.get_running_loop()
     except RuntimeError:
         return  # 无事件循环（测试环境）：不创建协程，避免悬空；启动清理兜底
-    task = _delayed_remove(img, delay)
+    coro = _delayed_remove(img, delay)
     try:
-        asyncio.create_task(task)
+        task = asyncio.create_task(coro)
     except Exception as e:
         # 循环已在收尾（AstrBot 热重载 / 进程退出）：get_running_loop 还答得出话，
         # create_task 却抛 RuntimeError('cannot schedule new futures after shutdown')。
         # 先 close 掉刚建出来的协程——不关就是一条「never awaited」告警进日志，
         # 明明只是少个保险丝，别顺手往日志里丢噪声。
-        task.close()
+        coro.close()
         logger.warning(f"牌面图清理登记失败（保险丝失效，图留待启动清理）: {e}")
+        return
+    _CLEANUP_TASKS.add(task)
+    task.add_done_callback(_CLEANUP_TASKS.discard)
 
 
 # ---------- 实例图片目录：每个插件实例一份，互不打扫对方 ----------
@@ -118,8 +126,8 @@ _INSTANCE_DIR_RE = re.compile(r"^inst_(\d+)_\d+_[0-9a-f]{8}$")
 
 三段各有职责：pid 区分进程（重启后的残骸一眼能认）；序号区分**同一进程内**
 先后或并存的两代实例（热重载正是同 pid——只靠 pid 的名字区分不了它们，
-而它们恰恰是本案的主角）；随机尾防撞名。pid 必须可解析：清理时按它跳过**本
-进程的全部实例目录**，见 cleanup_stale_images。
+而它们恰恰是本案的主角）；随机尾防撞名。pid 必须可解析：清理时按它区分
+**本进程的旧实例目录**——只有过期且为空才回收，见 cleanup_stale_images。
 """
 
 STALE_INSTANCE_DIR_AGE = 3 * 24 * 3600
@@ -129,7 +137,7 @@ STALE_INSTANCE_DIR_AGE = 3 * 24 * 3600
 不是「进程已退出」「目录已无人使用」的证明：mtime 只说明「最近三天没往这里写过东西」。
 之所以敢据此回收，是因为图片是一次性产物、渲染到发送的间隔以分钟计——一个三天没写过
 新东西的目录里，极少还躺着一条正在等发送的图。它撑不住的正确性由另外两条兜住：
-同进程的其他实例目录一律免删（见 cleanup_stale_images 的 pid 判据），跨进程那份由
+同进程的旧实例目录只要非空就免删（见 cleanup_stale_images 的 pid 判据），跨进程那份由
 发送前的 main._ensure_image 补渲染兜底。
 为什么不设更短：判错一次的代价是删掉别人可能正在用的图——正是本案要修的东西；
 多留几天的代价只是几十 MB 磁盘。这个不对称决定宁可宽松。
@@ -201,10 +209,12 @@ def cleanup_stale_images(current_dir: str | None = None) -> None:
     2. mtime 超过 STALE_INSTANCE_DIR_AGE（三天没写过新东西，只当磁盘回收候选）。
 
     豁免（按优先级）：
-    - **本进程的全部实例目录一律跳过**——从名字里解析 pid，凡是 os.getpid() 的一律
-      不碰。热重载正是「同进程、两代实例」：新实例启动清理时，旧实例可能还活着、
-      图还在等发送，只跳过传入的 current_dir 是不够的（旧写法就是这么漏的，issue #21
-      ① 复核已复现）。同进程的目录里可能还有图在等发送，宁可留着让保险丝去收。
+    - **本进程的旧实例目录只回收空壳**——从名字里解析 pid，凡是 os.getpid() 的一律
+      先看里面还有没有东西：非空的可能还有图在等发送，宁可留着让保险丝去收；只有
+      已经空了的（热重载后旧实例收尾完毕）才按过期回收。热重载正是「同进程、两代
+      实例」：新实例启动清理时，旧实例可能还活着，只跳过传入的 current_dir 是不够的
+      （旧写法就是这么漏的，issue #21 ① 复核已复现）。删除用 rmdir 而不是 rmtree：
+      「非空就删不掉」交给文件系统判断，不靠自己再枚举一次。
     - current_dir 是本次传入的当前实例目录，同样永不删——即便系统时钟被往回调、
       让它的 mtime 看起来已经过期。
     跨进程的过期目录照旧回收（那些 pid 与本进程不同，是重启留下的残骸）。
@@ -237,11 +247,19 @@ def cleanup_stale_images(current_dir: str | None = None) -> None:
                 m = _INSTANCE_DIR_RE.match(name)
                 if m is None or not os.path.isdir(path):
                     continue
-                if int(m.group(1)) == own_pid:
-                    continue  # 本进程的任何一代实例目录都不碰（热重载的旧实例可能还活着）
                 if current_dir and os.path.abspath(path) == os.path.abspath(current_dir):
                     continue
-                if _is_stale(path, STALE_INSTANCE_DIR_AGE):
+                if not _is_stale(path, STALE_INSTANCE_DIR_AGE):
+                    continue
+                if int(m.group(1)) == own_pid:
+                    # 同进程的旧实例目录：非空说明可能还有图在等发送，留给保险丝；
+                    # 空壳才算残骸。rmdir 在非空时必然失败，正好当判据用。
+                    try:
+                        os.rmdir(path)
+                        reaped += 1
+                    except OSError:
+                        pass
+                else:
                     shutil.rmtree(path, ignore_errors=True)
                     reaped += 1
         except OSError as e:
@@ -460,6 +478,20 @@ def _draw_card(canvas, x, y, card, upright) -> int:
 
 
 # ---------- 拼图主函数 ----------
+def _save_png(image, path: str) -> None:
+    """保存 PNG；目标目录若恰在保存前被启动清理回收，就重建目录再存一次。
+
+    清理只回收「过期且空」的旧实例目录，与本函数的窗口极窄；但热重载时旧实例
+    可能正好在渲染，重建一次目录比丢掉整张图便宜。第二次仍失败就让异常上抛，
+    由渲染兜底转成无图。
+    """
+    try:
+        image.save(path, "PNG")
+    except FileNotFoundError:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        image.save(path, "PNG")
+
+
 def render_cards(positions, picks, formation, save_dir=None) -> str:
     """把抽牌结果渲染成一张图片，返回图片保存路径。
 
@@ -507,7 +539,7 @@ def render_cards(positions, picks, formation, save_dir=None) -> str:
         save_dir = IMAGE_DIR_ROOT
     os.makedirs(save_dir, exist_ok=True)
     path = os.path.join(save_dir, f"tarot_{int(time.time())}_{secrets.token_hex(4)}.png")
-    canvas.save(path, "PNG")
+    _save_png(canvas, path)
     return path
 
 
@@ -607,5 +639,5 @@ def _render_daily_card_img(card, upright, signature, date_text, save_dir=None) -
         save_dir = IMAGE_DIR_ROOT
     os.makedirs(save_dir, exist_ok=True)
     out_path = os.path.join(save_dir, f"daily_{int(time.time())}_{secrets.token_hex(4)}.png")
-    canvas.convert("RGB").save(out_path, "PNG")
+    _save_png(canvas.convert("RGB"), out_path)
     return out_path

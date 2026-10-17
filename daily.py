@@ -13,6 +13,7 @@ import asyncio
 import hashlib
 import random
 import re
+import threading
 from contextlib import AbstractAsyncContextManager, nullcontext
 
 from astrbot.api import logger
@@ -23,6 +24,16 @@ from .dailylines import pick_signature
 from .kv_utils import kv_get, kv_put
 from .prompts import SPIRIT_PROMPT_V
 from .tarot_data import TAROT_CARDS
+
+# 牌灵生成中的共享登记：键 = (缓存键, 牌组指纹, 日期)。
+# 为什么放模块级而不是实例属性：热重载前后、或同一进程里并存的两代 DailyFortune
+# 若各持一张表，会同时 miss 共享 KV、各生成一句，「当日同牌组同一句」当场破功。
+# 模块级表能覆盖同一模块对象下的多实例；跨模块对象（重载后旧实例还活着）没有原子
+# KV 原语可用，仍以最后写回者为准——这条边界记在契约里，不在这里假装解决。
+# 用 threading.Lock 而不是 asyncio.Lock：临界区只有同步的 dict 操作，且模块级
+# asyncio 锁会绑死第一个事件循环，测试里换循环就炸。
+_SPIRIT_INFLIGHT: dict[tuple[str, str, str], asyncio.Future] = {}
+_SPIRIT_INFLIGHT_GUARD = threading.Lock()
 
 # 今日固定牌运判定：只有「明确在问当日运」才走每日固定，分两层——
 # 1) 明确运势词（运势/运气/牌运/日运/daily）直接命中；
@@ -275,6 +286,9 @@ class DailyFortune:
         # 缓存读-判-写串行化（gating 同款防线）：并发占卜时两条协程各自读旧值再写回，
         # 后写的会把先写的分桶整个覆盖掉（实测：并发问两个主题，KV 里只剩一个）
         self._kv_lock = asyncio.Lock()
+        # 同一（用户, 牌组, 今天）正在生成的牌灵的话登记在模块级 _SPIRIT_INFLIGHT：
+        # 并发 miss 只让一个人去问 AI，其余等它的结果——否则两句话各自成文，
+        # 破坏「当日同牌组同一句」。跨实例共享的理由见模块级注释。
 
     async def render_daily_card(self, topics: list[str], picks: list[dict], uid: str) -> str | None:
         """今日牌运卡海报编排：签文（确定性函数）+ 日期文本 + 线程池渲染 + 登记清理。
@@ -353,6 +367,9 @@ class DailyFortune:
         """
         topic = _norm_topic(clean)
         key, today = f"sf_daily_{uid}", self.clock.today()
+        # 牌指纹：同一天换牌（升级、修 KV、牌库顺序变化）后，旧解读不再算命中。
+        # 用 id + 正逆（稳定标识），不用牌名——改名不该让缓存整体失效。
+        sig = "|".join(f"{p['card']['id']}:{1 if p['upright'] else 0}" for p in picks)
         # 命中判定原子化；写回另起一次锁（AI 调用不占锁，见下）
         hit = None
         async with self._kv_lock:
@@ -360,7 +377,9 @@ class DailyFortune:
             if ok and isinstance(data, dict) and data.get("date") == today:
                 slots = data.get("interps")
                 if isinstance(slots, dict):
-                    hit = slots.get(topic)
+                    # 牌变了就不是同一签：旧解读必须重生成（2026-10-17 复核）
+                    if data.get("sign") == sig:
+                        hit = slots.get(topic)
         if hit:
             # 命中路径**只读不写**（2026-10-17 复核收口）：这是一条无 CAS 的 KV，
             # 任何「读旧值 → 裁 → 写回」的维护动作都可能覆盖并发生成的新主题
@@ -397,10 +416,11 @@ class DailyFortune:
                 # 读故障时它整段跳过（if ok 门），此处不自己判就会把昨天的分桶盖上今天的
                 # 日期复活（同主题当天复用昨天的解读）。判据与 pick_cached 同口径：
                 # date != today 即作废；同一天内仍是原位保留
-                same_day = data.get("date") == today
+                # 同一天且同一组牌才沿用旧分桶；牌换了就清空（旧解读对不上新牌面）
+                same_day = data.get("date") == today and data.get("sign") == sig
                 slots = (dict(data.get("interps") or {})
                          if same_day and isinstance(data.get("interps"), dict) else {})
-                data["date"], data["interps"] = today, slots
+                data["date"], data["interps"], data["sign"] = today, slots, sig
                 # 失败不落 falsy：interp 为 None / 空串时只刷新结构与日期，不写分桶。
                 # 写 null 的功能后果其实没有（命中判据 `slots.get(topic)` 对 None 同样是
                 # falsy，下次照样现场重生成），但「interps 里有这个 key」会因此失去含义
@@ -450,23 +470,76 @@ class DailyFortune:
             return fallback  # 无标识：连缓存都无从谈起，直接池内兜底
         key = f"sf_spirit_{uid}"
         sig = "|".join(f"{p['card']['cn']}:{1 if p['upright'] else 0}" for p in picks)
-        data, ok = await kv_get(self.kv_store, key, None, "牌灵的话缓存")
-        if ok and isinstance(data, dict) and data.get("v") == SPIRIT_PROMPT_V \
-                and data.get("date") == today and data.get("sign") == sig \
-                and data.get("line"):
-            return data["line"]
+        # 日期进登记键：跨午夜仍在生成的那一句属于昨天，新一天的请求不能加入它，
+        # 否则会把昨天的文案当成今天的（缓存命中本来就按 date 判，登记也得同口径）。
+        reg_key = (key, sig, today)
+
+        # 命中判定与 in-flight 登记都放在锁内：并发同签只允许一个人去问 AI。
+        # 生成本身在锁外（AI 可能跑几十秒），写回再进锁。
+        async with self._kv_lock:
+            data, ok = await kv_get(self.kv_store, key, None, "牌灵的话缓存")
+            if ok and isinstance(data, dict) and data.get("v") == SPIRIT_PROMPT_V \
+                    and data.get("date") == today and data.get("sign") == sig \
+                    and data.get("line"):
+                return data["line"]
+            loop = asyncio.get_running_loop()
+            with _SPIRIT_INFLIGHT_GUARD:
+                pending = _SPIRIT_INFLIGHT.get(reg_key)
+                # 上个事件循环留下的死 Future 不能复用：done 的直接换新的，
+                # 绑在别的 loop 上的也换新的（否则 await 会报跨循环错误）。
+                if pending is not None and (pending.done()
+                                           or pending.get_loop() is not loop):
+                    pending = None
+                owner = pending is None
+                if owner:
+                    pending = loop.create_future()
+                    _SPIRIT_INFLIGHT[reg_key] = pending
+        assert pending is not None   # owner 分支已建好；非 owner 分支本来就有
+
+        if not owner:
+            # 别人正在生成：等它的那一句；它失败/被取消就跟着池内兜底，
+            # 绝不在这里再问一次 AI（并发风暴正是要避免的东西）
+            try:
+                # shield：等待者被取消时不能把共享 Future 一起取消——否则所有者
+                # 稍后 set_result 会抛 InvalidStateError，所有等待者一起陪葬。
+                return await asyncio.shield(pending)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                return fallback
+
         # topic 传的是 _norm_topic 的指纹而非用户原话：泛问归一为「（今日牌运）」，
         # 它非空、会整段拼进 prompt（build_spirit_line_prompt 的 topic_part 只判空串）。
         # 有意为之——本缓存的命中键不含 topic，同牌组当天本就该是同一句，
         # 传原话只会让这个定型值随用户措辞漂移。
-        line = await _ai_output(
-            self.tarot.interpreter.spirit_line(
-                event, [(p["card"], p["upright"]) for p in picks],
-                _norm_topic(clean), persona_eff, budget=budget),
-            "牌灵的话", uid)
-        if not line:
-            return fallback  # AI 失败：池内当日句；不写缓存，下次再试 AI
-        await kv_put(self.kv_store, key, {"v": SPIRIT_PROMPT_V, "date": today,
-                                          "sign": sig, "line": line},
-                     "牌灵的话缓存")
-        return line
+        try:
+            line = await _ai_output(
+                self.tarot.interpreter.spirit_line(
+                    event, [(p["card"], p["upright"]) for p in picks],
+                    _norm_topic(clean), persona_eff, budget=budget),
+                "牌灵的话", uid)
+            if not line:
+                return fallback  # AI 失败：池内当日句；不写缓存，下次再试 AI
+            async with self._kv_lock:
+                # 写回前再读一眼：另一个实例（跨模块对象时登记表不共享）可能刚写好
+                # 同一天同一句。有就采用它，别用后生成的覆盖掉——同一签两句话正是
+                # 这条缓存要防的事。
+                fresh, fresh_ok = await kv_get(self.kv_store, key, None, "牌灵的话缓存")
+                if fresh_ok and isinstance(fresh, dict) and fresh.get("v") == SPIRIT_PROMPT_V \
+                        and fresh.get("date") == today and fresh.get("sign") == sig \
+                        and fresh.get("line"):
+                    line = fresh["line"]
+                else:
+                    await kv_put(self.kv_store, key, {"v": SPIRIT_PROMPT_V, "date": today,
+                                                      "sign": sig, "line": line},
+                                 "牌灵的话缓存")
+            pending.set_result(line)   # 唤醒并发等待者：同一句
+            return line
+        finally:
+            # 成功、失败、取消都要唤醒等待者并摘除登记；没结果就给池内兜底
+            if not pending.done():
+                pending.set_result(fallback)
+            with _SPIRIT_INFLIGHT_GUARD:
+                # 只摘自己那张：期间可能有新请求登记了同名 Future
+                if _SPIRIT_INFLIGHT.get(reg_key) is pending:
+                    _SPIRIT_INFLIGHT.pop(reg_key, None)

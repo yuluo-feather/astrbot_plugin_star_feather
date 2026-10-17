@@ -108,6 +108,28 @@ class TestTarotSettings:
         assert TarotSettings({"ai": {"ai_timeout": 5}}).ai_timeout == 5
         assert TarotSettings({"ai": {"ai_timeout": 30}}).ai_timeout == 30
 
+    def test_ai_budget_only_explicit_zero_means_unlimited(self):
+        """只有显式 0 = 不限制；负数/非数字回退默认值（-10 不许被夹成 0）。"""
+        from data.plugins.astrbot_plugin_star_feather.settings import DEFAULT_AI_BUDGET
+        assert TarotSettings({"ai": {"ai_budget_seconds": 0}}).ai_budget == 0
+        assert TarotSettings({"ai": {"ai_budget_seconds": -10}}).ai_budget == DEFAULT_AI_BUDGET
+        assert TarotSettings({"ai": {"ai_budget_seconds": "oops"}}).ai_budget == DEFAULT_AI_BUDGET
+        assert TarotSettings({"ai": {"ai_budget_seconds": 300}}).ai_budget == 300
+        # 小数不能被截成 0（0.5 秒 -> 至少 1 秒），布尔 / inf 一律回退默认值
+        assert TarotSettings({"ai": {"ai_budget_seconds": 0.5}}).ai_budget == 1
+        assert TarotSettings({"ai": {"ai_budget_seconds": True}}).ai_budget == DEFAULT_AI_BUDGET
+        assert TarotSettings({"ai": {"ai_budget_seconds": float("inf")}}).ai_budget == DEFAULT_AI_BUDGET
+        # 超大整数（float 溢出）与下溢成 -0.0 的极小负数都不许变成「不限制」
+        assert TarotSettings({"ai": {"ai_budget_seconds": 10 ** 400}}).ai_budget == DEFAULT_AI_BUDGET
+        assert TarotSettings({"ai": {"ai_budget_seconds": "-1e-9999"}}).ai_budget == DEFAULT_AI_BUDGET
+        assert TarotSettings({"ai": {"ai_budget_seconds": -0.0}}).ai_budget == DEFAULT_AI_BUDGET
+        # 下溢成 +0.0 的极小正数同样是坏值：它不是「显式 0」
+        assert TarotSettings({"ai": {"ai_budget_seconds": "1e-9999"}}).ai_budget == DEFAULT_AI_BUDGET
+        # 有限但大到算不出截止点的值（1e308）回退默认；上限本身仍可用
+        assert TarotSettings({"ai": {"ai_budget_seconds": "1e308"}}).ai_budget == DEFAULT_AI_BUDGET
+        assert TarotSettings({"ai": {"ai_budget_seconds": 24 * 3600 + 1}}).ai_budget == DEFAULT_AI_BUDGET
+        assert TarotSettings({"ai": {"ai_budget_seconds": 24 * 3600}}).ai_budget == 24 * 3600
+
     def test_legacy_flat_still_loads(self):
         # 升级前扁平配置：分组缺失时回退顶层读取
         s = TarotSettings({"show_image": False, "forward_result": True})
