@@ -195,7 +195,8 @@ class AiInterpreter:
                  max_question_len: int = DEFAULT_QUESTION_MAX_LEN,
                  persona: str = DEFAULT_AI_PERSONA,
                  ai_budget: int = DEFAULT_AI_BUDGET,
-                 structure_check: str = DEFAULT_STRUCTURE_CHECK):
+                 structure_check: str = DEFAULT_STRUCTURE_CHECK,
+                 clock=time.monotonic):
         self.context = context
         self.enable_ai = enable_ai
         self.ai_timeout = ai_timeout
@@ -207,6 +208,9 @@ class AiInterpreter:
         # 粒度到 provider（而非插件全局熔断）：单个模型挂掉只冷却它自己，
         # 其他模型与其他用户不受拖累；冷却期内该 provider 直接从候选链里跳过。
         self._fail_ts_by_provider: dict[str, float] = {}
+        # 冷却计时用进程内单调时钟：只剩「过了多久」这一种语义，墙钟回拨不该
+        # 把 provider 多冻一段时间。可注入假时钟，测试不睡墙钟。
+        self._clock = clock
         self.ai_budget = ai_budget  # 单次占卜的 AI 总预算（秒），0=不限制；见 AiBudget
         # 输出结构校验强度（ai.structure_check）：见 _accept_structure
         self.structure_check = structure_check
@@ -270,12 +274,12 @@ class AiInterpreter:
         if self.ai_cooldown <= 0:
             return False
         ts = self._fail_ts_by_provider.get(pid, 0.0)
-        return ts > 0 and time.time() - ts < self.ai_cooldown
+        return ts > 0 and self._clock() - ts < self.ai_cooldown
 
     def _mark_fail(self, pid: str) -> None:
         """记录一次服务级失败：进入该 provider 的冷却期（服务没挂则不记冷却）。"""
         if self.ai_cooldown > 0:
-            self._fail_ts_by_provider[pid] = time.time()
+            self._fail_ts_by_provider[pid] = self._clock()
 
     async def _provider_candidates(self, umo: str | None) -> list:
         """收集候选：当前会话 > 全局默认 > 全部已加载，按 id 去重。

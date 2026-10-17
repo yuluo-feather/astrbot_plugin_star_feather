@@ -202,10 +202,8 @@ class StarFeatherPlugin(Star):
         # clock 传核心那份：每日计数的日期键与今日牌运必须落在同一个「今天」
         self.gate = LimitGate(self, self.tarot.cmd_rate_limit, self.tarot.daily_count_limit,
                               clock=self.tarot.clock)
-        # 启动回收过期残骸（确认过期的实例目录 + 旧布局散图）：
-        # 传自己的目录路径是让「绝不删自己」这条豁免有据可依——即便时钟跳变
-        # 让它看起来过期，也不动（图可能还在发）。见 card_render.cleanup_stale_images
-        cleanup_stale_images(self.tarot.image_dir)
+        # 启动回收放到 initialize 里做（见下）：构造期是同步路径，扫盘/删目录
+        # 不该堵住事件循环；传自己的目录路径仍是为了让「绝不删自己」有据可依。
 
     async def initialize(self):
         """实例化后的异步初始化钩子：打印启动横幅，本羽的排面不能少。"""
@@ -217,6 +215,18 @@ class StarFeatherPlugin(Star):
 |____/ \__\__,_|_|    |_|  \___|\__,_|\__|_| |_|\___|_|
 星羽塔罗 v{VERSION} · 78张牌已就位，牌灵在等你来问。
 """)
+        # 启动回收过期残骸（确认过期的实例目录 + 旧布局散图）：scan/rmtree 是
+        # 阻塞 IO，丢线程池执行，别让一次启动把整个事件循环按住。传自己的目录
+        # 路径是让「绝不删自己」这条豁免有据可依——即便时钟跳变让它看起来过期，
+        # 也不动（图可能还在发）。见 card_render.cleanup_stale_images。
+        tarot = getattr(self, "tarot", None)
+        image_dir = getattr(tarot, "image_dir", None)
+        if isinstance(image_dir, str) and image_dir:
+            try:
+                await asyncio.to_thread(cleanup_stale_images, image_dir)
+            except Exception as e:
+                # 清扫只是磁盘回收，失败不该把插件加载带走
+                logger.warning(f"启动回收过期图片失败（不影响加载）: {e}")
         # 登记本代实例 + 打一行快照：热重载每来一次，这里就多一行 [cfg] LOAD，
         # 与入口那行 [cfg] ENTRY 对照就能看出「谁跑在谁身上、读到的是哪一代的配置」。
         # 这一句是整套诊断里唯一写到外部对象的地方，而它跑在 initialize() 里：框架

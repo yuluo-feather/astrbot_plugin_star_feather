@@ -18,6 +18,10 @@ def cooldown_remaining(last_ts: float, now: float, cooldown: int) -> int:
     """
     if cooldown <= 0 or last_ts <= 0:
         return 0
+    if now < last_ts:
+        # 服务器时钟被回拨：把负的 elapsed 当成「已过期」，别让用户被冻结
+        # cooldown + 回拨量那么久。KV 里存的是墙钟时间戳，这里只做防御性归一。
+        return 0
     remain = int(cooldown - (now - last_ts))
     return max(0, remain)
 
