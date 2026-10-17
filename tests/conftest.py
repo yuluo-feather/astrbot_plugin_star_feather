@@ -1,6 +1,6 @@
 """pytest 启动准备：打桩 astrbot 框架 API，使插件模块可在无 AstrBot 环境下导入。
 
-测试按域分文件：test_core（核心与三入口集成）/ test_settings（配置语义）/
+测试按域分文件：test_core（抽牌/牌义/渲染门控/AI 候选链与注入）/ test_entries（入口编排与收尾句）/ test_tool_entry（工具入口直发）/ test_daily_cache（每日解读缓存）/ test_spirit（牌灵的话）/ test_settings（配置语义）/
 test_spreads（选阵与清洗）/ test_hardening（Prompt 防护）/ test_identity（身份标识）/
 test_gating（限流闸门）/ test_card_render（渲染与清理）/ test_clock（日期边界：时区口径与今天唯一来源）/
 test_fonts（字体子系统）/ test_deliver（分段与分发）/ test_limiter / test_config /
