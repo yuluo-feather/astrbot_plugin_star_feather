@@ -263,7 +263,7 @@ class TestShadowTally:
 
     def test_zero_denominator_reports_na_never_zero_percent(self):
         """分母为零写 N/A，不许写 0%：0/0 是「还没观测量」，不是「没被拒」。"""
-        from interpret import _rate_text
+        from data.plugins.astrbot_plugin_star_feather.interpret import _rate_text
         assert _rate_text(2, 50) == "2/50 (4.00%)"
         assert _rate_text(0, 3) == "0/3 (0.00%)"
         assert _rate_text(0, 0) == "0/0 (N/A)"

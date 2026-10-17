@@ -136,7 +136,7 @@ def test_readme_config_tables_cover_every_schema_key():
 
 def test_budget_and_structure_rows_match_schema_and_code():
     """两个重点项：默认值与取值必须与 schema、settings 常量逐字一致（防文档臆造）。"""
-    from settings import (
+    from data.plugins.astrbot_plugin_star_feather.settings import (
         DEFAULT_AI_BUDGET,
         DEFAULT_STRUCTURE_CHECK,
         STRUCTURE_CHECK_VALUES,

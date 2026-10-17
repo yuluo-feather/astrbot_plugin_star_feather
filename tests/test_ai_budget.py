@@ -592,9 +592,9 @@ class TestUnlimitedBudgetKeepsTheImagePipeline:
     """
 
     def test_zero_budget_rerenders_a_vanished_image(self, tmp_path, monkeypatch):
-        import daily as daily_mod
-        import tarot_core
-        from main import StarFeatherPlugin
+        from data.plugins.astrbot_plugin_star_feather import daily as daily_mod
+        from data.plugins.astrbot_plugin_star_feather import tarot_core
+        from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
 
         monkeypatch.setattr(card_render, "IMAGE_DIR_ROOT", str(tmp_path / "star_feather"))
         ctx = FakeContext(using=None, others=[FakeProvider("p0", result=OK_INTERP)])
