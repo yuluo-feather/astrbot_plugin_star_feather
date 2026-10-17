@@ -126,8 +126,8 @@ _INSTANCE_DIR_RE = re.compile(r"^inst_(\d+)_\d+_[0-9a-f]{8}$")
 
 三段各有职责：pid 区分进程（重启后的残骸一眼能认）；序号区分**同一进程内**
 先后或并存的两代实例（热重载正是同 pid——只靠 pid 的名字区分不了它们，
-而它们恰恰是本案的主角）；随机尾防撞名。pid 必须可解析：清理时按它跳过**本
-进程的全部实例目录**，见 cleanup_stale_images。
+而它们恰恰是本案的主角）；随机尾防撞名。pid 必须可解析：清理时按它区分
+**本进程的旧实例目录**——只有过期且为空才回收，见 cleanup_stale_images。
 """
 
 STALE_INSTANCE_DIR_AGE = 3 * 24 * 3600
@@ -137,7 +137,7 @@ STALE_INSTANCE_DIR_AGE = 3 * 24 * 3600
 不是「进程已退出」「目录已无人使用」的证明：mtime 只说明「最近三天没往这里写过东西」。
 之所以敢据此回收，是因为图片是一次性产物、渲染到发送的间隔以分钟计——一个三天没写过
 新东西的目录里，极少还躺着一条正在等发送的图。它撑不住的正确性由另外两条兜住：
-同进程的其他实例目录一律免删（见 cleanup_stale_images 的 pid 判据），跨进程那份由
+同进程的旧实例目录只要非空就免删（见 cleanup_stale_images 的 pid 判据），跨进程那份由
 发送前的 main._ensure_image 补渲染兜底。
 为什么不设更短：判错一次的代价是删掉别人可能正在用的图——正是本案要修的东西；
 多留几天的代价只是几十 MB 磁盘。这个不对称决定宁可宽松。
@@ -478,6 +478,20 @@ def _draw_card(canvas, x, y, card, upright) -> int:
 
 
 # ---------- 拼图主函数 ----------
+def _save_png(image, path: str) -> None:
+    """保存 PNG；目标目录若恰在保存前被启动清理回收，就重建目录再存一次。
+
+    清理只回收「过期且空」的旧实例目录，与本函数的窗口极窄；但热重载时旧实例
+    可能正好在渲染，重建一次目录比丢掉整张图便宜。第二次仍失败就让异常上抛，
+    由渲染兜底转成无图。
+    """
+    try:
+        image.save(path, "PNG")
+    except FileNotFoundError:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        image.save(path, "PNG")
+
+
 def render_cards(positions, picks, formation, save_dir=None) -> str:
     """把抽牌结果渲染成一张图片，返回图片保存路径。
 
@@ -525,7 +539,7 @@ def render_cards(positions, picks, formation, save_dir=None) -> str:
         save_dir = IMAGE_DIR_ROOT
     os.makedirs(save_dir, exist_ok=True)
     path = os.path.join(save_dir, f"tarot_{int(time.time())}_{secrets.token_hex(4)}.png")
-    canvas.save(path, "PNG")
+    _save_png(canvas, path)
     return path
 
 
@@ -625,5 +639,5 @@ def _render_daily_card_img(card, upright, signature, date_text, save_dir=None) -
         save_dir = IMAGE_DIR_ROOT
     os.makedirs(save_dir, exist_ok=True)
     out_path = os.path.join(save_dir, f"daily_{int(time.time())}_{secrets.token_hex(4)}.png")
-    canvas.convert("RGB").save(out_path, "PNG")
+    _save_png(canvas.convert("RGB"), out_path)
     return out_path

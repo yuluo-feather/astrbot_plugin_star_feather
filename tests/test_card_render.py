@@ -625,3 +625,27 @@ class TestBackgroundRandomHygiene:
         path = card_render.render_cards(positions, picks, "羽时三刻", save_dir=str(tmp_path))
         assert os.path.isfile(path)
         assert random.getstate() == before      # 全局随机序一模一样：一次都没被消耗
+
+
+# ---------- 保存与清理的竞态：目录被回收后要能补建 ----------
+class TestSavePngRace:
+    def test_recreates_directory_removed_before_save(self, tmp_path):
+        """启动清理若在保存前一刻回收了空目录，保存要重建目录，而不是丢掉整张图。"""
+        target = tmp_path / "inst_1_1_deadbeef"
+        target.mkdir()
+        out = target / "tarot_x.png"
+
+        class _Img:
+            calls = 0
+
+            def save(self, path, fmt):
+                self.calls += 1
+                if self.calls == 1:
+                    os.rmdir(os.path.dirname(path))     # 模拟清理抢在前面
+                with open(path, "wb") as f:
+                    f.write(b"PNG")
+
+        img = _Img()
+        card_render._save_png(img, str(out))
+        assert out.exists()
+        assert img.calls == 2, "第一次保存失败后应重建目录并重试一次"

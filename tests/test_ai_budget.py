@@ -126,6 +126,12 @@ class TestBudgetArithmetic:
         assert bd.limited is True
         assert bd.seconds == float(DEFAULT_AI_BUDGET)
 
+    def test_huge_but_finite_budget_does_not_break_deadline(self):
+        # "1e308" 是有限数字，但 int 之后加不进 float 时钟：构造期必须挡住
+        bd = AiBudget("1e308")
+        assert bd.seconds == float(DEFAULT_AI_BUDGET)
+        assert bd.deadline is not None
+
     def test_remaining_shrinks_timeout_then_stops_before_min_attempt(self):
         clk = Clock()
         bd = AiBudget(120, clk)

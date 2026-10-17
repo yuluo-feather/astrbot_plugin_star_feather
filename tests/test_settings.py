@@ -123,6 +123,12 @@ class TestTarotSettings:
         assert TarotSettings({"ai": {"ai_budget_seconds": 10 ** 400}}).ai_budget == DEFAULT_AI_BUDGET
         assert TarotSettings({"ai": {"ai_budget_seconds": "-1e-9999"}}).ai_budget == DEFAULT_AI_BUDGET
         assert TarotSettings({"ai": {"ai_budget_seconds": -0.0}}).ai_budget == DEFAULT_AI_BUDGET
+        # 下溢成 +0.0 的极小正数同样是坏值：它不是「显式 0」
+        assert TarotSettings({"ai": {"ai_budget_seconds": "1e-9999"}}).ai_budget == DEFAULT_AI_BUDGET
+        # 有限但大到算不出截止点的值（1e308）回退默认；上限本身仍可用
+        assert TarotSettings({"ai": {"ai_budget_seconds": "1e308"}}).ai_budget == DEFAULT_AI_BUDGET
+        assert TarotSettings({"ai": {"ai_budget_seconds": 24 * 3600 + 1}}).ai_budget == DEFAULT_AI_BUDGET
+        assert TarotSettings({"ai": {"ai_budget_seconds": 24 * 3600}}).ai_budget == 24 * 3600
 
     def test_legacy_flat_still_loads(self):
         # 升级前扁平配置：分组缺失时回退顶层读取

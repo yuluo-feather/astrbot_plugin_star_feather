@@ -613,6 +613,7 @@ class TestImageGoneBeforeSend:
         """
         stale = str(tmp_path / "tarot_race.png")
         fresh = str(tmp_path / "tarot_fresh.png")
+        open(stale, "wb").write(b"PNG")   # 先真实存在：模拟「判完之后、取值之前被删」
 
         def render():
             open(fresh, "wb").write(b"PNG")
@@ -623,6 +624,7 @@ class TestImageGoneBeforeSend:
 
         def flaky(path):
             if path == stale:
+                os.remove(stale)          # 竞态正好发生在这里
                 raise FileNotFoundError(path)
             return real_getsize(path)
 
@@ -634,6 +636,7 @@ class TestImageGoneBeforeSend:
         """权限 / 路径非法等 OSError 同样走补渲染：未核验的路径不交给发送侧。"""
         stale = str(tmp_path / "tarot_unreadable.png")
         fresh = str(tmp_path / "tarot_fresh2.png")
+        open(stale, "wb").write(b"PNG")   # 先存在，再让取值失败
 
         def render():
             open(fresh, "wb").write(b"PNG")

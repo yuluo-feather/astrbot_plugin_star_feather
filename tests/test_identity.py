@@ -48,6 +48,21 @@ class TestResolveSenderUid:
         assert resolve_sender_uid(b) == "telegram:123"
         assert resolve_sender_uid(a) != resolve_sender_uid(b)
 
+    def test_platform_prefix_is_injective(self):
+        """分隔符要转义：``p`` + ``x:y`` 与 ``p:x`` + ``y`` 不能撞成同一个人。"""
+        a = self._evt(getter="x:y", platform="p")
+        b = self._evt(getter="y", platform="p:x")
+        assert resolve_sender_uid(a) == "p:x%3Ay"
+        assert resolve_sender_uid(b) == "p%3Ax:y"
+        assert resolve_sender_uid(a) != resolve_sender_uid(b)
+
+    def test_escape_char_itself_is_escaped(self):
+        """字面量 ``%3A`` 与真分隔符不能撞：``%`` 先转义成 ``%25``。"""
+        literal = self._evt(getter="x%3Ay", platform="p")
+        separator = self._evt(getter="x:y", platform="p")
+        assert resolve_sender_uid(literal) == "p:x%253Ay"
+        assert resolve_sender_uid(literal) != resolve_sender_uid(separator)
+
     def test_l2_raw_int_compat(self):
         # 官方 get_sender_id 只认 str，int 型 QQ 号直接拿空 → 第二层直读兜住
         evt = self._evt(sender_user_id=12345, getter="", session_id="s", origin="o")
