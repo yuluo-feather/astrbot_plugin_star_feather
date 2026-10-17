@@ -290,8 +290,6 @@
 
 > 更早版本（v0.7.2 及以前）的逐条明细见 [CHANGELOG.md](CHANGELOG.md) 与 `changelogs/` 目录——这里只保留最近 6 个版本的摘要。
 
-> 更早版本（v0.7.1 及以前）的逐条明细见 [CHANGELOG.md](CHANGELOG.md) 与 `changelogs/` 目录——这里只保留最近 6 个版本的摘要。
-
 ---
 
 ## 🌙 注意事项
