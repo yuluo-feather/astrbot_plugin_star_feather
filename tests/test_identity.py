@@ -10,7 +10,7 @@ class TestResolveSenderUid:
     """stub 事件：鸭子类型，测两级降级链（群号不兜底）。"""
 
     @staticmethod
-    def _evt(sender_user_id="", getter="", session_id="", origin=""):
+    def _evt(sender_user_id="", getter="", session_id="", origin="", platform=""):
         class _Sender:
             user_id = sender_user_id
 
@@ -27,6 +27,9 @@ class TestResolveSenderUid:
             def get_session_id(self):
                 return session_id
 
+            def get_platform_id(self):
+                return platform
+
             @property
             def unified_msg_origin(self):
                 return self.uni
@@ -36,6 +39,14 @@ class TestResolveSenderUid:
     def test_l1_official_getter(self):
         evt = self._evt(sender_user_id="", getter="12345", session_id="s", origin="o")
         assert resolve_sender_uid(evt) == "12345"
+
+    def test_platform_prefix_isolates_same_user_id(self):
+        """不同适配器下同一个 user_id 必须落成两个身份（多平台不串数据）。"""
+        a = self._evt(getter="123", platform="qq")
+        b = self._evt(getter="123", platform="telegram")
+        assert resolve_sender_uid(a) == "qq:123"
+        assert resolve_sender_uid(b) == "telegram:123"
+        assert resolve_sender_uid(a) != resolve_sender_uid(b)
 
     def test_l2_raw_int_compat(self):
         # 官方 get_sender_id 只认 str，int 型 QQ 号直接拿空 → 第二层直读兜住

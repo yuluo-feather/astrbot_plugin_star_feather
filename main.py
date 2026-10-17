@@ -404,6 +404,12 @@ class StarFeatherPlugin(Star):
             return
         # message_str 属性异常/缺失时按空文本处理（保 Agent Loop 不中断）
         text = (getattr(event, "message_str", "") or "").strip()
+        # 帮助请求不占卜：模型偶尔会把「占卜怎么用」也调到这里，
+        # 命中帮助页就直发并结束，别真抽一副牌
+        if _is_help_request(text):
+            await self._tool_send(event, self._help())
+            yield "帮助页已发送。请自然回应一句，不必再调用工具。"
+            return
         if not text:
             yield "工具收到空文本：用户没说占卜什么。请回一句，引导用户说出想占卜的内容（如感情、事业、学业、今日运势）。"
             return

@@ -55,6 +55,35 @@ class TestSpiritCache:
         assert cache["sign"] == f"{PICK['card']['cn']}:1"  # 牌组指纹（卡名:正逆）
         assert cache["v"] == SPIRIT_PROMPT_V  # prompt 版本号：文案迭代旧缓存自动失效
 
+    def test_concurrent_misses_share_one_generated_line(self):
+        """同一（用户, 牌组）并发 miss：只调一次 AI，等待者拿到同一句。"""
+        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        kv, calls = {}, []
+
+        class _Ctx:
+            async def get_kv_data(self, key, default=None):
+                return kv.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                kv[key] = value
+
+        async def slow_spirit(event, cards, topic, persona_eff, budget=None):
+            calls.append(1)
+            await asyncio.sleep(0.02)   # 制造重叠窗口：两条协程都会 miss
+            return "并发同一句"
+
+        tarot = types.SimpleNamespace(interpreter=types.SimpleNamespace(spirit_line=slow_spirit))
+        df = DailyFortune(_Ctx(), tarot)
+
+        async def go():
+            return await asyncio.gather(
+                df.spirit_cached(EVENT, "u1", [PICK], "今日运势", None),
+                df.spirit_cached(EVENT, "u1", [PICK], "今日运势", None))
+
+        a, b = asyncio.run(go())
+        assert a == b == "并发同一句"
+        assert len(calls) == 1, f"并发 miss 应只调用一次 AI，实际 {len(calls)}"
+
     def test_spirit_writes_back_even_on_read_failure(self):
         """读故障仍写回——方向与 pick/interp 的 if ok 门相反，是有意的。
 
