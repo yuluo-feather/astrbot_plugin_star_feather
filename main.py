@@ -106,6 +106,42 @@ _CFG_FIELD_NAMES = ("shuffle_lines", "enable_ai", "ai_timeout", "llm_tool_enable
 # 也是一条普通链消息。这两种情形睡窗口纯属白让用户多等，故只在小节末按条件睡。
 _EPILOGUE_DELAY_SECONDS = 2.0
 
+# 收尾句后台任务的强引用集合：asyncio 只对任务持弱引用，没人引用时可能被 GC 掉，
+# 收尾句就静默丢了。任务结束（含取消/异常）由 done callback 自摘。
+_EPILOGUE_TASKS: set = set()
+
+
+async def _send_epilogue_after_window(event, text: str, delay: float) -> None:
+    """等窗口再直发收尾句。异常只告警：收尾句是赠品，不许反噬已经交付的结果。"""
+    if delay > 0:
+        await asyncio.sleep(delay)
+    try:
+        await event.send(MessageChain([Plain(text)]))
+    except Exception as e:
+        logger.warning(f"收尾句独立发送失败: {e}")
+
+
+def _schedule_epilogue(event, text: str, delay: float) -> bool:
+    """把「等窗口 + 直发」放进后台任务，命令处理协程不再为此挂起。
+
+    窗口只买「合并转发卡落地慢」这一件事：结果已经提交给平台，收尾句晚几秒到即可。
+    冻结 event 引用交给任务持有；AstrBot 的 send 只依赖事件对象与平台通道，不要求
+    handler 还活着。
+
+    契约：本函数永不抛——调度失败（循环已在收尾）只告警并返回 False，由调用方退回
+    同步直发；协程先 close 掉，免得日志里多一条 never awaited。
+    """
+    coro = _send_epilogue_after_window(event, text, delay)
+    try:
+        task = asyncio.create_task(coro)
+    except Exception as e:
+        coro.close()
+        logger.warning(f"收尾句后台任务登记失败，改用同步直发: {e}")
+        return False
+    _EPILOGUE_TASKS.add(task)
+    task.add_done_callback(_EPILOGUE_TASKS.discard)
+    return True
+
 
 def _cfg_fingerprint(plugin) -> str:
     """一行配置读数：两个对象 id 取十六进制（够比对，又不至于长得读不下去）+ 四个开关值。
@@ -614,17 +650,19 @@ class StarFeatherPlugin(Star):
         # 其收尾由 Agent Loop 的 LLM 回复承担。send 失败仅告警，不追加回结果。
         # 直发前先等一个窗口：结果这一笔「已交给平台」不等于「已经落到群里」——
         # 合并转发卡落地慢于紧随其后的纯文本，收尾句会抢在前面到（见窗口常量）。
+        # 这个窗口放在后台任务里等：handler 立刻收尾，用户不再为一句收尾多等两秒。
         if epilogue_text:
             # 只有合并转发卡需要等：卡片要在协议端上传卡内图片、拼多消息，落地慢于
             # 紧随其后的纯文本。plain / text_only 以及 AI 回退路径交付的都是普通链
             # 消息，与收尾句同一条通道，提交次序即落地次序。
             forwarded = bool(interp) and self.tarot.deliverer.forward_result
-            if forwarded and _EPILOGUE_DELAY_SECONDS > 0:
-                await asyncio.sleep(_EPILOGUE_DELAY_SECONDS)
-            try:
-                await event.send(MessageChain([Plain(epilogue_text)]))
-            except Exception as e:
-                logger.warning(f"收尾句独立发送失败: {e}")
+            scheduled = (forwarded and _EPILOGUE_DELAY_SECONDS > 0
+                         and _schedule_epilogue(event, epilogue_text, _EPILOGUE_DELAY_SECONDS))
+            if not scheduled:
+                try:
+                    await event.send(MessageChain([Plain(epilogue_text)]))
+                except Exception as e:
+                    logger.warning(f"收尾句独立发送失败: {e}")
 
 
     # ---------- 今日固定牌运（实现全在 daily.py，入口层不设转发层） ----------

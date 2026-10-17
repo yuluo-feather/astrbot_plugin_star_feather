@@ -209,10 +209,12 @@ def cleanup_stale_images(current_dir: str | None = None) -> None:
     2. mtime 超过 STALE_INSTANCE_DIR_AGE（三天没写过新东西，只当磁盘回收候选）。
 
     豁免（按优先级）：
-    - **本进程的全部实例目录一律跳过**——从名字里解析 pid，凡是 os.getpid() 的一律
-      不碰。热重载正是「同进程、两代实例」：新实例启动清理时，旧实例可能还活着、
-      图还在等发送，只跳过传入的 current_dir 是不够的（旧写法就是这么漏的，issue #21
-      ① 复核已复现）。同进程的目录里可能还有图在等发送，宁可留着让保险丝去收。
+    - **本进程的旧实例目录只回收空壳**——从名字里解析 pid，凡是 os.getpid() 的一律
+      先看里面还有没有东西：非空的可能还有图在等发送，宁可留着让保险丝去收；只有
+      已经空了的（热重载后旧实例收尾完毕）才按过期回收。热重载正是「同进程、两代
+      实例」：新实例启动清理时，旧实例可能还活着，只跳过传入的 current_dir 是不够的
+      （旧写法就是这么漏的，issue #21 ① 复核已复现）。删除用 rmdir 而不是 rmtree：
+      「非空就删不掉」交给文件系统判断，不靠自己再枚举一次。
     - current_dir 是本次传入的当前实例目录，同样永不删——即便系统时钟被往回调、
       让它的 mtime 看起来已经过期。
     跨进程的过期目录照旧回收（那些 pid 与本进程不同，是重启留下的残骸）。
@@ -245,11 +247,19 @@ def cleanup_stale_images(current_dir: str | None = None) -> None:
                 m = _INSTANCE_DIR_RE.match(name)
                 if m is None or not os.path.isdir(path):
                     continue
-                if int(m.group(1)) == own_pid:
-                    continue  # 本进程的任何一代实例目录都不碰（热重载的旧实例可能还活着）
                 if current_dir and os.path.abspath(path) == os.path.abspath(current_dir):
                     continue
-                if _is_stale(path, STALE_INSTANCE_DIR_AGE):
+                if not _is_stale(path, STALE_INSTANCE_DIR_AGE):
+                    continue
+                if int(m.group(1)) == own_pid:
+                    # 同进程的旧实例目录：非空说明可能还有图在等发送，留给保险丝；
+                    # 空壳才算残骸。rmdir 在非空时必然失败，正好当判据用。
+                    try:
+                        os.rmdir(path)
+                        reaped += 1
+                    except OSError:
+                        pass
+                else:
                     shutil.rmtree(path, ignore_errors=True)
                     reaped += 1
         except OSError as e:
