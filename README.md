@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-  <img src="https://img.shields.io/badge/version-v0.8.0-f8a5c2" alt="v0.8.0"/>
+<img src="https://img.shields.io/badge/version-v0.8.1-f8a5c2" alt="v0.8.1"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -257,6 +257,11 @@
 
 ## 📜 更新记录
 
+#### v0.8.1
+
+- 修复：升级用户的旧解读缓存超过 20 条主题时，现在会在下一次命中就把多余的最早分桶裁掉并写回——写回放在缓存锁外、最长等 2 秒，KV 挂住也不会拖住这次命中，本次命中的解读照旧返回
+- 说明：`ai_budget_seconds=0` 与 `ai_timeout=0` 同时出现时，AI 阶段就是没有上界（README 一直这么写）——v0.8.0 里「两个上界都还在」只适用于总预算非 0 或单请求超时非 0 的常规配置；要给 AI 留保护，把任意一项设成非 0 即可
+
 #### v0.8.0
 
 - 新增：单次占卜的 AI 总预算（`ai.ai_budget_seconds`，默认 120 秒）——候选重试、换供应商、结构修复共用一个截止点，见底就回退本地牌义；写 `0` 可关闭保护（日志会留一行提示）
@@ -284,12 +289,7 @@
 - 修复：起卦正好撞上插件重载或进程收尾时，不再整条丢掉——那一刻牌面图已经画好、解读也写好了，却可能一条都收不到；现在这一步失败只影响它自己，卦照常送到你手上
 - 修复：一长串「说说说说…」这样的开头不再拖住回复——从前这类文本会让消息迟迟没有回音，越长越糟，几十个字就够把这一条卡住；现在它按普通消息处理，该占卜的照常占卜
 
-#### v0.7.1
-
-- 修复：AI 报错不再吞掉整卦——AI 服务出错（超时、限流、接口报错）时，整次占卜会塌成一句「这卦起得有点乱」，牌面、牌义、签文全拿不到；现在丢的只是那两句 AI 文案，解读回退本地牌义、「牌灵的话」回退当日池内签文，牌照常算给你
-- 修复：牌面图不会再让整卦丢掉——图在发出前会先核验一次，不在了就当场补画，最坏只是没有图，解读一定到手
-
-> 更早版本（v0.7.0 及以前）的逐条明细见 [CHANGELOG.md](CHANGELOG.md) 与 `changelogs/` 目录——这里只保留最近 6 个版本的摘要。
+> 更早版本（v0.7.1 及以前）的逐条明细见 [CHANGELOG.md](CHANGELOG.md) 与 `changelogs/` 目录——这里只保留最近 6 个版本的摘要。
 
 ---
 
