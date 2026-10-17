@@ -5,6 +5,7 @@
 """
 import asyncio
 import json
+import time
 import types
 
 from data.plugins.astrbot_plugin_star_feather.daily import (
@@ -424,6 +425,28 @@ class TestDailyInterpCap:
         assert len(record["interps"]) == self.CAP
         assert list(record["interps"]) == [
             self.TOPIC.format(n) for n in range(extra - self.CAP + 1, extra + 1)]
+
+    def test_a_hung_trim_write_does_not_strand_the_cache_hit(self, monkeypatch):
+        """命中后的裁剪写回有上限：KV 写挂住也不许把用户卡在缓存命中上。"""
+        from data.plugins.astrbot_plugin_star_feather import daily as daily_mod
+        monkeypatch.setattr(daily_mod, "TRIM_WRITE_TIMEOUT", 0.05)
+        extra = self.CAP + 5
+        legacy = {self.TOPIC.format(n): f"旧解读{n}" for n in range(1, extra + 1)}
+
+        class _HangingPutKv(self._JsonKv):
+            async def put_kv_data(self, key, value):
+                await asyncio.sleep(30)      # 写挂住：维护动作不许拖住这次命中
+
+        kv = _HangingPutKv()
+        df, calls = self._daily(kv)
+        kv.raw[self.KEY] = json.dumps({"date": df.clock.today(), "interps": legacy})
+        t0 = time.monotonic()
+        hit = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK],
+                                           self.TOPIC.format(1)))
+        elapsed = time.monotonic() - t0
+        assert hit == "旧解读1"
+        assert calls == []
+        assert elapsed < 1.0, f"命中被裁剪写回拖住了：{elapsed:.2f}s"
 
     def test_trim_touches_only_the_bucket_bag(self):
         """裁剪只动 interps：记录里的日期与当天抽好的牌一律不动。

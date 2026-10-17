@@ -16,7 +16,6 @@ MIN_AI_TIMEOUT = 5              # 非 0 取值的下限：不足 5 秒按 5 秒�
 DEFAULT_AI_BUDGET = 120         # 单次占卜的 AI 总预算（秒，ai.ai_budget_seconds）：所有 AI 阶段共用一个截止点
 AI_BUDGET_MIN_ATTEMPT = 1.0     # 剩余预算不足此值（秒）就不再发起新请求——注定超时，只是白等一次
 DEFAULT_SPIRIT_STAGE_BUDGET = 20  # 牌灵的话的阶段上限（秒）：次要内容不许独吞整笔预算
-DEFAULT_INTERPRET_STAGE_BUDGET = DEFAULT_AI_BUDGET  # 解读阶段上限（秒）：总预算关闭时仍给解读一个有界等待
 DEFAULT_DISCLAIMER = "✨ 占卜仅供娱乐参考，选择权永远在你手里。"  # 免责声明默认文案（output.disclaimer，空字符串=不显示）
 DEFAULT_AI_COOLDOWN = 60        # AI 解读失败后的冷却（秒），按 Provider 粒度：挂掉的模型只冷却自己，其余照常服务
 DEFAULT_AI_PERSONA = "random"   # 牌灵人设（ai.persona）：off=中立 / tsundere 傲娇 / gentle 温柔 / mystic 神秘 / random 每次随机

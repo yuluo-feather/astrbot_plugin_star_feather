@@ -173,6 +173,9 @@ _GENERIC_TOPIC = "（今日牌运）"
 # 20 的口径：一次占卜一问一桶，20 桶＝一天换 20 个话题仍留得住；真要压成本，
 # 该动的是 limit.daily_count（限流），而不是把缓存做大。
 DAILY_INTERP_MAX = 20
+# 命中路径的裁剪写回上限（秒）：命中已经拿到答案，维护动作最多等这么久；超时就
+# 放弃本次写回（下次命中再收口），绝不把用户的消息堵在一次慢 KV 写后面。
+TRIM_WRITE_TIMEOUT = 2.0
 
 
 def _trim_interp_slots(slots: dict) -> None:
@@ -334,6 +337,21 @@ class DailyFortune:
                 logger.warning("每日牌运缓存不可用，改由确定性函数直接出牌")
         return _daily_result(card, upright)
 
+    async def _persist_trim(self, key: str, data: dict) -> None:
+        """把命中路径裁好的分桶写回：失败/超时只记一行，不影响这次已经拿到的解读。
+
+        维护性写回不能变成新的卡点——KV 偶发挂住时，用户要的是一句现成的解读，
+        不是等一次缓存整理。超时就放弃，下次命中重新收口。
+        """
+        try:
+            await asyncio.wait_for(
+                kv_put(self.kv_store, key, data, "每日牌运解读缓存"),
+                timeout=TRIM_WRITE_TIMEOUT)
+        except asyncio.TimeoutError:
+            logger.warning("解读缓存裁剪写回超时（本次命中不受影响，下次命中再收口）")
+        except Exception as e:
+            logger.warning(f"解读缓存裁剪写回失败（本次命中不受影响）: {e}")
+
     async def interp_cached(self, event, uid: str, formation: str, positions: list[str],
                             picks: list[dict], clean: str,
                             persona_eff=None, budget=None) -> str | None:
@@ -354,23 +372,28 @@ class DailyFortune:
         topic = _norm_topic(clean)
         key, today = f"sf_daily_{uid}", self.clock.today()
         # 命中判定原子化；写回另起一次锁（AI 调用不占锁，见下）
+        hit = None
+        pending_trim = None
         async with self._kv_lock:
             data, ok = await kv_get(self.kv_store, key, None, "每日牌运解读缓存")
             if ok and isinstance(data, dict) and data.get("date") == today:
                 slots = data.get("interps")
                 if isinstance(slots, dict):
+                    hit = slots.get(topic)
                     # 读侧也裁（⑧ 补）：上限是 v0.8.0 才有的，升级用户的持久化分桶可能
                     # 早就超过 DAILY_INTERP_MAX；只在「写入新解读之后」裁剪的话，只问
-                    # 老主题的人会把这本超大字典一直留着。裁剪结果写回，但本次命中仍按
-                    # 原桶返回——不为了缩结构把用户已经在等的那段解读丢掉。
-                    if len(slots) > DAILY_INTERP_MAX:
+                    # 老主题的人会把这本超大字典一直留着。裁剪结果写回，但写回放到锁外
+                    # 且有上限（见 _persist_trim）：命中已经拿到答案，一次慢 KV 写不许
+                    # 把这句解读压在手里；本次命中的原文照旧返回。
+                    if hit and len(slots) > DAILY_INTERP_MAX:
                         trimmed = dict(slots)
                         _trim_interp_slots(trimmed)
-                        data = dict(data)
-                        data["interps"] = trimmed
-                        await kv_put(self.kv_store, key, data, "每日牌运解读缓存")
-                    if slots.get(topic):
-                        return slots[topic]
+                        pending_trim = dict(data)
+                        pending_trim["interps"] = trimmed
+        if hit:
+            if pending_trim is not None:
+                await self._persist_trim(key, pending_trim)
+            return hit
         interp = await _ai_output(
             self.tarot._ai_interpret(
                 event, formation, positions, picks, clean or "（今日牌运）",
@@ -412,10 +435,11 @@ class DailyFortune:
                 # 红线：tests/test_core.py::TestDailyNullInterp
                 if interp:
                     data["interps"][topic] = interp
-                    # 写入后裁剪（⑧）：超过 DAILY_INTERP_MAX 就丢最早插入的那桶。
-                    # 裁剪在写入之后、写回之前——读写两侧看到的都是同一个形状，命中判定
-                    # 不必额外考虑「桶还在不在」
-                    _trim_interp_slots(data["interps"])
+                # 写回前一律裁剪（⑧）：超过 DAILY_INTERP_MAX 就丢最早插入的那桶。
+                # 放在 if 之外兜底：AI 失败（interp 为空、只刷新结构）时，旧超大字典
+                # 也不会被原样写回去。裁剪在写回之前——读写两侧看到同一个形状，命中
+                # 判定不必额外考虑「桶还在不在」
+                _trim_interp_slots(data["interps"])
                 await kv_put(self.kv_store, key, data, "每日牌运解读缓存")
         return interp
 
