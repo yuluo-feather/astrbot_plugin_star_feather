@@ -22,7 +22,7 @@ import re
 #      重载时永远清不到它——旧模块赖在 sys.modules 里、新名字（如 TOOL_EPILOGUE）读不到，
 #      于是被迫再写一段 pop 循环兜底，那是症状的症状；
 #   ② pop 清的是通用名字，同一解释器里别的插件或库若同名，会被无辜拆掉。
-# 框架的加载路径本就是 __import__("data.plugins.astrbot_plugin_star_feather.main")，包前缀
+# 框架的加载路径本就是 data.plugins.astrbot_plugin_star_feather.main 这一串包路径，包前缀
 # 已经在手上，相对导入是顺着它走，不是另开一条路。
 
 # 本插件的模块间引用（实现分别在 config / daily / gating / identity / prompts / settings / spreads）：
