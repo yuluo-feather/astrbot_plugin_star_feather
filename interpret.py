@@ -30,6 +30,7 @@ from .settings import (
     AI_BUDGET_MIN_ATTEMPT,
     DEFAULT_AI_BUDGET,
     DEFAULT_AI_PERSONA,
+    DEFAULT_INTERPRET_STAGE_BUDGET,
     DEFAULT_QUESTION_MAX_LEN,
     DEFAULT_SPIRIT_STAGE_BUDGET,
     DEFAULT_STRUCTURE_CHECK,
@@ -598,6 +599,12 @@ class AiInterpreter:
         if not self.enable_ai:
             return None
         bd = budget if budget is not None else self.new_budget()
+        # 总预算关掉（ai_budget_seconds=0）时没有跨阶段截止点；解读阶段再开一条自己的
+        # 上限（与默认总预算同值），否则 ai_timeout 也写 0 时这一步会无界等待——
+        # 「AI 卡住不再无限等」不能只在牌灵那一段成立。总预算开着时不动它：
+        # 用户配的 120/300 秒仍是唯一的总上界，别被一条隐藏阶段上限悄悄截短。
+        if not bd.limited:
+            bd.open_stage(_STAGE_INTERPRET, DEFAULT_INTERPRET_STAGE_BUDGET)
         # 清洗链路顺序（技能规范）：归一化（先行）→ 截断 → 句式剥除
         user_input = normalize_injection_input(user_input)  # 归一化先行：全角/零宽/bidi 绕行先失效
         if self.max_question_len > 0:
@@ -622,7 +629,9 @@ class AiInterpreter:
             if self._in_cooldown(pid):
                 logger.info(f"AI 解读 provider[{pid}] 处于失败冷却期，跳过")
                 continue
-            timeout = bd.step_timeout(self.ai_timeout)
+            # 阶段名一直传：总预算开着时该阶段没开上限（stage_left=None），行为不变；
+            # 总预算关掉时这一步才吃得到上面那条解读阶段上限
+            timeout = bd.step_timeout(self.ai_timeout, _STAGE_INTERPRET)
             if timeout is None:
                 self._stage_stop(bd, _STAGE_INTERPRET)
                 break  # 预算见底：剩下的候选与供应商回退都不再试（截止点不重置）

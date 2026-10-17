@@ -402,6 +402,29 @@ class TestDailyInterpCap:
         assert self.TOPIC.format(1) not in slots
         assert self.TOPIC.format(2) in slots
 
+    def test_oversized_legacy_cache_is_trimmed_on_a_cache_hit(self):
+        """升级用户的旧缓存超过上限：命中路径也要把它裁小并写回。
+
+        上限是 v0.8.0 才引入的，升级前落盘的持久化分桶可能早就超过 20 条；只在
+        「写入新解读之后」裁剪的话，只问老主题的人会一直留着这本超大字典。命中
+        照旧返回原文（不为了缩结构把用户正在等的那段丢掉），但落盘那份必须收口。
+        """
+        kv = self._JsonKv()
+        df, calls = self._daily(kv)
+        extra = self.CAP + 5
+        legacy = {self.TOPIC.format(n): f"旧解读{n}" for n in range(1, extra + 1)}
+        kv.raw[self.KEY] = json.dumps({"date": df.clock.today(), "interps": legacy})
+
+        hit = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK],
+                                           self.TOPIC.format(1)))
+        assert hit == "旧解读1"                  # 命中的就是最早那桶：照旧返回
+        assert calls == []                       # 命中不花 AI 调用
+        record = kv.record()
+        assert record["date"] == df.clock.today()
+        assert len(record["interps"]) == self.CAP
+        assert list(record["interps"]) == [
+            self.TOPIC.format(n) for n in range(extra - self.CAP + 1, extra + 1)]
+
     def test_trim_touches_only_the_bucket_bag(self):
         """裁剪只动 interps：记录里的日期与当天抽好的牌一律不动。
 

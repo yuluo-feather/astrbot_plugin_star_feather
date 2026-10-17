@@ -358,8 +358,19 @@ class DailyFortune:
             data, ok = await kv_get(self.kv_store, key, None, "每日牌运解读缓存")
             if ok and isinstance(data, dict) and data.get("date") == today:
                 slots = data.get("interps")
-                if isinstance(slots, dict) and slots.get(topic):
-                    return slots[topic]
+                if isinstance(slots, dict):
+                    # 读侧也裁（⑧ 补）：上限是 v0.8.0 才有的，升级用户的持久化分桶可能
+                    # 早就超过 DAILY_INTERP_MAX；只在「写入新解读之后」裁剪的话，只问
+                    # 老主题的人会把这本超大字典一直留着。裁剪结果写回，但本次命中仍按
+                    # 原桶返回——不为了缩结构把用户已经在等的那段解读丢掉。
+                    if len(slots) > DAILY_INTERP_MAX:
+                        trimmed = dict(slots)
+                        _trim_interp_slots(trimmed)
+                        data = dict(data)
+                        data["interps"] = trimmed
+                        await kv_put(self.kv_store, key, data, "每日牌运解读缓存")
+                    if slots.get(topic):
+                        return slots[topic]
         interp = await _ai_output(
             self.tarot._ai_interpret(
                 event, formation, positions, picks, clean or "（今日牌运）",

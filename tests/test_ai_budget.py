@@ -24,6 +24,7 @@ from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
 from data.plugins.astrbot_plugin_star_feather.interpret import AiBudget, AiInterpreter
 from data.plugins.astrbot_plugin_star_feather.settings import (
     DEFAULT_AI_BUDGET,
+    DEFAULT_INTERPRET_STAGE_BUDGET,
     DEFAULT_SPIRIT_STAGE_BUDGET,
 )
 from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
@@ -573,6 +574,28 @@ class TestCandidateFetchWithinBudget:
         prov = FakeProvider("p0", result=OK_INTERP)
         it = AiInterpreter(_SlowContext(using=prov, delay=1.5), ai_timeout=1, ai_budget=0)
         assert self._run(it, AiBudget(0)) == OK_INTERP
+
+    def test_zero_budget_and_zero_timeout_still_bound_the_reading_stage(self, monkeypatch):
+        """ai_budget_seconds=0 + ai_timeout=0：解读阶段仍有一条有限上限。
+
+        v0.8.0 的口径是「总预算与牌灵阶段上限都在，最坏耗时照旧有界」，但两个 0
+        同时出现时，解读阶段既没有总预算也没有阶段上限——候选来源或供应商装死就是
+        真正的无界等待。总预算关闭时给解读开一条与默认总预算同值的阶段上限。
+        """
+        clk = Clock()
+        it = _interp([FakeProvider("p0", result=OK_INTERP)], ai_timeout=0, ai_budget=0)
+        seen = _spy_chat(monkeypatch, clk, 0, {"p0": OK_INTERP})
+        assert self._run(it, AiBudget(0, clk)) == OK_INTERP
+        assert seen == [("p0", float(DEFAULT_INTERPRET_STAGE_BUDGET))]
+
+    def test_slow_candidate_source_is_capped_when_budget_is_off(self, monkeypatch):
+        """总预算关掉时，取候选这一步也在解读阶段上限之内（不只看单次超时）。"""
+        monkeypatch.setattr(interpret_mod, "DEFAULT_INTERPRET_STAGE_BUDGET", 0.3)
+        it = AiInterpreter(_SlowContext(delay=5.0), ai_timeout=0, ai_budget=0)
+        t0 = time.monotonic()
+        assert self._run(it, AiBudget(0)) is None
+        elapsed = time.monotonic() - t0
+        assert elapsed < 3.0, f"取候选没被解读阶段上限收住：等了 {elapsed:.2f}s"
 
     def test_candidate_fetch_timeout_does_not_freeze_the_provider(self):
         """取候选超时 ≠ 模型服务故障：不许把它记进失败冷却、拖累后面的占卜。"""
