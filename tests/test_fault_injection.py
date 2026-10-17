@@ -630,6 +630,27 @@ class TestImageGoneBeforeSend:
         assert _run(p._ensure_image(stale, self.FORMATION, self.POSITIONS, [PICK])) == fresh
         assert calls == [self.FORMATION], "消失的图必须补渲染一次"
 
+    def test_verify_image_treats_other_oserrors_as_missing(self, tmp_path, monkeypatch):
+        """权限 / 路径非法等 OSError 同样走补渲染：未核验的路径不交给发送侧。"""
+        stale = str(tmp_path / "tarot_unreadable.png")
+        fresh = str(tmp_path / "tarot_fresh2.png")
+
+        def render():
+            open(fresh, "wb").write(b"PNG")
+            return fresh
+
+        p, calls = self._plugin(render)
+        real_getsize = os.path.getsize
+
+        def denied(path):
+            if path == stale:
+                raise PermissionError(13, "denied", path)
+            return real_getsize(path)
+
+        monkeypatch.setattr(os.path, "getsize", denied)
+        assert _run(p._ensure_image(stale, self.FORMATION, self.POSITIONS, [PICK])) == fresh
+        assert calls == [self.FORMATION], "问不出大小的图必须补渲染一次"
+
 
 # ============ ② 图片后置渲染：渲染排在两段 AI 之后（2026-10-12） ============
 class TestRenderAfterBothAI:

@@ -119,6 +119,10 @@ class TestTarotSettings:
         assert TarotSettings({"ai": {"ai_budget_seconds": 0.5}}).ai_budget == 1
         assert TarotSettings({"ai": {"ai_budget_seconds": True}}).ai_budget == DEFAULT_AI_BUDGET
         assert TarotSettings({"ai": {"ai_budget_seconds": float("inf")}}).ai_budget == DEFAULT_AI_BUDGET
+        # 超大整数（float 溢出）与下溢成 -0.0 的极小负数都不许变成「不限制」
+        assert TarotSettings({"ai": {"ai_budget_seconds": 10 ** 400}}).ai_budget == DEFAULT_AI_BUDGET
+        assert TarotSettings({"ai": {"ai_budget_seconds": "-1e-9999"}}).ai_budget == DEFAULT_AI_BUDGET
+        assert TarotSettings({"ai": {"ai_budget_seconds": -0.0}}).ai_budget == DEFAULT_AI_BUDGET
 
     def test_legacy_flat_still_loads(self):
         # 升级前扁平配置：分组缺失时回退顶层读取

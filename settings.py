@@ -6,6 +6,8 @@ StarTarot / AiInterpreter / Deliverer 只消费解析后的数值，不碰配置
 
 ——默认值、迁移规则都只在这里维护，其他地方别自作主张。
 """
+import math
+
 from .config import _cfg_bool, _cfg_get, _cfg_int
 
 # ---- 默认值常量：集中管理散落的默认值 / 间隔（改默认值只找这一处） ----
@@ -65,6 +67,29 @@ def resolve_send_mode(config) -> str:
     return mode if mode in SEND_MODES else DEFAULT_SEND_MODE
 
 
+def _budget_seconds(raw, default: int = DEFAULT_AI_BUDGET) -> int:
+    """AI 总预算归一：**只有显式 0 = 不限制**，其余坏值一律回退默认值。
+
+    坏值的完整清单（2026-10-17 两轮复核）：负数（含下溢成 ``-0.0`` 的极小负数）、
+    NaN / inf、布尔、超大整数（``float()`` 溢出）、非数字。小数至少按 1 秒算——
+    ``0.5`` 被截成 0 就等于「不限制」，不能用取整把保护悄悄关掉。
+    """
+    if isinstance(raw, bool):
+        return default
+    try:
+        num = float(raw)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    if math.isnan(num) or math.isinf(num):
+        return default
+    # -0.0 要单独判：`-0.0 < 0` 是 False，漏掉就会把极小负数当成显式 0
+    if num < 0 or (num == 0 and math.copysign(1.0, num) < 0):
+        return default
+    if num == 0:
+        return 0
+    return max(1, int(num))
+
+
 class TarotSettings:
     """一份配置的解析结果：字段即插件运行所需的全部配置值。
 
@@ -95,22 +120,10 @@ class TarotSettings:
         self.ai_timeout = (_raw_timeout if _raw_timeout == 0
                            else max(MIN_AI_TIMEOUT, _raw_timeout))
         self.ai_cooldown = _cfg_int(config, "ai", "ai_fail_cooldown", DEFAULT_AI_COOLDOWN)
-        # 单次占卜的 AI 总预算（秒）：**只有显式 0 = 不限制**（关掉总预算保护，
-        # AiInterpreter 构造时会打一条 warning）。其余值必须是有限、非布尔的数值：
-        # 负数 / NaN / inf / 非数字回退默认值；小数至少按 1 秒算——0.5 被截成 0
-        # 等于「不限制」，不能用取整把保护悄悄关掉（2026-10-17 复核）。
-        _raw_budget = _cfg_get(config, "ai", "ai_budget_seconds", DEFAULT_AI_BUDGET)
-        if isinstance(_raw_budget, bool):
-            _raw_budget = DEFAULT_AI_BUDGET
-        try:
-            _budget_num = float(_raw_budget)
-        except (TypeError, ValueError):
-            _budget_num = float(DEFAULT_AI_BUDGET)
-        if _budget_num != _budget_num or _budget_num in (float("inf"), float("-inf")):
-            _budget_num = float(DEFAULT_AI_BUDGET)
-        if _budget_num < 0:
-            _budget_num = float(DEFAULT_AI_BUDGET)
-        self.ai_budget = 0 if _budget_num == 0 else max(1, int(_budget_num))
+        # 单次占卜的 AI 总预算（秒）：归一规则全在 _budget_seconds 里——只有显式 0
+        # 表示「不限制」，其余坏值一律回退默认，别让取整/溢出把保护悄悄关掉
+        self.ai_budget = _budget_seconds(
+            _cfg_get(config, "ai", "ai_budget_seconds", DEFAULT_AI_BUDGET))
         # 自然语言入口开关：默认值在 settings，工具注册是静态的，开关只在运行期判断（见 main.divine_tool）
         self.llm_tool_enabled = _cfg_bool(config, "tool", "llm_tool_enabled", True)
         self.llm_tool_cooldown = _cfg_int(config, "tool", "llm_tool_cooldown",

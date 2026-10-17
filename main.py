@@ -493,16 +493,18 @@ class StarFeatherPlugin(Star):
         if not isinstance(img, str) or not img:
             return img  # 本就无图（text_only / 渲染失败）：无需核验，别白跑一次渲染
         try:
-            # 存在且非空：getsize 一次调用同时判「在不在」与「是不是空」——
-            # 分成 exists + getsize 两步时，文件可能正好在两步之间被删掉，
-            # FileNotFoundError 会被下面的 OSError 吞成「当作还在」。
-            if os.path.getsize(img) > 0:
-                return img
-        except FileNotFoundError:
-            pass  # 刚好在这一刻被删：按缺失处理，走下面的补渲染
-        except OSError:
-            return img  # 路径本身问不出来（权限/长度等）：交给发送侧，别在这里改语义
-        logger.warning(f"牌面图在发送前已不存在或为空（多半是 AI 耗时超过清理保险丝）：{img}")
+            # getsize 一次调用同时判「在不在」与「是不是空」：分成 exists + getsize
+            # 两步时，文件可能正好在两步之间被删掉。
+            size = os.path.getsize(img)
+        except OSError as e:
+            # 删除、权限、路径非法……只要问不出「非空文件」就当缺失处理，统一走
+            # 下面的补渲染：把未核验的路径交给发送侧只会让整条消息被打回
+            size, why = 0, f"核验失败：{e}"
+        else:
+            why = "是空文件"
+        if size > 0:
+            return img
+        logger.warning(f"牌面图在发送前不可用（{why}）：{img}")
         try:
             new_img = await self.tarot._maybe_render_image(formation, positions, picks)
         except Exception as e:
