@@ -1,0 +1,48 @@
+# 依赖安全巡检：每周一次 pip-audit，把「已知 CVE」从人工记忆里挪进 CI。
+#
+# 为什么单开一条 workflow、不塞进 ci.yml：
+#   - 它查的是「今天上游的依赖有没有新披露」，与我们某次提交是否改坏代码无关；
+#     跟 push / PR 绑在一起，只会让人为一次与本次改动无关的红灯停手；
+#   - 红要能看见：这一格红了 = 该抬下限或换依赖了。R31b 那次 Pillow 从「0 条」
+#     变成「35 条」就是人工翻出来的，往后交给它定期自己说。
+#
+# 口径：audit 的是 requirements.txt 解析出来的那几版（用户装插件真正会拿到的一档），
+# 不是本机运行环境。没发现 -> 绿；发现任一条目 -> 红（含上游暂无修复的）。
+# 真要「接受某条风险」，再加 --ignore-vuln <ID>，并在账本写清为什么，别默默放宽。
+name: 依赖安全巡检
+
+on:
+  schedule:
+    - cron: "17 1 * * 1"   # 每周一 01:17 UTC = 09:17 CST
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: pip-audit (requirements.txt)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: 装审计工具
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pip-audit
+      - name: 现采解析到的版本（排障用）
+        run: |
+          python -m pip install -r requirements.txt
+          python -c "import sys, PIL; print('py', sys.version.split()[0], '| Pillow', PIL.__version__)"
+      # requirements.txt 带中文注释（UTF-8）：pip-audit 读它时用系统默认编码，
+      # Windows 的 cp936 会在中文上炸（本机实测 UnicodeDecodeError），ubuntu 默认
+      # UTF-8 没事。显式给 PYTHONUTF8 是给「本机复算」留一条同样的路。
+      - name: pip-audit
+        env:
+          PYTHONUTF8: "1"
+        run: python -m pip_audit -r requirements.txt
