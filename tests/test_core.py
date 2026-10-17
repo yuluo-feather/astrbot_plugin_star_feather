@@ -593,6 +593,9 @@ def no_epilogue_delay(monkeypatch):
 class _FakeTarot:
     """只实现 _run_reading 依赖的方法；_deliver 同步收拢所有输出。"""
     send_mode = "plain"  # 匹配真实现的发图判断（text_only 不渲染）
+    # 收尾句窗口只看这一处判据（真实现 = send_mode == "forward"）；桩走 plain，
+    # 与 send_mode 保持一致，免得桩自身比生产更宽松
+    deliverer = types.SimpleNamespace(forward_result=False)
     ai_persona = "off"  # 牌灵人设：main 的 resolve_persona 从这里取
 
     def new_budget(self):
@@ -2288,3 +2291,71 @@ class TestEpilogueWindow:
         assert [k for k, _ in order] == ["yield", "window", "send"], f"次序不对：{order!r}"
         assert order[1][1] == sf_main._EPILOGUE_DELAY_SECONDS
         assert order[-1][1] in RESULT_EPILOGUE
+
+    @staticmethod
+    def _harness(monkeypatch, interp_text):
+        """最小 _run_reading 链路：只关心「窗口有没有睡」，返回 (plugin, event, order)。"""
+        from data.plugins.astrbot_plugin_star_feather import main as sf_main
+        from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
+        order = []
+
+        async def fake_sleep(seconds):
+            order.append(("window", seconds))
+
+        monkeypatch.setattr(sf_main, "asyncio", types.SimpleNamespace(sleep=fake_sleep))
+        t = StarTarot(FakeContext(None), None)
+
+        async def fake_interp(event, formation, positions, picks, clean,
+                              persona_eff=None, budget=None):
+            return interp_text
+
+        async def fake_render(formation, positions, picks, *a):
+            return None
+
+        t._ai_interpret = fake_interp
+        t._maybe_render_image = fake_render
+        p = StarFeatherPlugin.__new__(StarFeatherPlugin)
+        p.tarot = t
+        p._shuffle_hint = lambda: None
+
+        async def fake_spirit(event, uid, picks, clean, persona_eff, budget=None):
+            from time import strftime
+            return pick_signature(picks[0]["card"], picks[0]["upright"],
+                                  uid, strftime("%Y%m%d"))
+
+        p.daily = types.SimpleNamespace(spirit_cached=fake_spirit)
+        evt = types.SimpleNamespace()
+        evt.result = None
+        evt.get_self_id = lambda: "12345"
+
+        def chain_result(chain):
+            evt.result = chain
+            order.append(("yield", None))
+            return chain
+
+        evt.chain_result = chain_result
+
+        async def send(chain):
+            order.append(("send", chain.chain[0].text))
+
+        evt.send = send
+        return p, evt, order
+
+    def test_no_window_when_delivery_is_plain(self, monkeypatch):
+        """窗口只买「合并转发卡落地慢」这一件事；plain / text_only 与收尾句同走纯文本通道，
+        提交次序即落地次序，再睡 2 秒就是白等。"""
+        p, evt, order = self._harness(
+            monkeypatch, "【第1张·过去】一段过去。\n【总结】结论。")
+        p.tarot.send_mode = "plain"
+        p.tarot.deliverer.forward_result = False
+        self._collect(p._run_reading(evt, "羽时三刻", ["过去"], [PICK], "问感情",
+                                     epilogue=True))
+        assert [k for k, _ in order] == ["yield", "send"], f"plain 模式不该睡窗口：{order!r}"
+
+    def test_no_window_when_ai_falls_back(self, monkeypatch):
+        """AI 全失败回退本地牌义时，结果同样是一条普通链消息（不是 Nodes），
+        转发卡那条理由不成立，别让用户多等一个窗口。"""
+        p, evt, order = self._harness(monkeypatch, None)
+        self._collect(p._run_reading(evt, "羽时三刻", ["过去"], [PICK], "问感情",
+                                     epilogue=True))
+        assert [k for k, _ in order] == ["yield", "send"], f"回退路径不该睡窗口：{order!r}"
