@@ -604,6 +604,32 @@ class TestImageGoneBeforeSend:
         p.tarot._maybe_render_image = boom
         assert _run(p._ensure_image(missing, self.FORMATION, self.POSITIONS, [PICK])) is None
 
+    def test_verify_image_treats_a_vanishing_file_as_missing(self, tmp_path, monkeypatch):
+        """exists 与 getsize 之间的竞态：getsize 抛 FileNotFoundError 也要走补渲染。
+
+        两步式写法（先 exists 再 getsize）会让「正好在两步之间被外部删掉」落进
+        宽泛的 OSError 分支、把过期路径当健康图交出去。现在只调一次 getsize，
+        FileNotFoundError 按缺失处理；其他 OSError（权限/长度）维持原语义。
+        """
+        stale = str(tmp_path / "tarot_race.png")
+        fresh = str(tmp_path / "tarot_fresh.png")
+
+        def render():
+            open(fresh, "wb").write(b"PNG")
+            return fresh
+
+        p, calls = self._plugin(render)
+        real_getsize = os.path.getsize
+
+        def flaky(path):
+            if path == stale:
+                raise FileNotFoundError(path)
+            return real_getsize(path)
+
+        monkeypatch.setattr(os.path, "getsize", flaky)
+        assert _run(p._ensure_image(stale, self.FORMATION, self.POSITIONS, [PICK])) == fresh
+        assert calls == [self.FORMATION], "消失的图必须补渲染一次"
+
 
 # ============ ② 图片后置渲染：渲染排在两段 AI 之后（2026-10-12） ============
 class TestRenderAfterBothAI:

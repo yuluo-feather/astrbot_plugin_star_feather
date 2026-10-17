@@ -440,7 +440,7 @@ class TestCommandEntry:
         evt = self._evt()
         out = self._collect(p._command_entry(evt, "帮助",
                                              err_tpl="占卜断了，换个时候再来。", helpable=True))
-        assert out and isinstance(out[0], str) and "星羽塔罗" in out[0]
+        assert out == [p._help()], "帮助页只能产出一条，别在它后面再补一次抽牌"
         assert ("should_call_llm", True) in evt.calls
         assert ("stop_event",) not in evt.calls
 
@@ -463,6 +463,13 @@ class TestCommandEntry:
             err_tpl="占卜断了，换个时候再来。", helpable=True))
         assert out and out[0] == "res"  # 走正常抽牌流程而非帮助文本
         assert "星羽塔罗" not in out[0]
+
+    def test_single_help_returns_help_page(self):
+        """/单抽 帮助 与 /占卜 一样走帮助页，而不是真抽一张牌。"""
+        p = self._plugin()
+        evt = self._evt()
+        out = self._collect(p.single(evt, "帮助"))
+        assert out == [p._help()], f"帮助页应当只产出这一条，实际 {len(out)} 条"
 
     def test_error_path_hides_exception_details(self):
         # 安全回归：异常（路径/内部结构）只进日志，用户提示保持友好文案

@@ -64,6 +64,11 @@ async def _delayed_remove(path: str, delay: int = IMAGE_TTL_SECONDS) -> None:
         pass  # 已被启动清理/其他路径处理，无需管
 
 
+# 清理任务的强引用集合：asyncio 只对任务持弱引用，没人引用时任务可能被 GC 掉，
+# 保险丝就静默失效了。任务结束（含取消/异常）由 done callback 自摘。
+_CLEANUP_TASKS: set = set()
+
+
 def _schedule_image_cleanup(img: str | None, delay: int = IMAGE_TTL_SECONDS) -> None:
     """图片产生点即绑定清理（而不是绑定发送出口）：无论后续走 AI 成功、
     文字兜底还是异常中断，任务都已在渲染成功后注册完毕；
@@ -88,16 +93,19 @@ def _schedule_image_cleanup(img: str | None, delay: int = IMAGE_TTL_SECONDS) -> 
         asyncio.get_running_loop()
     except RuntimeError:
         return  # 无事件循环（测试环境）：不创建协程，避免悬空；启动清理兜底
-    task = _delayed_remove(img, delay)
+    coro = _delayed_remove(img, delay)
     try:
-        asyncio.create_task(task)
+        task = asyncio.create_task(coro)
     except Exception as e:
         # 循环已在收尾（AstrBot 热重载 / 进程退出）：get_running_loop 还答得出话，
         # create_task 却抛 RuntimeError('cannot schedule new futures after shutdown')。
         # 先 close 掉刚建出来的协程——不关就是一条「never awaited」告警进日志，
         # 明明只是少个保险丝，别顺手往日志里丢噪声。
-        task.close()
+        coro.close()
         logger.warning(f"牌面图清理登记失败（保险丝失效，图留待启动清理）: {e}")
+        return
+    _CLEANUP_TASKS.add(task)
+    task.add_done_callback(_CLEANUP_TASKS.discard)
 
 
 # ---------- 实例图片目录：每个插件实例一份，互不打扫对方 ----------

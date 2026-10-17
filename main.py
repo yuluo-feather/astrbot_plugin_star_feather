@@ -360,6 +360,7 @@ class StarFeatherPlugin(Star):
         async for r in self._command_entry(
                 event, text,
                 err_tpl="单抽断线了。牌灵今天不太配合，晚点再试。",
+                helpable=True,
                 force_daily=True, fixed_formation="羽签",
                 empty_fallback="（今日牌运）"):
             yield r
@@ -481,7 +482,7 @@ class StarFeatherPlugin(Star):
         （ai.ai_budget_seconds，默认 120s），把窗口上界从「没有上界」收到预算量级；
         同日 ② 图片后置渲染把渲染点搬到两段 AI 之后，窗口进一步收到毫秒级。
         本函数**只判文件在不在、不判图片年龄**，因此它守的从来不是「图会不会过期」，
-        而是「这一秒钟拿到的图真的能打开」——即清理定时器（600s 保险丝）之外，
+        而是「这一秒钟拿到的图存在且非空」——即清理定时器（600s 保险丝）之外，
         外部因素（磁盘清理、别的进程、人工 rm）在最后几毫秒里删掉文件也在它的职责内。
 
         所以清理定时器只当保险丝，真正的判据落在发送前这一刻：距离平台读取只剩
@@ -492,11 +493,16 @@ class StarFeatherPlugin(Star):
         if not isinstance(img, str) or not img:
             return img  # 本就无图（text_only / 渲染失败）：无需核验，别白跑一次渲染
         try:
-            if os.path.exists(img):
+            # 存在且非空：getsize 一次调用同时判「在不在」与「是不是空」——
+            # 分成 exists + getsize 两步时，文件可能正好在两步之间被删掉，
+            # FileNotFoundError 会被下面的 OSError 吞成「当作还在」。
+            if os.path.getsize(img) > 0:
                 return img
+        except FileNotFoundError:
+            pass  # 刚好在这一刻被删：按缺失处理，走下面的补渲染
         except OSError:
             return img  # 路径本身问不出来（权限/长度等）：交给发送侧，别在这里改语义
-        logger.warning(f"牌面图在发送前已不存在（多半是 AI 耗时超过清理保险丝）：{img}")
+        logger.warning(f"牌面图在发送前已不存在或为空（多半是 AI 耗时超过清理保险丝）：{img}")
         try:
             new_img = await self.tarot._maybe_render_image(formation, positions, picks)
         except Exception as e:

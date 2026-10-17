@@ -55,7 +55,7 @@
 | 🃏 Quick draw | `/单抽` | Today's fixed fortune: one card per person per day, reset at midnight. The reading is per topic and holds for the day. You get a poster card — card art, date, the spirit's line, sign-off. |
 | ❓ Help | `/占卜 帮助` / `/占卜 help` | Show usage. |
 
-> 💡 **How to trigger it**: in private chat, `占卜 问题` is enough (`/占卜 问题` works as well). In a group, @ the bot. Set a wake word under WebUI → Settings → Wake Words and `wake-word 占卜 问题` will do it. Bare text with neither wake word nor @ stays quiet — the framework owns the gate; reading the cards is my job.
+> 💡 **How to trigger it**: in private chat, `占卜 问题` is enough (`/占卜 问题` works as well). In a group, @ the bot. Set a wake word under WebUI → Settings → Wake Words and `wake-word 占卜 问题` will do it. In a group, bare text with neither a wake word nor an @ stays quiet — the framework owns the gate; reading the cards is my job.
 
 ### 🧩 Multiple bots
 

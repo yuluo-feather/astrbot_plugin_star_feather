@@ -108,6 +108,18 @@ class TestTarotSettings:
         assert TarotSettings({"ai": {"ai_timeout": 5}}).ai_timeout == 5
         assert TarotSettings({"ai": {"ai_timeout": 30}}).ai_timeout == 30
 
+    def test_ai_budget_only_explicit_zero_means_unlimited(self):
+        """只有显式 0 = 不限制；负数/非数字回退默认值（-10 不许被夹成 0）。"""
+        from data.plugins.astrbot_plugin_star_feather.settings import DEFAULT_AI_BUDGET
+        assert TarotSettings({"ai": {"ai_budget_seconds": 0}}).ai_budget == 0
+        assert TarotSettings({"ai": {"ai_budget_seconds": -10}}).ai_budget == DEFAULT_AI_BUDGET
+        assert TarotSettings({"ai": {"ai_budget_seconds": "oops"}}).ai_budget == DEFAULT_AI_BUDGET
+        assert TarotSettings({"ai": {"ai_budget_seconds": 300}}).ai_budget == 300
+        # 小数不能被截成 0（0.5 秒 -> 至少 1 秒），布尔 / inf 一律回退默认值
+        assert TarotSettings({"ai": {"ai_budget_seconds": 0.5}}).ai_budget == 1
+        assert TarotSettings({"ai": {"ai_budget_seconds": True}}).ai_budget == DEFAULT_AI_BUDGET
+        assert TarotSettings({"ai": {"ai_budget_seconds": float("inf")}}).ai_budget == DEFAULT_AI_BUDGET
+
     def test_legacy_flat_still_loads(self):
         # 升级前扁平配置：分组缺失时回退顶层读取
         s = TarotSettings({"show_image": False, "forward_result": True})
