@@ -101,6 +101,9 @@ _CFG_FIELD_NAMES = ("shuffle_lines", "enable_ai", "ai_timeout", "llm_tool_enable
 # 前面到达（2026-10-13 实测：命令入口 5/5 倒序，工具入口 5/5 正常；进程内次序经探针
 # 核对是「结果先提交、收尾句后提交」，所以差别只在落地这一步）。
 # 现场调参口径：顺序正常 = 窗口够；仍倒序 = 这个值调大（卡片滞后的真实量级尚未测）。
+# 适用范围：只有「合并转发」需要这个窗口。plain / text_only 的结果与收尾句同走
+# 一条纯文本（或单条链）通道，提交次序即落地次序；AI 全失败回退本地牌义时交付的
+# 也是一条普通链消息。这两种情形睡窗口纯属白让用户多等，故只在小节末按条件睡。
 _EPILOGUE_DELAY_SECONDS = 2.0
 
 
@@ -598,7 +601,11 @@ class StarFeatherPlugin(Star):
         # 直发前先等一个窗口：结果这一笔「已交给平台」不等于「已经落到群里」——
         # 合并转发卡落地慢于紧随其后的纯文本，收尾句会抢在前面到（见窗口常量）。
         if epilogue_text:
-            if _EPILOGUE_DELAY_SECONDS > 0:
+            # 只有合并转发卡需要等：卡片要在协议端上传卡内图片、拼多消息，落地慢于
+            # 紧随其后的纯文本。plain / text_only 以及 AI 回退路径交付的都是普通链
+            # 消息，与收尾句同一条通道，提交次序即落地次序。
+            forwarded = bool(interp) and self.tarot.deliverer.forward_result
+            if forwarded and _EPILOGUE_DELAY_SECONDS > 0:
                 await asyncio.sleep(_EPILOGUE_DELAY_SECONDS)
             try:
                 await event.send(MessageChain([Plain(epilogue_text)]))
