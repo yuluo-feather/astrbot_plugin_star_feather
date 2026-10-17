@@ -383,7 +383,7 @@ class TestInstanceImageDir:
 
     def test_daily_keeps_empty_image_dir_instead_of_shared_root(self, tmp_path, monkeypatch):
         """空路径是「本次降级为无图」的信号：不许用 `or` 换成共享根目录（①的边界）。"""
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from daily import DailyFortune
         monkeypatch.setattr(card_render, "IMAGE_DIR_ROOT", str(tmp_path / "star_feather"))
         tarot = types.SimpleNamespace(image_dir="")
         assert DailyFortune(None, tarot).image_dir == ""
@@ -404,8 +404,9 @@ class TestReloadIsolationEndToEnd:
     @staticmethod
     def _pair(tmp_path, monkeypatch):
         """同进程两代实例（真 StarTarot：image_dir 由 new_instance_image_dir 开出）。"""
-        from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
         from stubs import FakeContext
+
+        from tarot_core import StarTarot
         monkeypatch.setattr(card_render, "IMAGE_DIR_ROOT", str(tmp_path / "star_feather"))
         return StarTarot(FakeContext(None), None), StarTarot(FakeContext(None), None)
 
