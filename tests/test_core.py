@@ -204,6 +204,17 @@ class TestAiInterpret:
         assert out2 is None
         assert p1.calls == 1 and p2.calls == 1
 
+    def test_provider_cooldown_uses_injected_clock(self):
+        """provider 冷却只吃进程内时钟：墙钟回拨不该延长冷却。"""
+        from data.plugins.astrbot_plugin_star_feather.interpret import AiInterpreter
+
+        now = [100.0]
+        it = AiInterpreter(None, ai_cooldown=60, clock=lambda: now[0])
+        it._mark_fail("p1")
+        assert it._in_cooldown("p1")
+        now[0] += 60
+        assert not it._in_cooldown("p1")
+
     def test_failed_provider_cooldown_does_not_block_others(self):
         """provider 粒度冷却：p1 失败只冷却 p1，p2 立即可用——全局熔断会拖垮所有用户。"""
         p1 = FakeProvider("p1", exc=RuntimeError("挂"))

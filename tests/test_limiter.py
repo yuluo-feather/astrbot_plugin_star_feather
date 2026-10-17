@@ -20,6 +20,9 @@ class TestCooldownRemaining:
         assert cooldown_remaining(1000, 1010, 10) == 0
         assert cooldown_remaining(1000, 1100, 10) == 0
 
+    def test_clock_rollback_does_not_lock_user_out(self):
+        assert cooldown_remaining(1000, 990, 10) == 0
+
 
 # ---------- 每日计数 daily_remaining ----------
 class TestDailyRemaining:

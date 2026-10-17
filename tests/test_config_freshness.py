@@ -136,6 +136,30 @@ class TestLoadRegistration:
             asyncio.run(p.initialize())
         assert any("读数行不可用" in w for w in _warnings(caplog))
 
+    def test_initialize_cleans_stale_images_off_the_loop(self, monkeypatch):
+        """启动清扫挪进 initialize 并走线程池：扫描/删除不再阻塞事件循环。"""
+        from data.plugins.astrbot_plugin_star_feather import main as main_mod
+
+        calls = []
+
+        def fake_cleanup(path):
+            calls.append(("cleanup", path))
+
+        async def fake_to_thread(fn, *args, **kwargs):
+            calls.append(("to_thread", args))
+            return fn(*args, **kwargs)
+
+        p = _plugin(types.SimpleNamespace(
+            shuffle_lines=False, enable_ai=True, ai_timeout=5,
+            llm_tool_enabled=True, image_dir="D:/tmp/sf-test"))
+        monkeypatch.setattr(main_mod, "cleanup_stale_images", fake_cleanup)
+        monkeypatch.setattr(main_mod.asyncio, "to_thread", fake_to_thread)
+        asyncio.run(p.initialize())
+        assert calls == [
+            ("to_thread", ("D:/tmp/sf-test",)),
+            ("cleanup", "D:/tmp/sf-test"),
+        ]
+
 
 class TestEntryBinding:
     """进门那一行：正常只报读数，跑在上一代实例上才 warning。"""
