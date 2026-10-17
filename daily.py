@@ -173,9 +173,6 @@ _GENERIC_TOPIC = "（今日牌运）"
 # 20 的口径：一次占卜一问一桶，20 桶＝一天换 20 个话题仍留得住；真要压成本，
 # 该动的是 limit.daily_count（限流），而不是把缓存做大。
 DAILY_INTERP_MAX = 20
-# 命中路径的裁剪写回上限（秒）：命中已经拿到答案，维护动作最多等这么久；超时就
-# 放弃本次写回（下次命中再收口），绝不把用户的消息堵在一次慢 KV 写后面。
-TRIM_WRITE_TIMEOUT = 2.0
 
 
 def _trim_interp_slots(slots: dict) -> None:
@@ -278,10 +275,6 @@ class DailyFortune:
         # 缓存读-判-写串行化（gating 同款防线）：并发占卜时两条协程各自读旧值再写回，
         # 后写的会把先写的分桶整个覆盖掉（实测：并发问两个主题，KV 里只剩一个）
         self._kv_lock = asyncio.Lock()
-        # 命中路径的裁剪写回是后台维护：留住任务引用（防 GC 半路收走），按 key 去重，
-        # 同一个用户的多个命中不许叠出一串同样的整理任务
-        self._trim_tasks: set = set()
-        self._trim_inflight: set[str] = set()
 
     async def render_daily_card(self, topics: list[str], picks: list[dict], uid: str) -> str | None:
         """今日牌运卡海报编排：签文（确定性函数）+ 日期文本 + 线程池渲染 + 登记清理。
@@ -341,53 +334,6 @@ class DailyFortune:
                 logger.warning("每日牌运缓存不可用，改由确定性函数直接出牌")
         return _daily_result(card, upright)
 
-    def _schedule_trim(self, key: str, today: str):
-        """命中路径的裁剪写回：后台任务，命中不等它（返回 task 只给测试 await）。
-
-        两条硬约束（2026-10-17 Sourcery 在 v0.8.1 复核时指出）：
-        1. 不拿命中那一刻的旧快照写回——任务里重新读 KV，只裁「今天」那份，
-           并发写进来的新主题不会被打回旧值；
-        2. 命中已经拿到答案，维护动作不许把它压在手里——连 wait_for 都不让等，
-           因为取消一个不配合取消的 KV 协程同样要时间。
-        """
-        if key in self._trim_inflight:
-            return None
-        self._trim_inflight.add(key)
-        try:
-            task = asyncio.create_task(self._trim_latest(key, today))
-        except RuntimeError:          # 没有运行中的事件循环（同步替身）：放弃维护
-            self._trim_inflight.discard(key)
-            return None
-
-        def _done(t, _key=key):
-            self._trim_inflight.discard(_key)
-            self._trim_tasks.discard(t)
-
-        self._trim_tasks.add(task)
-        task.add_done_callback(_done)
-        return task
-
-    async def _trim_latest(self, key: str, today: str) -> None:
-        """重读最新缓存 → 超限就裁到 DAILY_INTERP_MAX → 写回；失败只记一行。"""
-        try:
-            async with self._kv_lock:
-                data, ok = await kv_get(self.kv_store, key, None, "每日牌运解读缓存")
-                if not ok or not isinstance(data, dict) or data.get("date") != today:
-                    return
-                slots = data.get("interps")
-                if not isinstance(slots, dict) or len(slots) <= DAILY_INTERP_MAX:
-                    return
-                fresh = dict(data)
-                fresh["interps"] = dict(slots)
-                _trim_interp_slots(fresh["interps"])
-                await asyncio.wait_for(
-                    kv_put(self.kv_store, key, fresh, "每日牌运解读缓存"),
-                    timeout=TRIM_WRITE_TIMEOUT)
-        except asyncio.TimeoutError:
-            logger.warning("解读缓存裁剪写回超时（本次命中不受影响，下次命中再收口）")
-        except Exception as e:
-            logger.warning(f"解读缓存裁剪写回失败（本次命中不受影响）: {e}")
-
     async def interp_cached(self, event, uid: str, formation: str, positions: list[str],
                             picks: list[dict], clean: str,
                             persona_eff=None, budget=None) -> str | None:
@@ -409,22 +355,18 @@ class DailyFortune:
         key, today = f"sf_daily_{uid}", self.clock.today()
         # 命中判定原子化；写回另起一次锁（AI 调用不占锁，见下）
         hit = None
-        needs_trim = False
         async with self._kv_lock:
             data, ok = await kv_get(self.kv_store, key, None, "每日牌运解读缓存")
             if ok and isinstance(data, dict) and data.get("date") == today:
                 slots = data.get("interps")
                 if isinstance(slots, dict):
                     hit = slots.get(topic)
-                    # 读侧也裁（⑧ 补）：上限是 v0.8.0 才有的，升级用户的持久化分桶可能
-                    # 早就超过 DAILY_INTERP_MAX；只在「写入新解读之后」裁剪的话，只问
-                    # 老主题的人会把这本超大字典一直留着。整理动作交给后台任务
-                    # （见 _schedule_trim）：命中拿到答案就返回，写回自己重读再裁。
-                    if hit and len(slots) > DAILY_INTERP_MAX:
-                        needs_trim = True
         if hit:
-            if needs_trim:
-                self._schedule_trim(key, today)
+            # 命中路径**只读不写**（2026-10-17 复核收口）：这是一条无 CAS 的 KV，
+            # 任何「读旧值 → 裁 → 写回」的维护动作都可能覆盖并发生成的新主题
+            # （热重载前后两代更是各持一把实例锁）；写回也总得占住锁或占用用户时间。
+            # 上限的职责交给真正写入的那条路径（见下方 _trim_interp_slots）：
+            # 问了新主题就顺手收口；只回头问老主题的用户，字典停在升级时的规模。
             return hit
         interp = await _ai_output(
             self.tarot._ai_interpret(

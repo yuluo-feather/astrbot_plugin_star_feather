@@ -5,7 +5,6 @@
 """
 import asyncio
 import json
-import time
 import types
 
 from data.plugins.astrbot_plugin_star_feather.daily import (
@@ -330,12 +329,14 @@ class TestDailyInterpCap:
     class _JsonKv:
         def __init__(self):
             self.raw = {}
+            self.puts = 0
 
         async def get_kv_data(self, key, default=None):
             text = self.raw.get(key)
             return default if text is None else json.loads(text)
 
         async def put_kv_data(self, key, value):
+            self.puts += 1
             self.raw[key] = json.dumps(value)
 
         def record(self, key="sf_daily_u1"):
@@ -403,12 +404,11 @@ class TestDailyInterpCap:
         assert self.TOPIC.format(1) not in slots
         assert self.TOPIC.format(2) in slots
 
-    def test_oversized_legacy_cache_is_trimmed_on_a_cache_hit(self):
-        """升级用户的旧缓存超过上限：命中路径也要把它裁小并写回。
+    def test_a_cache_hit_does_not_write_anything_back(self):
+        """命中只读：超限旧缓存也不在命中路径做写回。
 
-        上限是 v0.8.0 才引入的，升级前落盘的持久化分桶可能早就超过 20 条；只在
-        「写入新解读之后」裁剪的话，只问老主题的人会一直留着这本超大字典。命中
-        照旧返回原文（不为了缩结构把用户正在等的那段丢掉），但落盘那份必须收口。
+        无 CAS 的 KV 上，任何「读旧值→裁→写回」都可能盖掉并发生成的新主题；
+        写回还会占锁或占用用户时间。命中只返回文本，收口交给下一次真正写入。
         """
         kv = self._JsonKv()
         df, calls = self._daily(kv)
@@ -416,73 +416,28 @@ class TestDailyInterpCap:
         legacy = {self.TOPIC.format(n): f"旧解读{n}" for n in range(1, extra + 1)}
         kv.raw[self.KEY] = json.dumps({"date": df.clock.today(), "interps": legacy})
 
-        async def go():
-            hit = await df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK],
-                                         self.TOPIC.format(1))
-            for task in list(df._trim_tasks):      # 等后台整理落地（生产上不等它）
-                await task
-            return hit
-
-        hit = asyncio.run(go())
-        assert hit == "旧解读1"                  # 命中的就是最早那桶：照旧返回
-        assert calls == []                       # 命中不花 AI 调用
-        record = kv.record()
-        assert record["date"] == df.clock.today()
-        assert len(record["interps"]) == self.CAP
-        assert list(record["interps"]) == [
-            self.TOPIC.format(n) for n in range(extra - self.CAP + 1, extra + 1)]
-
-    def test_the_trim_rereads_and_keeps_a_topic_written_after_the_hit(self):
-        """命中后、后台裁剪运行前并发写进来的新主题，不许被旧快照盖掉。
-
-        这是「命中时先拿旧 data、锁外再写回」那个版本的回归：旧快照会把并发写入
-        整段覆盖。现在任务里重新读 KV，只裁分桶本身。
-        """
-        kv = self._JsonKv()
-        df, calls = self._daily(kv)
-        extra = self.CAP + 5
-        legacy = {self.TOPIC.format(n): f"旧解读{n}" for n in range(1, extra + 1)}
-        kv.raw[self.KEY] = json.dumps({"date": df.clock.today(), "interps": legacy})
-
-        async def go():
-            hit = await df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK],
-                                         self.TOPIC.format(1))
-            # 后台任务还没跑：先把「另一个协程」写回的新主题落进去
-            concurrent = kv.record()
-            concurrent["interps"][self.TOPIC.format(extra + 1)] = "并发写进来的新主题"
-            kv.raw[self.KEY] = json.dumps(concurrent)
-            for task in list(df._trim_tasks):
-                await task
-            return hit
-
-        hit = asyncio.run(go())
-        assert hit == "旧解读1"
-        assert calls == []
-        slots = kv.record()["interps"]
-        assert len(slots) == self.CAP
-        assert self.TOPIC.format(extra + 1) in slots
-
-    def test_a_hung_trim_write_does_not_strand_the_cache_hit(self, monkeypatch):
-        """命中后的裁剪写回有上限：KV 写挂住也不许把用户卡在缓存命中上。"""
-        from data.plugins.astrbot_plugin_star_feather import daily as daily_mod
-        monkeypatch.setattr(daily_mod, "TRIM_WRITE_TIMEOUT", 0.05)
-        extra = self.CAP + 5
-        legacy = {self.TOPIC.format(n): f"旧解读{n}" for n in range(1, extra + 1)}
-
-        class _HangingPutKv(self._JsonKv):
-            async def put_kv_data(self, key, value):
-                await asyncio.sleep(30)      # 写挂住：维护动作不许拖住这次命中
-
-        kv = _HangingPutKv()
-        df, calls = self._daily(kv)
-        kv.raw[self.KEY] = json.dumps({"date": df.clock.today(), "interps": legacy})
-        t0 = time.monotonic()
         hit = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK],
                                            self.TOPIC.format(1)))
-        elapsed = time.monotonic() - t0
         assert hit == "旧解读1"
-        assert calls == []
-        assert elapsed < 1.0, f"命中被裁剪写回拖住了：{elapsed:.2f}s"
+        assert calls == []                              # 命中不花 AI 调用
+        assert kv.puts == 0                             # 命中不写 KV
+        assert len(kv.record()["interps"]) == extra     # 旧字典原样留着
+
+    def test_the_next_new_topic_trims_a_legacy_oversized_dict(self):
+        """旧超限字典在下一次真正写入（问新主题）时收口到上限。"""
+        kv = self._JsonKv()
+        df, calls = self._daily(kv)
+        extra = self.CAP + 5
+        legacy = {self.TOPIC.format(n): f"旧解读{n}" for n in range(1, extra + 1)}
+        kv.raw[self.KEY] = json.dumps({"date": df.clock.today(), "interps": legacy})
+
+        new_topic = self.TOPIC.format(extra + 1)
+        out = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], new_topic))
+        assert out == f"解读:{new_topic}"
+        assert calls == [new_topic]
+        slots = kv.record()["interps"]
+        assert len(slots) == self.CAP
+        assert new_topic in slots
 
     def test_trim_touches_only_the_bucket_bag(self):
         """裁剪只动 interps：记录里的日期与当天抽好的牌一律不动。
