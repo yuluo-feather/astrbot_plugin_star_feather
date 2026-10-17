@@ -172,7 +172,7 @@ class TestStagesShareTheDeadline:
         clk = Clock()
         seen = _spy_chat(monkeypatch, clk, 0, "嗯")
         asyncio.run(_interp([FakeProvider("s")]).spirit_line(
-            EVENT, [(CARD, True)], "感情", None, budget=AiBudget(0)))
+            EVENT, [(CARD, True)], "感情", None, budget=AiBudget(0, clk)))
         assert seen == [("s", float(DEFAULT_SPIRIT_STAGE_BUDGET))]
 
 
