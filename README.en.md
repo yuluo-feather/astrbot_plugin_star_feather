@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-  <img src="https://img.shields.io/badge/version-v0.7.5-f8a5c2" alt="v0.7.5"/>
+  <img src="https://img.shields.io/badge/version-v0.8.0-f8a5c2" alt="v0.8.0"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -270,6 +270,16 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 
 ## 📜 Changelog
 
+#### v0.8.0
+
+- Added: a per-reading AI time budget (`ai.ai_budget_seconds`, default 120 seconds) — candidate retries, provider fallbacks and structure repairs all draw on one deadline; when it is spent the reading falls back to the built-in meanings. Set it to `0` to turn the guard off (the log will say so).
+- Added: configurable strictness for the structure check (`ai.structure_check`, default `shadow`) — readings go out exactly as before, while one more line records whether the strict rules would have rejected the candidate and what the running rejection rate looks like, so you can decide when to switch to `strict`.
+- Fixed: a stuck AI no longer keeps a reading waiting, and the spirit's line has its own 20-second stage cap so it cannot spend the whole budget.
+- Fixed: a hot reload no longer deletes images the previous instance was about to send — every instance gets its own image directory, and no directory owned by the running process is touched.
+- Fixed: the closing line no longer jumps ahead of the result on the command path — it waits a short moment only for forwarded cards, while text-only and image-only modes send straight away.
+- Changed: `ai_timeout=0` now means "no cap on a single request"; the natural-language entry explains an AI failure instead of staying silent; "today" follows the framework timezone everywhere.
+- Changed: the Pillow runtime floor is now `>=12.3.0` (10.x / 11.x still carry known CVEs); rendering behaviour is unchanged.
+
 #### v0.7.5
 
 - Fixed: all logging now goes through AstrBot's own logger, and the plugin no longer keeps a second log file under `data/logs/` — the separate `star_feather.log` is gone, while troubleshooting output still reaches AstrBot's log (the console, the WebUI log view, and `logs/astrbot.log` when file logging is enabled)
@@ -292,13 +302,7 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 - Fixed: AI errors no longer swallow a whole reading — when the AI service failed, the whole reading collapsed into one apologetic line and you lost the cards, their meanings and the line with it; now only the two AI-written passages are lost, the reading falls back to the built-in meanings and the spirit's line to the one drawn for that day, and the cards still come through
 - Fixed: a missing card image no longer costs you the reading — the image is checked right before sending and redrawn on the spot if it is gone, so the worst case is a reading without a picture instead of no reading at all
 
-#### v0.7.0
-
-- Added: layered meanings for all 78 cards — instead of a string of keywords, an upright reading now gives keywords, what's unfolding and what to do about it, and a reversed reading gives keywords, the state you're in, where the energy sticks and how to turn it around. Richer material for the AI, and more guidance in the built-in fallback. The bundled font subset was extended to cover every rendered string — the new meaning texts plus the spaces and brand characters in titles, card labels, the signature and the watermark — so cards no longer show tofu boxes.
-- Fixed: with `ai.persona = random`, the spirit's line and the reading body could land on different personas — a reading now draws its persona once. Corrupt cooldown data, or a model replying with nothing but quotes or whitespace, no longer aborts a reading.
-- Fixed: in text-only mode the per-card meanings no longer collapse to the last card — the built-in fallback used to print only the spread's last card, and every card now gets its own block.
-
-> Full per-version details for v0.6.3 and earlier live in [CHANGELOG.md](CHANGELOG.md) and the `changelogs/` directory — this page keeps only the six most recent releases.
+> Full per-version details for v0.7.0 and earlier live in [CHANGELOG.md](CHANGELOG.md) and the `changelogs/` directory — this page keeps only the six most recent releases.
 
 ---
 

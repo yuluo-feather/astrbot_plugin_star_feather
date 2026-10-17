@@ -50,7 +50,7 @@ from .prompts import (
 from .spreads import clean_tool_question, select_formation
 from .tarot_core import StarTarot
 
-VERSION = "0.7.5"
+VERSION = "0.8.0"
 
 # —— 配置新鲜度自证：那条「工具入口吃旧配置」孤例的止损手段（2026-10-01）——
 #

@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-  <img src="https://img.shields.io/badge/version-v0.7.5-f8a5c2" alt="v0.7.5"/>
+  <img src="https://img.shields.io/badge/version-v0.8.0-f8a5c2" alt="v0.8.0"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -257,6 +257,16 @@
 
 ## 📜 更新记录
 
+#### v0.8.0
+
+- 新增：单次占卜的 AI 总预算（`ai.ai_budget_seconds`，默认 120 秒）——候选重试、换供应商、结构修复共用一个截止点，见底就回退本地牌义；写 `0` 可关闭保护（日志会留一行提示）
+- 新增：解读结构校验强度可选（`ai.structure_check`，默认 `shadow` 影子档）——解读照常发出，另外记一行「严格口径会不会拒」与累计拒绝率，攒够样本再决定要不要切 `strict`
+- 修复：AI 卡住不再无限等；「牌灵的话」另受 20 秒阶段上限，不会独吞整笔预算
+- 修复：热重载不再删掉旧实例正要发的图——每个实例一份图片目录，同一进程的任何实例目录一律不动
+- 修复：命令入口的收尾句不再抢在结果前面——只在合并转发时等一个短窗口，纯文字 / 纯图模式即发即到
+- 变更：`ai_timeout=0` 表示不限制单个请求；自然语言入口在 AI 失败时会说明这次是回退结果；「今天」的日期边界统一跟随框架时区
+- 变更：Pillow 运行下限提升到 `>=12.3.0`（10.x / 11.x 仍带已知 CVE），渲染逻辑不变
+
 #### v0.7.5
 
 - 修复：日志统一走 AstrBot 自己的日志，插件不再往 `data/logs/` 里另开一份文件——从前那份自建日志文件（`star_feather.log`）删掉了，排障信息照旧一条不少地进 AstrBot 主日志（控制台、WebUI 日志台，以及开了文件日志时的 `logs/astrbot.log`）
@@ -279,13 +289,7 @@
 - 修复：AI 报错不再吞掉整卦——AI 服务出错（超时、限流、接口报错）时，整次占卜会塌成一句「这卦起得有点乱」，牌面、牌义、签文全拿不到；现在丢的只是那两句 AI 文案，解读回退本地牌义、「牌灵的话」回退当日池内签文，牌照常算给你
 - 修复：牌面图不会再让整卦丢掉——图在发出前会先核验一次，不在了就当场补画，最坏只是没有图，解读一定到手
 
-#### v0.7.0
-
-- 新增：78 张牌义分层升级——全部 78 张牌拆为「关键词 + 事件走向 + 心法建议」（逆位「关键词 + 能量状态 + 能量卡点 + 转身建议」），AI 解读素材更丰富、本地牌义更有引导性；内置字体子集同步扩展至全部渲染文案（含标题、牌名行、署名与水印里的空格与品牌字样），牌面不再出现方块
-- 修复：人设随机（`ai.persona = random`）时同一签的「牌灵的话」与解读可能落到不同人格，现改为一次占卜只抽一次人设；会话冷却里的异常数据、模型只回引号或空白的情况不再中断占卜
-- 修复：纯文字模式的逐张牌义不再只剩最后一张——AI 不可用时的本地兜底此前只输出牌阵的最后一张，现在每张牌各出一段
-
-> 更早版本（v0.6.3 及以前）的逐条明细见 [CHANGELOG.md](CHANGELOG.md) 与 `changelogs/` 目录——这里只保留最近 6 个版本的摘要。
+> 更早版本（v0.7.0 及以前）的逐条明细见 [CHANGELOG.md](CHANGELOG.md) 与 `changelogs/` 目录——这里只保留最近 6 个版本的摘要。
 
 ---
 
