@@ -239,7 +239,7 @@ class TestDailyInterpTopic:
         topic = _norm_topic("今天感情运势")
         sig = "|".join(f"{p['card']['id']}:{1 if p['upright'] else 0}" for p in [PICK])
         kv = {"sf_daily_u1": {"date": "20990101", "card": PICK["card"], "upright": True,
-                              "sign": sig, "v": "oldver",
+                              "sign": sig, "v": "oldver", "persona": "",
                               "interps": {topic: "旧口吻"}}}
         df, calls = self._daily(kv)
         # 用今天重写日期，只留版本号不匹配这一个差异
@@ -542,6 +542,7 @@ class TestDailyInterpCap:
         df, calls = self._daily(kv)
         kv.raw[self.KEY] = json.dumps({
             "date": df.clock.today(), "sign": self._sign([PICK]),
+            "v": READING_PROMPT_V, "persona": "",
             "interps": {self.TOPIC.format(1): "旧解读"}})
 
         other = {"card": {**PICK["card"], "id": "another_card"}, "upright": False}

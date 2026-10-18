@@ -46,6 +46,12 @@ class TestCfgInt:
     def test_no_floor_passes_through(self):
         assert _cfg_int({"a": {"x": 0}}, "a", "x", 30) == 0
 
+    def test_infinity_and_bool_fall_back(self):
+        """YAML 的 .inf / -.inf 在 int() 处抛 OverflowError；布尔不是数字。"""
+        assert _cfg_int({"a": {"x": float("inf")}}, "a", "x", 3) == 3
+        assert _cfg_int({"a": {"x": float("-inf")}}, "a", "x", 3) == 3
+        assert _cfg_int({"a": {"x": True}}, "a", "x", 3) == 3
+
 
 class TestCfgBool:
     def test_bool_value(self):

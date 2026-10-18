@@ -48,9 +48,14 @@ def _cfg_int(config: dict[str, Any] | None, group: str, key: str, default: int, 
     以后真需要 float 再加回来，YAGNI。
     """
     raw = _cfg_get(config, group, key, default)
+    if isinstance(raw, bool):
+        # 布尔不是数字：True 当 1 用等于把配置错误悄悄变成有效值
+        return default
     try:
         value = int(raw)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError：YAML 的 .inf / -.inf 能过 float，却在 int() 处炸；
+        # 这里必须兜住，否则 TarotSettings 构造失败会带走整个插件加载
         return default
     return max(floor, value) if floor is not None else value
 

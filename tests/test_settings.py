@@ -102,6 +102,9 @@ class TestTarotSettings:
         assert TarotSettings({"ai": {"question_max_len": -5}}).ai_max_len == DEFAULT_QUESTION_MAX_LEN
         # -0.5 会被 int() 截成 0，不能当成「明确关闭截断」
         assert TarotSettings({"ai": {"question_max_len": -0.5}}).ai_max_len == DEFAULT_QUESTION_MAX_LEN
+        # YAML 的 .inf / -.inf 在 int() 处抛 OverflowError，不能带走插件加载
+        assert TarotSettings({"ai": {"question_max_len": float("inf")}}).ai_max_len == DEFAULT_QUESTION_MAX_LEN
+        assert TarotSettings({"ai": {"question_max_len": float("-inf")}}).ai_max_len == DEFAULT_QUESTION_MAX_LEN
         assert TarotSettings({"ai": {"question_max_len": 120}}).ai_max_len == 120
 
     def test_ai_timeout_semantics_zero_unlimited_others_floored(self):
