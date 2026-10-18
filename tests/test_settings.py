@@ -94,6 +94,14 @@ class TestTarotSettings:
         assert s.daily_count_limit == 3 and s.disclaimer == "x" and s.daily_fixed is False
         assert s.llm_tool_enabled is False
 
+    def test_negative_question_max_len_falls_back_to_default(self):
+        """负数不是「更不压缩」：坏值回默认，只有 0 才表示明确关闭截断。"""
+        from data.plugins.astrbot_plugin_star_feather.settings import (
+            DEFAULT_QUESTION_MAX_LEN,
+        )
+        assert TarotSettings({"ai": {"question_max_len": -5}}).ai_max_len == DEFAULT_QUESTION_MAX_LEN
+        assert TarotSettings({"ai": {"question_max_len": 120}}).ai_max_len == 120
+
     def test_ai_timeout_semantics_zero_unlimited_others_floored(self):
         """0 = 不限制单个请求；**非 0 取值一律不低于 5 秒**（2026-10-14 主人定）。
 

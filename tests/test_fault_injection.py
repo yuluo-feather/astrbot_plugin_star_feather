@@ -654,6 +654,19 @@ class TestImageGoneBeforeSend:
         assert _run(p._ensure_image(stale, self.FORMATION, self.POSITIONS, [PICK])) == fresh
         assert calls == [self.FORMATION], "问不出大小的图必须补渲染一次"
 
+    def test_verify_image_treats_valueerror_as_missing(self, tmp_path):
+        """含 NUL 的路径会让 getsize 抛 ValueError，同样不能带走整条消息。"""
+        fresh = str(tmp_path / "tarot_fresh3.png")
+
+        def render():
+            open(fresh, "wb").write(b"PNG")
+            return fresh
+
+        p, calls = self._plugin(render)
+        assert _run(p._ensure_image("a\0b.png", self.FORMATION,
+                                    self.POSITIONS, [PICK])) == fresh
+        assert calls == [self.FORMATION], "ValueError 也必须走补渲染"
+
 
 # ============ ② 图片后置渲染：渲染排在两段 AI 之后（2026-10-12） ============
 class TestRenderAfterBothAI:

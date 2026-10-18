@@ -164,7 +164,9 @@ class TarotSettings:
         if self.ai_persona not in PERSONA_VALUES:
             self.ai_persona = DEFAULT_AI_PERSONA
         # 送 AI 的问题长度上限（字符，0=不压缩）：ai.question_max_len
-        self.ai_max_len = _cfg_int(config, "ai", "question_max_len", DEFAULT_QUESTION_MAX_LEN)
+        # 负数不是「更不压缩」而是坏值：与预算同口径回默认，0 才表示明确关闭截断
+        _max_len = _cfg_int(config, "ai", "question_max_len", DEFAULT_QUESTION_MAX_LEN)
+        self.ai_max_len = DEFAULT_QUESTION_MAX_LEN if _max_len < 0 else _max_len
         # 解读结构校验强度（ai.structure_check）：非法值回退默认（shadow=先量不拦）
         self.structure_check = str(
             _cfg_get(config, "ai", "structure_check", DEFAULT_STRUCTURE_CHECK) or "").strip().lower()

@@ -3,6 +3,7 @@
 import asyncio
 import types
 
+from astrbot.api.message_components import Nodes
 from data.plugins.astrbot_plugin_star_feather.deliver import (
     Deliverer,
     split_sections,
@@ -88,6 +89,7 @@ class TestDeliverEpilogue:
                                 "羽时三刻", ["过去"], [PICK], lambda *a: "兜底"))
         assert all(getattr(c, "text", "") != "✨ 收尾句" for c in evt.result)
 
+
     def test_message_order_image_then_preface_then_sections(self):
         """呈现顺序契约：牌面 → 牌灵的话(preface 裸句无前缀无引号) → 解读段 → 总结 → 免责。"""
         evt = self._evt()
@@ -111,6 +113,46 @@ class TestDeliverEpilogue:
         assert "✨ 星羽塔罗 · 牌面" in nodes[0].content[1].text
         assert nodes[1].content[0].text == "今天安心"
         assert "免责声明" in nodes[-1].content[0].text
+
+
+class TestForwardPlatformFallback:
+    """平台收不下 Nodes 时要自动回退普通链消息，不能静默把结果丢掉。"""
+
+    @staticmethod
+    def _evt(platform):
+        e = types.SimpleNamespace()
+
+        def chain_result(chain):
+            e.result = chain
+            return chain
+
+        e.chain_result = chain_result
+        e.get_self_id = lambda: "12345"
+        e.get_platform_name = lambda: platform
+        return e
+
+    @staticmethod
+    def _collect(d, evt):
+        async def run():
+            return [x async for x in d.deliver(
+                evt, "【第1张·过去】一段。\n【总结】结论。", None,
+                "羽时三刻", ["过去"], [PICK], lambda *a: "兜底", preface="牌灵的话")]
+        return asyncio.run(run())
+
+    def test_webchat_falls_back_to_plain(self):
+        """WebChat 的 _send 只认 Plain/Image 等，Nodes 会被静默丢弃。"""
+        evt = self._evt("webchat")
+        self._collect(Deliverer(300, "", True), evt)
+        comps = list(evt.result)
+        assert not any(isinstance(c, Nodes) for c in comps), "WebChat 不该收到 Nodes"
+        text = "".join(getattr(c, "text", "") for c in comps)
+        assert "【总结】结论" in text and "牌灵的话" in text
+
+    def test_qq_keeps_forward_nodes(self):
+        """QQ 等支持转发的平台维持原行为：结果仍是 Nodes。"""
+        evt = self._evt("aiocqhttp")
+        self._collect(Deliverer(300, "", True), evt)
+        assert any(isinstance(c, Nodes) for c in list(evt.result))
 
 
 def _plain_text(formation, positions, picks):

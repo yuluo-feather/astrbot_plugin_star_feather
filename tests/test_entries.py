@@ -150,7 +150,8 @@ class _FakeTarot:
     send_mode = "plain"  # 匹配真实现的发图判断（text_only 不渲染）
     # 收尾句窗口只看这一处判据（真实现 = send_mode == "forward"）；桩走 plain，
     # 与 send_mode 保持一致，免得桩自身比生产更宽松
-    deliverer = types.SimpleNamespace(forward_result=False)
+    deliverer = types.SimpleNamespace(forward_result=False,
+                                      forward_for=lambda event: False)
     ai_persona = "off"  # 牌灵人设：main 的 resolve_persona 从这里取
 
     def new_budget(self):

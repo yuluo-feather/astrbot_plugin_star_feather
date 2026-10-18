@@ -4,9 +4,37 @@
 结果如何呈现（分段 / 合并转发 / 免责声明）全部收敛于此。
 ——牌是占出来了，怎么端到你面前，本羽说了算。
 """
+from astrbot.api import logger
 from astrbot.api.message_components import Image, Node, Nodes, Plain
 
 from .prompts import SECTION_MARK_RE
+
+# 已知收不下合并转发（Nodes）的平台：WebChat 的 _send 只认 Plain / Json / Image /
+# Record / File，Nodes 会落进 else 被静默丢掉（框架源码核于 2026-10-18）。
+# 默认 send_mode=forward 在这些平台上等于「什么都不发」，所以按平台回退普通链消息。
+_FORWARD_UNSUPPORTED_PLATFORMS = frozenset({"webchat"})
+_WARNED_FORWARD_PLATFORMS: set[str] = set()
+
+
+def supports_forward(event) -> bool:
+    """该事件所在平台能不能收 Nodes（合并转发）。
+
+    取不到平台名时按「支持」处理：诊断字段缺失不该改变既有发送形态。
+    已知不支持的平台回退普通消息，并在首次遇到时留一条 warning——静默降级
+    正是这条要修的毛病（用户配着默认值却看不到结果，日志里也没有一句解释）。
+    """
+    try:
+        name = str(event.get_platform_name() or "").strip().lower()
+    except Exception:
+        return True
+    if not name or name not in _FORWARD_UNSUPPORTED_PLATFORMS:
+        return True
+    if name not in _WARNED_FORWARD_PLATFORMS:
+        _WARNED_FORWARD_PLATFORMS.add(name)
+        logger.warning(
+            f"平台 {name} 不支持合并转发（Nodes），结果改按普通消息发送；"
+            "要固定行为可把 output.send_mode 设为 plain")
+    return False
 
 
 def split_text(text: str, size: int) -> list[str]:
@@ -61,6 +89,10 @@ class Deliverer:
         self.disclaimer = disclaimer
         self.forward_result = forward_result
 
+    def forward_for(self, event) -> bool:
+        """本次事件实际走不走合并转发：配置开了 + 平台能收 Nodes。"""
+        return self.forward_result and supports_forward(event)
+
     async def deliver(self, event, interp: str | None, img: str | None,
                       formation: str, positions: list[str], picks: list[dict],
                       plain_text, fail_note: str = "", preface: str = ""):
@@ -104,7 +136,7 @@ class Deliverer:
         uin = "0"
         if hasattr(event, "get_self_id"):
             uin = str(event.get_self_id() or "0")
-        if self.forward_result:
+        if self.forward_for(event):
             # 是否含图由调用方门控（text_only 模式下 img 为 None → 纯文字转发）
             # preface = 牌灵的话（正常路径）/洗牌提示降级并入；节点序：牌面 → preface → 解读段
             nodes = []

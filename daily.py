@@ -22,18 +22,48 @@ from .card_render import IMAGE_DIR_ROOT, _render_daily_card_img, _schedule_image
 from .clock import Clock
 from .dailylines import pick_signature
 from .kv_utils import kv_get, kv_put
-from .prompts import SPIRIT_PROMPT_V
+from .prompts import READING_PROMPT_V, SPIRIT_PROMPT_V
 from .tarot_data import TAROT_CARDS
 
-# 牌灵生成中的共享登记：键 = (缓存键, 牌组指纹, 日期)。
-# 为什么放模块级而不是实例属性：热重载前后、或同一进程里并存的两代 DailyFortune
-# 若各持一张表，会同时 miss 共享 KV、各生成一句，「当日同牌组同一句」当场破功。
-# 模块级表能覆盖同一模块对象下的多实例；跨模块对象（重载后旧实例还活着）没有原子
-# KV 原语可用，仍以最后写回者为准——这条边界记在契约里，不在这里假装解决。
+# AI 生成中的共享登记（牌灵的话 / 每日解读共用）：键由各业务拼，含用户、牌组、
+# 主题与日期。为什么放模块级而不是实例属性：热重载前后、或同一进程里并存的两代
+# DailyFortune 若各持一张表，会同时 miss 共享 KV、各生成一份，「当日同签同一句」
+# 当场破功。模块级表能覆盖同一模块对象下的多实例；跨模块对象（重载后旧实例还活着）
+# 没有原子 KV 原语可用，仍以最后写回者为准——这条边界记在契约里，不在这里假装解决。
 # 用 threading.Lock 而不是 asyncio.Lock：临界区只有同步的 dict 操作，且模块级
 # asyncio 锁会绑死第一个事件循环，测试里换循环就炸。
-_SPIRIT_INFLIGHT: dict[tuple[str, str, str], asyncio.Future] = {}
-_SPIRIT_INFLIGHT_GUARD = threading.Lock()
+_INFLIGHT: dict[tuple, asyncio.Future] = {}
+_INFLIGHT_GUARD = threading.Lock()
+
+
+def _claim_inflight(reg_key: tuple) -> tuple[asyncio.Future, bool]:
+    """认领或加入一笔同键生成，返回 (future, 是否 owner)。
+
+    只做同步操作，调用方负责把它放进自己的锁里（跨实例共享靠模块级表 + threading 锁）。
+    上个事件循环留下的死 Future 一律换新的：done 的不能再 set_result，绑在别的
+    loop 上的 await 会直接报跨循环错误。
+    """
+    loop = asyncio.get_running_loop()
+    with _INFLIGHT_GUARD:
+        pending = _INFLIGHT.get(reg_key)
+        if pending is not None and (pending.done() or pending.get_loop() is not loop):
+            pending = None
+        owner = pending is None
+        if owner:
+            pending = loop.create_future()
+            _INFLIGHT[reg_key] = pending
+    assert pending is not None   # owner 分支已建好；非 owner 分支本来就有
+    return pending, owner
+
+
+def _release_inflight(reg_key: tuple, pending: asyncio.Future, result=None) -> None:
+    """唤醒等待者并摘除登记；没结果就给 result（None / 池内兜底句）。"""
+    if not pending.done():
+        pending.set_result(result)
+    with _INFLIGHT_GUARD:
+        # 只摘自己那张：期间可能有新请求登记了同名 Future
+        if _INFLIGHT.get(reg_key) is pending:
+            _INFLIGHT.pop(reg_key, None)
 
 # 今日固定牌运判定：只有「明确在问当日运」才走每日固定，分两层——
 # 1) 明确运势词（运势/运气/牌运/日运/daily）直接命中；
@@ -286,7 +316,7 @@ class DailyFortune:
         # 缓存读-判-写串行化（gating 同款防线）：并发占卜时两条协程各自读旧值再写回，
         # 后写的会把先写的分桶整个覆盖掉（实测：并发问两个主题，KV 里只剩一个）
         self._kv_lock = asyncio.Lock()
-        # 同一（用户, 牌组, 今天）正在生成的牌灵的话登记在模块级 _SPIRIT_INFLIGHT：
+        # 同一（用户, 牌组, 今天）正在生成的牌灵的话登记在模块级 _INFLIGHT：
         # 并发 miss 只让一个人去问 AI，其余等它的结果——否则两句话各自成文，
         # 破坏「当日同牌组同一句」。跨实例共享的理由见模块级注释。
 
@@ -362,6 +392,9 @@ class DailyFortune:
         主题分桶的硬上界是 DAILY_INTERP_MAX（FIFO，见该常量），跨天另由
         pick_cached 的 interps 清理整体回收。
 
+        命中要求 date + 牌组指纹 + prompt 指纹三者一致；同一主题的并发 miss
+        由模块级 in-flight 登记去重，等待者拿同一段话——与牌灵的话同一套口径。
+
         budget：调用方（一次占卜）传的 AI 总预算对象，原样透传给解读器——缓存命中的
         路径根本不碰 AI，也就无所谓预算；未命中而现场生成时才吃这笔预算。
         """
@@ -370,16 +403,23 @@ class DailyFortune:
         # 牌指纹：同一天换牌（升级、修 KV、牌库顺序变化）后，旧解读不再算命中。
         # 用 id + 正逆（稳定标识），不用牌名——改名不该让缓存整体失效。
         sig = "|".join(f"{p['card']['id']}:{1 if p['upright'] else 0}" for p in picks)
+        # 同一天同一主题的并发生成也只允许一个人去问 AI：与牌灵的话同一套登记表。
+        # 登记键含 prompt 指纹与日期——升级换了提示词/人设时，旧生成不能喂给新请求。
+        reg_key = (key, sig, topic, today, READING_PROMPT_V)
         # 命中判定原子化；写回另起一次锁（AI 调用不占锁，见下）
         hit = None
         async with self._kv_lock:
             data, ok = await kv_get(self.kv_store, key, None, "每日牌运解读缓存")
-            if ok and isinstance(data, dict) and data.get("date") == today:
+            # prompt 指纹进命中条件：升级换了提示词/人设，牌组没变也要重生成，
+            # 否则当天会继续吐旧口吻的解读（牌灵那句早就有这层保护）。
+            if ok and isinstance(data, dict) and data.get("date") == today \
+                    and data.get("v") == READING_PROMPT_V:
                 slots = data.get("interps")
                 if isinstance(slots, dict):
                     # 牌变了就不是同一签：旧解读必须重生成（2026-10-17 复核）
                     if data.get("sign") == sig:
                         hit = slots.get(topic)
+            pending, owner = (None, False) if hit else _claim_inflight(reg_key)
         if hit:
             # 命中路径**只读不写**（2026-10-17 复核收口）：这是一条无 CAS 的 KV，
             # 任何「读旧值 → 裁 → 写回」的维护动作都可能覆盖并发生成的新主题
@@ -387,55 +427,71 @@ class DailyFortune:
             # 上限的职责交给真正写入的那条路径（见下方 _trim_interp_slots）：
             # 问了新主题就顺手收口；只回头问老主题的用户，字典停在升级时的规模。
             return hit
-        interp = await _ai_output(
-            self.tarot._ai_interpret(
-                event, formation, positions, picks, clean or "（今日牌运）",
-                persona_eff=persona_eff, budget=budget),
-            "AI 解读", uid)
-        if ok:
-            async with self._kv_lock:
-                # 重读再合并：本主题生成期间别的主题可能已写回，拿旧 data 写回会把它覆盖掉
-                fresh, _ = await kv_get(self.kv_store, key, None, "每日牌运解读缓存")
-                # 类型校验链（与 pick_cached 同口径，勿退回 `dict(data or {})`）：
-                # `or` 只兜 falsy，truthy 非 dict（["a"]/"abc"/123，外部工具或旧版残留
-                # 写坏）会直接进 dict(...) 抛 ValueError/TypeError，而上抛前那次写回
-                # 整段跳过 → 坏值永不被覆盖，该用户解读缓存**永久失效**（每次问都重生成）。
-                # 红线：tests/test_core.py::TestDailyPoisonedCacheValue
-                # （2026-10-02 复核：这链不是逐层防御——三选一最终都归 dict、彼此没有
-                #   降级差异；它做的是把「fresh 可用 / 退回旧 data / 都不可用」三条路
-                #   显式摆出来。写成一行三元等价，但读不出降级路径。写法不动。）
-                if isinstance(fresh, dict):
-                    data = dict(fresh)
-                elif isinstance(data, dict):
-                    data = dict(data)
-                else:
-                    data = {}
-                # 仅正常读到才写回分桶：读故障时旧缓存保持原样（写回可能把有效数据
-                # 覆盖成只含本主题的空壳），旧实现同样走 except 跳过写回
-                # 写入端自己判跨天：pick_cached 的 interps 清理依赖它那次「读+写回」都成功，
-                # 读故障时它整段跳过（if ok 门），此处不自己判就会把昨天的分桶盖上今天的
-                # 日期复活（同主题当天复用昨天的解读）。判据与 pick_cached 同口径：
-                # date != today 即作废；同一天内仍是原位保留
-                # 同一天且同一组牌才沿用旧分桶；牌换了就清空（旧解读对不上新牌面）
-                same_day = data.get("date") == today and data.get("sign") == sig
-                slots = (dict(data.get("interps") or {})
-                         if same_day and isinstance(data.get("interps"), dict) else {})
-                data["date"], data["interps"], data["sign"] = today, slots, sig
-                # 失败不落 falsy：interp 为 None / 空串时只刷新结构与日期，不写分桶。
-                # 写 null 的功能后果其实没有（命中判据 `slots.get(topic)` 对 None 同样是
-                # falsy，下次照样现场重生成），但「interps 里有这个 key」会因此失去含义
-                # ——有 key 必为有效解读，这条不变量值得立住。顺带收益：失败时少一次
-                # 「拿旧 data 覆盖 KV」的机会（fresh 重读失败的回退路径）。
-                # 红线：tests/test_core.py::TestDailyNullInterp
-                if interp:
-                    data["interps"][topic] = interp
-                # 写回前一律裁剪（⑧）：超过 DAILY_INTERP_MAX 就丢最早插入的那桶。
-                # 放在 if 之外兜底：AI 失败（interp 为空、只刷新结构）时，旧超大字典
-                # 也不会被原样写回去。裁剪在写回之前——读写两侧看到同一个形状，命中
-                # 判定不必额外考虑「桶还在不在」
-                _trim_interp_slots(data["interps"])
-                await kv_put(self.kv_store, key, data, "每日牌运解读缓存")
-        return interp
+        assert pending is not None
+        if not owner:
+            # 同一主题已经有人在生成：等它的结果，别再问一次 AI（否则同一主题
+            # 并发会各生成一段、互相覆盖）。取消只退出等待，不影响共享 Future。
+            try:
+                return await asyncio.shield(pending)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                return None
+        try:
+            interp = await _ai_output(
+                self.tarot._ai_interpret(
+                    event, formation, positions, picks, clean or "（今日牌运）",
+                    persona_eff=persona_eff, budget=budget),
+                "AI 解读", uid)
+            if ok:
+                async with self._kv_lock:
+                    # 重读再合并：本主题生成期间别的主题可能已写回，拿旧 data 写回会把它覆盖掉
+                    fresh, _ = await kv_get(self.kv_store, key, None, "每日牌运解读缓存")
+                    # 类型校验链（与 pick_cached 同口径，勿退回 `dict(data or {})`）：
+                    # `or` 只兜 falsy，truthy 非 dict（["a"]/"abc"/123，外部工具或旧版残留
+                    # 写坏）会直接进 dict(...) 抛 ValueError/TypeError，而上抛前那次写回
+                    # 整段跳过 → 坏值永不被覆盖，该用户解读缓存**永久失效**（每次问都重生成）。
+                    # 红线：tests/test_core.py::TestDailyPoisonedCacheValue
+                    # （2026-10-02 复核：这链不是逐层防御——三选一最终都归 dict、彼此没有
+                    #   降级差异；它做的是把「fresh 可用 / 退回旧 data / 都不可用」三条路
+                    #   显式摆出来。写成一行三元等价，但读不出降级路径。写法不动。）
+                    if isinstance(fresh, dict):
+                        data = dict(fresh)
+                    elif isinstance(data, dict):
+                        data = dict(data)
+                    else:
+                        data = {}
+                    # 仅正常读到才写回分桶：读故障时旧缓存保持原样（写回可能把有效数据
+                    # 覆盖成只含本主题的空壳），旧实现同样走 except 跳过写回
+                    # 写入端自己判跨天：pick_cached 的 interps 清理依赖它那次「读+写回」都成功，
+                    # 读故障时它整段跳过（if ok 门），此处不自己判就会把昨天的分桶盖上今天的
+                    # 日期复活（同主题当天复用昨天的解读）。判据与 pick_cached 同口径：
+                    # date != today 即作废；同一天内仍是原位保留
+                    # 同一天、同一组牌、同一版 prompt 才沿用旧分桶；任一变了就清空
+                    same_day = (data.get("date") == today and data.get("sign") == sig
+                                and data.get("v") == READING_PROMPT_V)
+                    slots = (dict(data.get("interps") or {})
+                             if same_day and isinstance(data.get("interps"), dict) else {})
+                    data["date"], data["interps"], data["sign"] = today, slots, sig
+                    data["v"] = READING_PROMPT_V
+                    # 失败不落 falsy：interp 为 None / 空串时只刷新结构与日期，不写分桶。
+                    # 写 null 的功能后果其实没有（命中判据 `slots.get(topic)` 对 None 同样是
+                    # falsy，下次照样现场重生成），但「interps 里有这个 key」会因此失去含义
+                    # ——有 key 必为有效解读，这条不变量值得立住。顺带收益：失败时少一次
+                    # 「拿旧 data 覆盖 KV」的机会（fresh 重读失败的回退路径）。
+                    # 红线：tests/test_core.py::TestDailyNullInterp
+                    if interp:
+                        data["interps"][topic] = interp
+                    # 写回前一律裁剪（⑧）：超过 DAILY_INTERP_MAX 就丢最早插入的那桶。
+                    # 放在 if 之外兜底：AI 失败（interp 为空、只刷新结构）时，旧超大字典
+                    # 也不会被原样写回去。裁剪在写回之前——读写两侧看到同一个形状，命中
+                    # 判定不必额外考虑「桶还在不在」
+                    _trim_interp_slots(data["interps"])
+                    await kv_put(self.kv_store, key, data, "每日牌运解读缓存")
+            pending.set_result(interp)   # 唤醒并发等待者：同一段解读
+            return interp
+        finally:
+            _release_inflight(reg_key, pending, None)
 
     async def spirit_cached(self, event, uid: str, picks: list, clean: str,
                             persona_eff, budget=None) -> str:
@@ -482,18 +538,7 @@ class DailyFortune:
                     and data.get("date") == today and data.get("sign") == sig \
                     and data.get("line"):
                 return data["line"]
-            loop = asyncio.get_running_loop()
-            with _SPIRIT_INFLIGHT_GUARD:
-                pending = _SPIRIT_INFLIGHT.get(reg_key)
-                # 上个事件循环留下的死 Future 不能复用：done 的直接换新的，
-                # 绑在别的 loop 上的也换新的（否则 await 会报跨循环错误）。
-                if pending is not None and (pending.done()
-                                           or pending.get_loop() is not loop):
-                    pending = None
-                owner = pending is None
-                if owner:
-                    pending = loop.create_future()
-                    _SPIRIT_INFLIGHT[reg_key] = pending
+            pending, owner = _claim_inflight(reg_key)
         assert pending is not None   # owner 分支已建好；非 owner 分支本来就有
 
         if not owner:
@@ -537,9 +582,4 @@ class DailyFortune:
             return line
         finally:
             # 成功、失败、取消都要唤醒等待者并摘除登记；没结果就给池内兜底
-            if not pending.done():
-                pending.set_result(fallback)
-            with _SPIRIT_INFLIGHT_GUARD:
-                # 只摘自己那张：期间可能有新请求登记了同名 Future
-                if _SPIRIT_INFLIGHT.get(reg_key) is pending:
-                    _SPIRIT_INFLIGHT.pop(reg_key, None)
+            _release_inflight(reg_key, pending, fallback)

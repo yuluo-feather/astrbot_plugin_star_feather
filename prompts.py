@@ -175,6 +175,18 @@ def build_reading_prompt(user_input: str, formation: str, detail: str) -> str:
     )
 
 
+def _reading_prompt_fingerprint() -> str:
+    """解读 prompt 的内容指纹：格式要求、系统提示或任一人设段一改，指纹就变，
+    当日解读缓存自动失效——与牌灵那句同一套办法，不靠人记着手工递增版本号。
+    用户问题 / 牌面是动态输入，不进指纹。"""
+    parts = [build_reading_prompt("", "", ""), SYSTEM_PROMPT_DIVINE]
+    parts += [profile["system_extra"] for profile in PERSONA_PROFILES.values()]
+    return hashlib.md5("|".join(parts).encode()).hexdigest()[:8]  # nosec B324 非安全用途：内容指纹
+
+
+READING_PROMPT_V = _reading_prompt_fingerprint()
+
+
 # ---- 洗牌提示语（多张牌阵仪式感；单张牌阵不发）----
 SHUFFLE_LINES = [
     "✨ 洗牌中……牌灵听见你的问题了，别催。",

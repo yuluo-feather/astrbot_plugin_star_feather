@@ -11,6 +11,7 @@ from data.plugins.astrbot_plugin_star_feather.daily import (
     _daily_pick,
 )
 from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
+from data.plugins.astrbot_plugin_star_feather.prompts import READING_PROMPT_V
 from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
 from data.plugins.astrbot_plugin_star_feather.tarot_data import (
     TAROT_CARDS,
@@ -198,6 +199,55 @@ class TestDailyInterpTopic:
         a, b = asyncio.run(go())
         assert a == b == "解读:今天感情运势"
         assert len(calls) == 1  # 同主题只生成一次
+
+    def test_concurrent_same_topic_generates_once(self):
+        """同一主题并发 miss：只调一次 AI，两个调用者拿到同一段。
+
+        生成在锁外跑，没有 in-flight 登记时两条协程会各自问一次、返回两段不同的话。
+        """
+        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        kv, calls = {}, []
+
+        class _Ctx:
+            async def get_kv_data(self, key, default=None):
+                return kv.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                kv[key] = value
+
+        async def slow_ai(event, formation, positions, picks, clean,
+                          persona_eff=None, budget=None):
+            calls.append(clean)
+            await asyncio.sleep(0.02)
+            return f"解读:{clean}"
+
+        df = DailyFortune(_Ctx(), types.SimpleNamespace(_ai_interpret=slow_ai))
+
+        async def go():
+            return await asyncio.gather(
+                df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], "今天感情运势"),
+                df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], "今天感情运势"))
+
+        a, b = asyncio.run(go())
+        assert a == b == "解读:今天感情运势"
+        assert len(calls) == 1, f"同主题并发应只调用一次 AI，实际 {len(calls)}"
+
+    def test_prompt_version_change_invalidates_same_day_interp(self):
+        """提示词/人设换版：牌组没变，当天也要重新生成，不能继续吐旧口吻。"""
+        from data.plugins.astrbot_plugin_star_feather.daily import _norm_topic
+
+        topic = _norm_topic("今天感情运势")
+        sig = "|".join(f"{p['card']['id']}:{1 if p['upright'] else 0}" for p in [PICK])
+        kv = {"sf_daily_u1": {"date": "20990101", "card": PICK["card"], "upright": True,
+                              "sign": sig, "v": "oldver",
+                              "interps": {topic: "旧口吻"}}}
+        df, calls = self._daily(kv)
+        # 用今天重写日期，只留版本号不匹配这一个差异
+        kv["sf_daily_u1"]["date"] = df.clock.today()
+        out = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK],
+                                           "今天感情运势"))
+        assert out == "解读:今天感情运势"
+        assert calls == ["今天感情运势"]
 
     def test_different_topic_regenerates(self):
         kv = {}
@@ -421,6 +471,7 @@ class TestDailyInterpCap:
         legacy = {self.TOPIC.format(n): f"旧解读{n}" for n in range(1, extra + 1)}
         kv.raw[self.KEY] = json.dumps({"date": df.clock.today(),
                                        "sign": self._sign([PICK]),
+                                       "v": READING_PROMPT_V,
                                        "interps": legacy})
 
         hit = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK],
@@ -438,6 +489,7 @@ class TestDailyInterpCap:
         legacy = {self.TOPIC.format(n): f"旧解读{n}" for n in range(1, extra + 1)}
         kv.raw[self.KEY] = json.dumps({"date": df.clock.today(),
                                        "sign": self._sign([PICK]),
+                                       "v": READING_PROMPT_V,
                                        "interps": legacy})
 
         new_topic = self.TOPIC.format(extra + 1)
@@ -647,7 +699,7 @@ class TestDailyNullInterp:
         today = _time.strftime("%Y%m%d")
         other = _norm_topic("最近事业运")
         sig = "|".join(f"{p['card']['id']}:{1 if p['upright'] else 0}" for p in [PICK])
-        kv = {"sf_daily_u1": {"date": today, "sign": sig,
+        kv = {"sf_daily_u1": {"date": today, "sign": sig, "v": READING_PROMPT_V,
                               "interps": {other: "事业解读"}}}
         df, calls = self._daily(kv, None)
         out = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], "今天感情运势"))

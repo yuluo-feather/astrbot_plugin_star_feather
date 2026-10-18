@@ -538,9 +538,11 @@ class StarFeatherPlugin(Star):
             # getsize 一次调用同时判「在不在」与「是不是空」：分成 exists + getsize
             # 两步时，文件可能正好在两步之间被删掉。
             size = os.path.getsize(img)
-        except OSError as e:
+        except (OSError, ValueError) as e:
             # 删除、权限、路径非法……只要问不出「非空文件」就当缺失处理，统一走
-            # 下面的补渲染：把未核验的路径交给发送侧只会让整条消息被打回
+            # 下面的补渲染：把未核验的路径交给发送侧只会让整条消息被打回。
+            # ValueError 也收：含 NUL 的路径会让 getsize 直接抛它（实测），
+            # 生产渲染路径不会产生，但出口纪律不该被一条畸形路径绕过。
             size, why = 0, f"核验失败：{e}"
         else:
             why = "是空文件"
@@ -655,7 +657,10 @@ class StarFeatherPlugin(Star):
             # 只有合并转发卡需要等：卡片要在协议端上传卡内图片、拼多消息，落地慢于
             # 紧随其后的纯文本。plain / text_only 以及 AI 回退路径交付的都是普通链
             # 消息，与收尾句同一条通道，提交次序即落地次序。
-            forwarded = bool(interp) and self.tarot.deliverer.forward_result
+            # 用 forward_for 而不是裸配置：平台收不下 Nodes 时（WebChat）实际走
+            # 普通链消息，就没有「卡片落地慢」这回事，不该再等窗口；后台任务
+            # 也不适用于 WebChat（handler 结束后请求队列会被移除）。
+            forwarded = bool(interp) and self.tarot.deliverer.forward_for(event)
             scheduled = (forwarded and _EPILOGUE_DELAY_SECONDS > 0
                          and _schedule_epilogue(event, epilogue_text, _EPILOGUE_DELAY_SECONDS))
             if not scheduled:
