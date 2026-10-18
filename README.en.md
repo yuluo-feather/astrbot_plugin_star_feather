@@ -199,7 +199,7 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `output.send_mode` | string | `forward` | How results are sent (dropdown): `plain` = card image + segmented text packed into one message chain; `forward` = card art + reading packed into one merged forward message (requires adapter support); `text_only` = plain text only, no card image — lightest. Legacy `forward_result` / `show_image` configs migrate automatically. |
+| `output.send_mode` | string | `forward` | How results are sent (dropdown): `plain` = card image + segmented text packed into one message chain; `forward` = card art + reading packed into one merged forward message (verified on `aiocqhttp` / `satori`; other adapters, including WebChat, fall back to `plain` automatically so the result is never lost); `text_only` = plain text only, no card image — lightest. Legacy `forward_result` / `show_image` configs migrate automatically. |
 | `output.segment_size` | int | `300` | Fallback chunk size for unstructured interpretation text (min 50). Structured segments are not affected. |
 | `output.daily_fixed` | bool | `true` | Fixed daily reading. When on, `/单抽` and fortune-word requests return the same card all day per user (refreshed at midnight); turn off for free random draws. |
 | `output.daily_card` | bool | `true` | Daily fortune poster card. When on, `/单抽` and daily fortunes render a vertical poster (card art + date + the spirit's words + sign-off); turn off to fall back to the normal card image while the spirit's words still follow the reading. |

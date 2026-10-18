@@ -9,31 +9,35 @@ from astrbot.api.message_components import Image, Node, Nodes, Plain
 
 from .prompts import SECTION_MARK_RE
 
-# 已知收不下合并转发（Nodes）的平台：WebChat 的 _send 只认 Plain / Json / Image /
-# Record / File，Nodes 会落进 else 被静默丢掉（框架源码核于 2026-10-18）。
-# 默认 send_mode=forward 在这些平台上等于「什么都不发」，所以按平台回退普通链消息。
-_FORWARD_UNSUPPORTED_PLATFORMS = frozenset({"webchat"})
+# 已验证能收合并转发（Nodes）的平台：框架源码里显式处理 Nodes 的只有这两个
+# （aiocqhttp_message_event / satori_event，2026-10-18 核对）。WebChat 的 _send
+# 只认 Plain / Json / Image / Record / File，Nodes 落进 else 被静默丢掉；
+# Telegram / Discord / WeCom AI bot 也没有 Nodes 分支。默认 send_mode=forward
+# 在这些平台上等于「什么都不发」，所以判据取白名单：未知平台一律回退普通链消息，
+# 宁可少一个合并转发，也别让用户一条结果都看不到。新增适配器验证过后再加进来。
+_FORWARD_SUPPORTED_PLATFORMS = frozenset({"aiocqhttp", "satori"})
 _WARNED_FORWARD_PLATFORMS: set[str] = set()
 
 
 def supports_forward(event) -> bool:
     """该事件所在平台能不能收 Nodes（合并转发）。
 
-    取不到平台名时按「支持」处理：诊断字段缺失不该改变既有发送形态。
-    已知不支持的平台回退普通消息，并在首次遇到时留一条 warning——静默降级
-    正是这条要修的毛病（用户配着默认值却看不到结果，日志里也没有一句解释）。
+    取不到平台名（空串 / 事件桩 / 老版本事件）时按「支持」处理：诊断字段缺失
+    不该改变既有发送形态。非空但不在白名单里的平台回退普通消息，并在首次遇到时
+    留一条 warning——静默降级正是这条要修的毛病（用户配着默认值却看不到结果，
+    日志里也没有一句解释）。
     """
     try:
         name = str(event.get_platform_name() or "").strip().lower()
     except Exception:
         return True
-    if not name or name not in _FORWARD_UNSUPPORTED_PLATFORMS:
+    if not name or name in _FORWARD_SUPPORTED_PLATFORMS:
         return True
     if name not in _WARNED_FORWARD_PLATFORMS:
         _WARNED_FORWARD_PLATFORMS.add(name)
         logger.warning(
-            f"平台 {name} 不支持合并转发（Nodes），结果改按普通消息发送；"
-            "要固定行为可把 output.send_mode 设为 plain")
+            f"平台 {name} 未验证支持合并转发（Nodes），结果改按普通消息发送；"
+            "已验证支持的是 aiocqhttp / satori，要固定行为可把 output.send_mode 设为 plain")
     return False
 
 

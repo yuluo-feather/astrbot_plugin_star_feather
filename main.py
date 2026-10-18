@@ -128,6 +128,10 @@ def _schedule_epilogue(event, text: str, delay: float) -> bool:
     冻结 event 引用交给任务持有；AstrBot 的 send 只依赖事件对象与平台通道，不要求
     handler 还活着。
 
+    只在平台确实会走合并转发时才被调用（见 deliver.supports_forward）；白名单外的
+    平台走同步直发。将来若把请求级队列平台（如 WeCom AI bot）加进转发白名单，这里
+    还要单独判「handler 结束后还能不能发」——别只看 Nodes 能力。
+
     契约：本函数永不抛——调度失败（循环已在收尾）只告警并返回 False，由调用方退回
     同步直发；协程先 close 掉，免得日志里多一条 never awaited。
     """

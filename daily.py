@@ -392,8 +392,9 @@ class DailyFortune:
         主题分桶的硬上界是 DAILY_INTERP_MAX（FIFO，见该常量），跨天另由
         pick_cached 的 interps 清理整体回收。
 
-        命中要求 date + 牌组指纹 + prompt 指纹三者一致；同一主题的并发 miss
-        由模块级 in-flight 登记去重，等待者拿同一段话——与牌灵的话同一套口径。
+        命中要求 date + 牌组指纹 + prompt 指纹 + 当前人设配置一致；面板切人设
+        当天也会重生成。同一主题的并发 miss 由模块级 in-flight 登记去重，
+        等待者拿同一段话——与牌灵的话同一套口径。
 
         budget：调用方（一次占卜）传的 AI 总预算对象，原样透传给解读器——缓存命中的
         路径根本不碰 AI，也就无所谓预算；未命中而现场生成时才吃这笔预算。
@@ -403,9 +404,13 @@ class DailyFortune:
         # 牌指纹：同一天换牌（升级、修 KV、牌库顺序变化）后，旧解读不再算命中。
         # 用 id + 正逆（稳定标识），不用牌名——改名不该让缓存整体失效。
         sig = "|".join(f"{p['card']['id']}:{1 if p['upright'] else 0}" for p in picks)
+        # 面板切人设（ai.persona gentle → tsundere）也要让当天旧解读失效：
+        # v 只覆盖「模板文本改版」，配置选择属于另一维，单独进键与记录。
+        # random 按原值参与——同一天仍是先到的那句，不因每次掷骰换口吻。
+        persona_cfg = str(getattr(self.tarot, "ai_persona", "") or "")
         # 同一天同一主题的并发生成也只允许一个人去问 AI：与牌灵的话同一套登记表。
         # 登记键含 prompt 指纹与日期——升级换了提示词/人设时，旧生成不能喂给新请求。
-        reg_key = (key, sig, topic, today, READING_PROMPT_V)
+        reg_key = (key, sig, topic, today, READING_PROMPT_V, persona_cfg)
         # 命中判定原子化；写回另起一次锁（AI 调用不占锁，见下）
         hit = None
         async with self._kv_lock:
@@ -413,7 +418,8 @@ class DailyFortune:
             # prompt 指纹进命中条件：升级换了提示词/人设，牌组没变也要重生成，
             # 否则当天会继续吐旧口吻的解读（牌灵那句早就有这层保护）。
             if ok and isinstance(data, dict) and data.get("date") == today \
-                    and data.get("v") == READING_PROMPT_V:
+                    and data.get("v") == READING_PROMPT_V \
+                    and data.get("persona") == persona_cfg:
                 slots = data.get("interps")
                 if isinstance(slots, dict):
                     # 牌变了就不是同一签：旧解读必须重生成（2026-10-17 复核）
@@ -469,11 +475,13 @@ class DailyFortune:
                     # date != today 即作废；同一天内仍是原位保留
                     # 同一天、同一组牌、同一版 prompt 才沿用旧分桶；任一变了就清空
                     same_day = (data.get("date") == today and data.get("sign") == sig
-                                and data.get("v") == READING_PROMPT_V)
+                                and data.get("v") == READING_PROMPT_V
+                                and data.get("persona") == persona_cfg)
                     slots = (dict(data.get("interps") or {})
                              if same_day and isinstance(data.get("interps"), dict) else {})
                     data["date"], data["interps"], data["sign"] = today, slots, sig
                     data["v"] = READING_PROMPT_V
+                    data["persona"] = persona_cfg
                     # 失败不落 falsy：interp 为 None / 空串时只刷新结构与日期，不写分桶。
                     # 写 null 的功能后果其实没有（命中判据 `slots.get(topic)` 对 None 同样是
                     # falsy，下次照样现场重生成），但「interps 里有这个 key」会因此失去含义

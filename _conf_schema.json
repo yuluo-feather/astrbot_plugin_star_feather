@@ -116,7 +116,7 @@
           "forward",
           "text_only"
         ],
-        "hint": "plain-图文合成一条链消息；forward-图文合成一条合并转发消息（点开查看，含牌面图，需适配器支持转发）；text_only-纯文字：不渲染图片，最省流量。旧配置（forward_result / show_image）自动迁移，无需重新设置。默认值：forward。"
+        "hint": "plain-图文合成一条链消息；forward-图文合成一条合并转发消息（点开查看，含牌面图；已验证支持 aiocqhttp / satori，其他平台含 WebChat 自动回退 plain，不会静默丢结果）；text_only-纯文字：不渲染图片，最省流量。旧配置（forward_result / show_image）自动迁移，无需重新设置。默认值：forward。"
       },
       "segment_size": {
         "description": "无结构解读文本的分段大小（字符数）",

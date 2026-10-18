@@ -115,6 +115,16 @@ def _budget_seconds(raw, default: int = DEFAULT_AI_BUDGET) -> int:
     return max(1, int(num))
 
 
+def _is_negative_number(raw) -> bool:
+    """原始配置值是不是负数（含 -0.5 这种取整后变 0 的）。坏值 / 布尔不算。"""
+    if isinstance(raw, bool):
+        return False
+    try:
+        return float(raw) < 0
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
 class TarotSettings:
     """一份配置的解析结果：字段即插件运行所需的全部配置值。
 
@@ -165,8 +175,11 @@ class TarotSettings:
             self.ai_persona = DEFAULT_AI_PERSONA
         # 送 AI 的问题长度上限（字符，0=不压缩）：ai.question_max_len
         # 负数不是「更不压缩」而是坏值：与预算同口径回默认，0 才表示明确关闭截断
+        _max_len_raw = _cfg_get(config, "ai", "question_max_len", DEFAULT_QUESTION_MAX_LEN)
         _max_len = _cfg_int(config, "ai", "question_max_len", DEFAULT_QUESTION_MAX_LEN)
-        self.ai_max_len = DEFAULT_QUESTION_MAX_LEN if _max_len < 0 else _max_len
+        self.ai_max_len = (DEFAULT_QUESTION_MAX_LEN
+                           if _max_len < 0 or (_max_len == 0 and _is_negative_number(_max_len_raw))
+                           else _max_len)
         # 解读结构校验强度（ai.structure_check）：非法值回退默认（shadow=先量不拦）
         self.structure_check = str(
             _cfg_get(config, "ai", "structure_check", DEFAULT_STRUCTURE_CHECK) or "").strip().lower()

@@ -154,6 +154,15 @@ class TestForwardPlatformFallback:
         self._collect(Deliverer(300, "", True), evt)
         assert any(isinstance(c, Nodes) for c in list(evt.result))
 
+    def test_unverified_platform_falls_back_to_plain(self):
+        """白名单之外的平台（Telegram / Discord / WeCom 等）也回退普通消息。"""
+        evt = self._evt("telegram")
+        self._collect(Deliverer(300, "", True), evt)
+        comps = list(evt.result)
+        assert not any(isinstance(c, Nodes) for c in comps), "未验证平台不该收到 Nodes"
+        text = "".join(getattr(c, "text", "") for c in comps)
+        assert "【总结】结论" in text
+
 
 def _plain_text(formation, positions, picks):
     """仿 tarot_core._render_text 的逐牌牌义兜底文案（回归用例用）。

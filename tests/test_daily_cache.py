@@ -249,6 +249,40 @@ class TestDailyInterpTopic:
         assert out == "解读:今天感情运势"
         assert calls == ["今天感情运势"]
 
+    def test_persona_switch_invalidates_same_day_interp(self):
+        """面板切人设：牌组与 prompt 版本都没变，当天也要重新生成。"""
+        from data.plugins.astrbot_plugin_star_feather.daily import (
+            DailyFortune,
+            _norm_topic,
+        )
+
+        topic = _norm_topic("今天感情运势")
+        sig = "|".join(f"{p['card']['id']}:{1 if p['upright'] else 0}" for p in [PICK])
+        kv = {"sf_daily_u1": {"date": "20990101", "card": PICK["card"], "upright": True,
+                              "sign": sig, "v": READING_PROMPT_V, "persona": "gentle",
+                              "interps": {topic: "温柔口吻"}}}
+        calls = []
+
+        class _Ctx:
+            async def get_kv_data(self, key, default=None):
+                return kv.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                kv[key] = value
+
+        async def fake_ai(event, formation, positions, picks, clean,
+                          persona_eff=None, budget=None):
+            calls.append(clean)
+            return f"解读:{clean}"
+
+        df = DailyFortune(_Ctx(), types.SimpleNamespace(_ai_interpret=fake_ai,
+                                                       ai_persona="tsundere"))
+        kv["sf_daily_u1"]["date"] = df.clock.today()
+        out = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK],
+                                           "今天感情运势"))
+        assert out == "解读:今天感情运势"
+        assert calls == ["今天感情运势"]
+
     def test_different_topic_regenerates(self):
         kv = {}
         df, calls = self._daily(kv)
@@ -472,6 +506,7 @@ class TestDailyInterpCap:
         kv.raw[self.KEY] = json.dumps({"date": df.clock.today(),
                                        "sign": self._sign([PICK]),
                                        "v": READING_PROMPT_V,
+                                       "persona": "",
                                        "interps": legacy})
 
         hit = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK],
@@ -490,6 +525,7 @@ class TestDailyInterpCap:
         kv.raw[self.KEY] = json.dumps({"date": df.clock.today(),
                                        "sign": self._sign([PICK]),
                                        "v": READING_PROMPT_V,
+                                       "persona": "",
                                        "interps": legacy})
 
         new_topic = self.TOPIC.format(extra + 1)
@@ -700,6 +736,7 @@ class TestDailyNullInterp:
         other = _norm_topic("最近事业运")
         sig = "|".join(f"{p['card']['id']}:{1 if p['upright'] else 0}" for p in [PICK])
         kv = {"sf_daily_u1": {"date": today, "sign": sig, "v": READING_PROMPT_V,
+                              "persona": "",
                               "interps": {other: "事业解读"}}}
         df, calls = self._daily(kv, None)
         out = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], "今天感情运势"))
