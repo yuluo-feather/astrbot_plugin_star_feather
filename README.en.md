@@ -306,7 +306,7 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 
 - Fixed: a question that merely contains the character 他 is no longer read as being about one specific matter — it used to miss the card of the day and get a fresh draw on every ask; now such a question counts as a general one and hands you today's card the same way a plain how-have-you-been does
 
-> Full per-version details for v0.7.2 and earlier live in [CHANGELOG.md](CHANGELOG.md) and the `changelogs/` directory — this page keeps only the six most recent releases.
+> Full per-version details for v0.7.3 and earlier live in [CHANGELOG.md](CHANGELOG.md) and the `changelogs/` directory — this page keeps only the six most recent releases.
 
 ---
 
