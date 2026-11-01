@@ -420,6 +420,9 @@ class TestEndToEndDeliveryUnderSpentBudget:
         而且它同时管住两种重置：入口两段各开一笔、解读器内部每候选各开一笔。
         墙钟上界只作旁证：每段各开一笔的实现里，第二段会拿到满额预算重新等满，
         elapsed 从 1.2s 量级抬到 2.4s 量级。
+
+        2026-11-01 起两段并发（没有数据依赖），所以「同一供应商被叫几次」从 1 变成 2：
+        两段同时起跑、同时被同一个截止点掐断。串行实现的次数一样是 1、墙钟是 2.4s。
         """
         first = FakeProvider("slow-1", result=OK_INTERP, delay=5.0)
         second = FakeProvider("slow-2", result=OK_INTERP, delay=5.0)
@@ -428,9 +431,9 @@ class TestEndToEndDeliveryUnderSpentBudget:
         elapsed = self._run(p, evt, "今日运势", is_daily=True, daily_uid="u1")
 
         assert len(created) == 1, "两段 AI 共用同一笔预算：阶段之间不许重置截止点"
-        assert first.calls == 1, "牌灵的话那一段先试一次，就这一次"
-        assert second.calls == 0, "第一段已把预算烧光：第二段不许重开一笔、也不许换供应商"
-        assert elapsed < 3.0, f"预算 1.2s，端到端却用了 {elapsed:.2f}s"
+        assert first.calls == 2, "两段并发：同一截止点上两段各试一次"
+        assert second.calls == 0, "预算已耗尽：两段都不许换供应商、也不许重开一笔"
+        assert elapsed < 3.0, f"预算 1.2s，端到端却用了 {elapsed:.2f}s（并发应 ≈1.2s，串行才 ≈2.4s）"
         self._assert_still_delivered(evt, path)
 
     def _plugin(self, tmp_path, providers):

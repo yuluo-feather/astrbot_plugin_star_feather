@@ -33,7 +33,7 @@ class TestRenderSmoke:
         ]
         path = card_render.render_cards(positions, picks, "羽时三刻", save_dir=str(tmp_path))
         assert os.path.isfile(path)
-        assert path.endswith(".png") and os.path.getsize(path) > 10_000
+        assert path.endswith(".jpg") and os.path.getsize(path) > 10_000
 
     def test_background_cache_returns_independent_copy(self):
         """背景缓存必须返回独立副本。
@@ -102,15 +102,17 @@ class TestRenderSmoke:
             card_render._build_card_background(
                 _mk("major", "99", "不存在", "Nope", "无", "无"), 120, 80)
 
-    def test_daily_card_poster_produces_png(self, tmp_path):
+    def test_daily_card_poster_produces_jpeg(self, tmp_path):
         # 今日牌运卡海报：竖版定型尺寸、真实素材可渲染、文件名带 daily 前缀（清理识别用）
         path = card_render._render_daily_card_img(
             _mk("major", "19", "太阳", "The Sun", "成功喜悦", "乌云遮日"), False,
             "别把一时心情当决定，睡一觉再说。", "8月27日·周四", save_dir=str(tmp_path))
         from PIL import Image
         assert os.path.isfile(path)
-        assert path.endswith(".png")
-        assert Image.open(path).size == (card_render.DAILY_CARD_W, card_render.DAILY_CARD_H)
+        assert path.endswith(".jpg")
+        with Image.open(path) as im:
+            assert im.size == (card_render.DAILY_CARD_W, card_render.DAILY_CARD_H)
+            assert im.mode == "RGB"
 
     def test_daily_card_poster_missing_asset_raises(self, tmp_path):
         # 素材缺失：向调用方抛异常（编排层负责回退，渲染层只保证 fail loudly）
@@ -237,13 +239,16 @@ class TestStaleCleanup:
         assert all(p.exists() for p in fresh)
 
     def test_stale_scattered_pngs_removed_but_irregular_kept(self, tmp_path, monkeypatch):
-        """旧布局散图过期才删；不合规的文件哪怕放烂了也不动（父目录不是自家后院）。"""
+        """旧布局散图过期才删；不合规的文件哪怕放烂了也不动（父目录不是自家后院）。
+
+        合规后缀 = 本插件生产过的两种：旧版 .png、当前 .jpg；其余后缀一律当外人。
+        """
         root = self._root(tmp_path, monkeypatch)
         stale_png = root / "tarot_old.png"
         stale_png.write_bytes(b"img")
         junk = root / "keep.txt"
         junk.write_bytes(b"keep")
-        odd = root / "tarot_old.jpg"
+        odd = root / "tarot_old.bmp"
         odd.write_bytes(b"img")
         for p in (stale_png, junk, odd):
             self._age(p, card_render.STALE_INSTANCE_DIR_AGE + 60)
@@ -628,24 +633,46 @@ class TestBackgroundRandomHygiene:
 
 
 # ---------- 保存与清理的竞态：目录被回收后要能补建 ----------
-class TestSavePngRace:
+class TestSaveImageRace:
     def test_recreates_directory_removed_before_save(self, tmp_path):
         """启动清理若在保存前一刻回收了空目录，保存要重建目录，而不是丢掉整张图。"""
         target = tmp_path / "inst_1_1_deadbeef"
         target.mkdir()
-        out = target / "tarot_x.png"
+        out = target / "tarot_x.jpg"
 
         class _Img:
             calls = 0
+            mode = "RGB"          # _save_image 只在非 RGB 时铺底，这里模拟已就绪的画布
 
-            def save(self, path, fmt):
+            def save(self, path, fmt, **kwargs):
                 self.calls += 1
                 if self.calls == 1:
                     os.rmdir(os.path.dirname(path))     # 模拟清理抢在前面
                 with open(path, "wb") as f:
-                    f.write(b"PNG")
+                    f.write(b"JPEG")
 
         img = _Img()
-        card_render._save_png(img, str(out))
+        card_render._save_image(img, str(out))
         assert out.exists()
         assert img.calls == 2, "第一次保存失败后应重建目录并重试一次"
+
+    def test_flattens_translucent_canvas_before_jpeg(self, tmp_path):
+        """半透明画布必须先铺实色底：直接 convert("RGB") 会把边缘算成黑。
+
+        素材圆角带 alpha（实测画布最小值 191），JPEG 没有透明通道；
+        铺底用画布同款深藏青，半透明像素应落在背景色附近而不是纯黑。
+        """
+        from PIL import Image
+
+        src = Image.new("RGBA", (8, 8), (200, 180, 160, 191))
+        out = tmp_path / "translucent.jpg"
+        card_render._save_image(src, str(out))
+        with Image.open(out) as im:
+            r, g, b = im.convert("RGB").getpixel((4, 4))
+        bg = card_render._OPAQUE_BACKDROP
+        alpha = 191 / 255
+        # 正确合成 = alpha*前景 + (1-alpha)*背景；直接 convert("RGB") 会得到 (200,180,160) 附近，
+        # 忽略 alpha，相当于把半透明边缘当不透明处理（深色底上就是一圈亮边）
+        expected = [round(alpha * fg + (1 - alpha) * bgc)
+                    for fg, bgc in zip((200, 180, 160), bg)]
+        assert all(abs(v - e) <= 3 for v, e in zip((r, g, b), expected)), (r, g, b, expected)

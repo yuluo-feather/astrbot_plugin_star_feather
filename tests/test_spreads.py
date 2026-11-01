@@ -30,6 +30,27 @@ class TestSelectFormation:
         assert select_formation("今天天气不错") == "羽时三刻"
         assert select_formation("") == "羽时三刻"
 
+    def test_pronoun_substring_is_not_relation(self):
+        """单字「他」的构词面不是关系主体：「其他／吉他／他乡」不得判成恋爱阵。
+
+        2026-11-01 复核：子串匹配下这三类问题全被选成恋羽十字。
+        「其他方面的运气」在默认配置下先命中今日牌运（走不到选阵层），
+        这里直接测选阵函数本身的口径。
+        """
+        assert select_formation("我想学吉他，前景如何") == "羽时三刻"
+        assert select_formation("其他方面的运气") == "羽时三刻"
+        assert select_formation("最近他乡怎么样") == "羽时三刻"
+        assert select_formation("他人怎么样") == "羽时三刻"
+
+    def test_hobby_like_is_not_romance(self):
+        """「喜欢」不再单独作为恋爱关键词：爱好类问题不判恋爱阵。"""
+        assert select_formation("我喜欢做设计，要不要转行") == "羽时三刻"
+
+    def test_pronoun_relation_still_lovers(self):
+        """摘构词的同时不能把真有关系主体的问题一起摘掉。"""
+        assert select_formation("她会喜欢我吗") == "恋羽十字"
+        assert select_formation("我和他的过去") == "恋羽十字"
+
     def test_timeline_word_with_relation_goes_lovers_cross(self):
         # 时间线词 + 关系语义 = 关系预测，不是纯时间线问题（2026-08-29 边界）
         assert select_formation("我们的未来") == "恋羽十字"

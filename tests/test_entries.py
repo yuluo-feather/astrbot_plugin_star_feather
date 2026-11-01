@@ -230,6 +230,31 @@ class TestRunReading:
         assert seen["spirit"] is not None
         assert seen["spirit"] is seen["interpret"]  # 同一截止点：阶段之间不重置
 
+    def test_spirit_and_interpret_run_concurrently(self):
+        """两段 AI 没有数据依赖：并发执行，总耗时取较慢的一段（2026-11-01）。
+
+        串行实现里第二段必须等第一段结束才开跑；这条用例让两段互相等对方先开始，
+        串行实现会等到超时——写死「同一时刻两段都在跑」这个事实。
+        """
+        p = self._plugin(hint=False)
+        spirit_started = asyncio.Event()
+        interpret_started = asyncio.Event()
+
+        async def fake_spirit(event, uid, picks, clean, persona_eff, budget=None):
+            spirit_started.set()
+            await asyncio.wait_for(interpret_started.wait(), timeout=1)
+            return "sig"
+
+        async def fake_interpret(ev, fmt, pos, picks, clean, persona_eff=None, budget=None):
+            interpret_started.set()
+            await asyncio.wait_for(spirit_started.wait(), timeout=1)
+            return "AI"
+
+        p.daily.spirit_cached = fake_spirit
+        p.tarot._ai_interpret = fake_interpret
+        out = self._collect(p._run_reading(self._evt(), "羽签", ["你的当下"], [PICK], "问感情"))
+        assert out[0] == "[sig]AI"
+
     def test_daily_card_switch_off_skips_poster(self):
         # output.daily_card=False：牌运卡海报不渲染（回退普通牌面图），解读照常走缓存
         p = self._plugin(hint=False)
@@ -837,7 +862,10 @@ class TestEpilogueWindow:
         async def fake_sleep(seconds):
             order.append(("window", seconds))
 
-        monkeypatch.setattr(sf_main, "asyncio", types.SimpleNamespace(sleep=fake_sleep))
+        # 只替 sleep，其余照真实现走：main 里两段 AI 用 asyncio.gather 并发，
+        # 桩若只给 sleep，gather 会在到达窗口之前就炸掉（2026-11-01）
+        monkeypatch.setattr(sf_main, "asyncio",
+                            types.SimpleNamespace(sleep=fake_sleep, gather=asyncio.gather))
         t = StarTarot(FakeContext(None), None)
 
         async def fake_interp(event, formation, positions, picks, clean,

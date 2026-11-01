@@ -67,7 +67,7 @@ class TestDailyCardOrchestration:
             # date_text 形如「8月27日·周四」（无前导零、带星期）
             assert re.fullmatch(r"\d{1,2}月\d{1,2}日·周[一二三四五六日]", date_text)
             assert signature  # 签文非空
-            p = os.path.join(str(tmp_path), "daily_test.png")
+            p = os.path.join(str(tmp_path), "daily_test.jpg")
             open(p, "wb").write(b"PNG")
             return p
 
@@ -78,7 +78,7 @@ class TestDailyCardOrchestration:
         monkeypatch.setattr(daily, "_schedule_image_cleanup", fake_cleanup)
         picks = [{"card": TAROT_CARDS[0], "upright": True}]
         out = asyncio.run(self._fortune().render_daily_card(["今日牌运"], picks, "u1"))
-        assert out.endswith(".png")
+        assert out.endswith(".jpg")
         # delay 为 None＝调用点没自带时长（曾硬写 300 秒），统一走 IMAGE_TTL_SECONDS
         assert calls and calls[0] == (out, None)
 
@@ -101,7 +101,7 @@ class TestDailyCardRenderSlot:
             peak = max(peak, live)      # 无锁时两条协程都在函数体内 → 峰值 2
             time.sleep(0.05)
             live -= 1
-            path = os.path.join(str(tmp_path), "daily_slot.png")
+            path = os.path.join(str(tmp_path), "daily_slot.jpg")
             open(path, "wb").write(b"PNG")
             return path
 
@@ -117,7 +117,7 @@ class TestDailyCardRenderSlot:
                 df.render_daily_card(["今日牌运"], picks, "u2"))
 
         outs = asyncio.run(twice())
-        assert all(o and o.endswith(".png") for o in outs)
+        assert all(o and o.endswith(".jpg") for o in outs)
         assert peak == 1                # 同一时刻只有一次渲染在锁内
 
     def test_missing_lock_still_renders(self, monkeypatch, tmp_path):
@@ -127,7 +127,7 @@ class TestDailyCardRenderSlot:
         「渲染失败，回退普通牌面图」，返回 None。
         """
         def fake_render(card, upright, signature, date_text, save_dir=None):
-            path = os.path.join(str(tmp_path), "daily_nolock.png")
+            path = os.path.join(str(tmp_path), "daily_nolock.jpg")
             open(path, "wb").write(b"PNG")
             return path
 
@@ -136,4 +136,4 @@ class TestDailyCardRenderSlot:
         picks = [{"card": TAROT_CARDS[0], "upright": True}]
         df = daily.DailyFortune.__new__(daily.DailyFortune)      # 连 tarot 都没有
         out = asyncio.run(df.render_daily_card(["今日牌运"], picks, "u1"))
-        assert out and out.endswith(".png")
+        assert out and out.endswith(".jpg")

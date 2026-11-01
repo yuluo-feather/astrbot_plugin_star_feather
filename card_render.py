@@ -239,8 +239,9 @@ def cleanup_stale_images(current_dir: str | None = None) -> None:
         path = os.path.join(IMAGE_DIR_ROOT, name)
         try:
             if name.startswith("tarot_") or name.startswith("daily_"):
-                # 旧布局散图（本版起生产路径不再往父目录写图）：同样「确认过期才删」
-                if name.endswith(".png") and os.path.isfile(path) \
+                # 旧布局散图（本版起生产路径不再往父目录写图）：同样「确认过期才删」。
+                # 后缀收 .png 与 .jpg：前者是旧版本的产物，后者是当前格式。
+                if name.endswith((".png", ".jpg")) and os.path.isfile(path) \
                         and _is_stale(path, STALE_INSTANCE_DIR_AGE):
                     os.remove(path)
             else:
@@ -478,18 +479,28 @@ def _draw_card(canvas, x, y, card, upright) -> int:
 
 
 # ---------- 拼图主函数 ----------
-def _save_png(image, path: str) -> None:
-    """保存 PNG；目标目录若恰在保存前被启动清理回收，就重建目录再存一次。
+# 输出编码：JPEG q88。同一张牌阵 PNG 是 0.6~2.0 MB、JPEG 是 0.13~0.47 MB，
+# 合并转发要在协议端上传图片，体积直接换上传时间（2026-11-01 实测）。
+OUTPUT_QUALITY = 88
+# 铺底色：素材边缘带半透明（实测画布 alpha 最低 191），直接 convert("RGB") 会把
+# 半透明像素按黑底算，边缘出一圈脏黑。先用同款深藏青铺实，再合成。
+_OPAQUE_BACKDROP = (28, 34, 56)
 
-    清理只回收「过期且空」的旧实例目录，与本函数的窗口极窄；但热重载时旧实例
-    可能正好在渲染，重建一次目录比丢掉整张图便宜。第二次仍失败就让异常上抛，
+
+def _save_image(image, path: str) -> None:
+    """保存为 JPEG（先铺实色底再转 RGB）；目标目录若恰在保存前被启动清理回收，就重建再存。
+
+    目录重建只兜「热重载时旧实例正在渲染」这个极窄窗口；第二次仍失败就让异常上抛，
     由渲染兜底转成无图。
     """
+    if image.mode != "RGB":
+        base = Image.new("RGBA", image.size, (*_OPAQUE_BACKDROP, 255))
+        image = Image.alpha_composite(base, image.convert("RGBA")).convert("RGB")
     try:
-        image.save(path, "PNG")
+        image.save(path, "JPEG", quality=OUTPUT_QUALITY)
     except FileNotFoundError:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        image.save(path, "PNG")
+        image.save(path, "JPEG", quality=OUTPUT_QUALITY)
 
 
 def render_cards(positions, picks, formation, save_dir=None) -> str:
@@ -538,8 +549,8 @@ def render_cards(positions, picks, formation, save_dir=None) -> str:
         # 落回根目录的文件由启动清理按过期判据回收
         save_dir = IMAGE_DIR_ROOT
     os.makedirs(save_dir, exist_ok=True)
-    path = os.path.join(save_dir, f"tarot_{int(time.time())}_{secrets.token_hex(4)}.png")
-    _save_png(canvas, path)
+    path = os.path.join(save_dir, f"tarot_{int(time.time())}_{secrets.token_hex(4)}.jpg")
+    _save_image(canvas, path)
     return path
 
 
@@ -638,6 +649,6 @@ def _render_daily_card_img(card, upright, signature, date_text, save_dir=None) -
         # 落回根目录的文件由启动清理按过期判据回收
         save_dir = IMAGE_DIR_ROOT
     os.makedirs(save_dir, exist_ok=True)
-    out_path = os.path.join(save_dir, f"daily_{int(time.time())}_{secrets.token_hex(4)}.png")
-    _save_png(canvas.convert("RGB"), out_path)
+    out_path = os.path.join(save_dir, f"daily_{int(time.time())}_{secrets.token_hex(4)}.jpg")
+    _save_image(canvas, out_path)
     return out_path

@@ -610,18 +610,25 @@ class StarFeatherPlugin(Star):
         # 另有耗时；预算耗尽后的表现是回退本地牌义。渲染不吃这笔预算（② 之后它整段
         # 排在预算窗口外面，不占用 AI 的等待时间）。
         budget = self.tarot.new_budget()
-        # 牌灵的话：所有占卜路径统一生成（羽签/羽时三刻/羽镜/恋羽十字都有这句
-        # 牌灵的开口）——裸句直出，无「牌灵的话：」前缀与引号
-        if picks:
-            sig_text = await self.daily.spirit_cached(event, daily_uid, picks, clean, persona_eff,
-                                                      budget)
+        # 牌灵的话与解读之间没有数据依赖（前者只用牌面与主题，后者只用牌面与问题），
+        # 两段共用同一个**绝对**截止点的预算——串行等待等于白等一个 LLM 往返。
+        # 并发后这段耗时 ≈ max(两段) 而不是两者相加（2026-11-01）。
+        # 失败语义不变：任一段抛异常仍旧冒泡到入口兜底；另一段此时已在跑，
+        # 它自己的结果会随 gather 一起被丢弃（只有装饰性文本，不影响整卦的正确性）。
+        spirit_call = (self.daily.spirit_cached(event, daily_uid, picks, clean, persona_eff,
+                                                budget)
+                       if picks else None)
         if is_daily and daily_uid:
-            interp = await self.daily.interp_cached(event, daily_uid, formation, positions,
-                                                    picks, clean, persona_eff, budget)
+            interp_call = self.daily.interp_cached(event, daily_uid, formation, positions,
+                                                   picks, clean, persona_eff, budget)
         else:
-            interp = await self.tarot._ai_interpret(
+            interp_call = self.tarot._ai_interpret(
                 event, formation, positions, picks, clean or empty_fallback,
                 persona_eff=persona_eff, budget=budget)
+        if spirit_call is None:
+            sig_text, interp = "", await interp_call
+        else:
+            sig_text, interp = await asyncio.gather(spirit_call, interp_call)
         if sig_text:
             # 牌灵的话随 preface 进结果：AI 全失败回退牌义时，牌灵的话一句不丢
             preface = f"{preface}\n{sig_text}" if preface else sig_text

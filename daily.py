@@ -203,6 +203,19 @@ def _cached_card(raw) -> dict | None:
 
 _GENERIC_TOPIC = "（今日牌运）"
 
+# 纯泛问判据：整句只由「时间词 / 运势词 / 签文词 / 泛问句式 / 口语填充」构成才算泛问。
+# 混着具体诉求的句子（「今天运势如何，我该不该表白」）必须按原句分桶——它和
+# 「今天运势」不是同一个问题，共用一段解读等于答非所问（2026-11-01 复核）。
+# 语气词只收子集字体已覆盖的几个：本文件的字面量会被 tools/build_font_subset.py
+# 算进字形清单，多加一个不在子集里的字就得重建字体（而它们大概率已被前面的
+# 泛问句式整段吃掉，漏掉顶多多分一个桶，不会把具体问题误并成泛问）。
+_GENERIC_ONLY_NOISE_RE = re.compile(
+    "|".join(map(re.escape, TIME_WORDS + DAILY_WORDS + _SIGN_WORDS))
+    + r"|怎么样|如何|咋样|怎样|还好吗|好不好|帮我|给我|麻烦|请|看看|看一下|"
+      r"占卜|算一算|算一卦|算算|抽|我|你|的|了|呢|吗|吧|[\s\W_]+",
+    re.IGNORECASE,
+)
+
 # 解读分桶上限（⑧）：同一天同一个人换着主题问，每个主题各占一桶，而桶只在跨天时随
 # pick_cached 整体作废——当天换主题不回收，KV 条目会随主题数线性长大。
 # 上限一到就丢「最早插入」的那桶：FIFO（按插入顺序），不是 LRU。
@@ -226,21 +239,25 @@ def _trim_interp_slots(slots: dict) -> None:
 
 
 def _norm_topic(clean: str) -> str:
-    """解读缓存的主题指纹：具体问题按清洗后原文；泛问（无具体主题词）统一为当日牌运。
+    """解读缓存的主题指纹：具体问题按清洗后原文；纯泛问统一为当日牌运。
 
     这样「看看今天的运势」「每日一签」这类泛问措辞当天共享同一段解读
     （防反复问刷版本），而「今天感情运势」「最近学业怎么样」各按主题
     缓存——不同问题的解读再也不能互相串用。
 
     分桶键是清洗后的**原句**，不是词表里的词——「今天财运怎么样」与
-    「今天财运如何」是两个桶。本函数只判「有没有具体主题」，不负责归并近义问法。
-    词表用 TOPIC_WORDS 而非 SPECIFIC_WORDS：后者在 _is_daily_request 里是排除
-    条件，拿它分桶会把判定与分桶重新绑死。
+    「今天财运如何」是两个桶。本函数只判「整句是不是纯泛问」，不负责归并近义问法。
+
+    【什么时候算泛问（2026-11-01 改）】不再用「不含 TOPIC_WORDS 即泛问」——
+    那样「今天运势如何，我该不该表白」会被塞进通用桶，拿到当天早上的泛泛解读。
+    现在的判据是「去掉时间/运势/签文/泛问句式/口语词后一个字都不剩」：真正只问了
+    一句运势的进通用桶，混了具体诉求的一律按原句分桶。TOPIC_WORDS 仍作快速通道，
+    保证带主题词的问法绝不进通用桶。
     """
     raw = (clean or "").strip().lower()
-    if not raw or not any(w in raw for w in TOPIC_WORDS):
-        return _GENERIC_TOPIC
-    return raw
+    if not raw or any(w in raw for w in TOPIC_WORDS):
+        return raw or _GENERIC_TOPIC
+    return _GENERIC_TOPIC if not _GENERIC_ONLY_NOISE_RE.sub("", raw) else raw
 
 
 def _render_slot(fortune) -> AbstractAsyncContextManager[None]:

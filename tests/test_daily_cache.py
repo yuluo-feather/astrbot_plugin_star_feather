@@ -189,6 +189,26 @@ class TestDailyInterpTopic:
         for q in ("今天运势", "看看今天的运势", "每日一签"):
             assert _norm_topic(q) == _GENERIC_TOPIC, q
 
+    def test_mixed_generic_question_gets_own_bucket(self):
+        """泛问混着具体诉求时不能进通用桶（2026-11-01 复核）。
+
+        「今天运势如何，我该不该表白」整体含运势词，但它真正想问的是表白——
+        进通用桶会拿到当天早上「今天运势」那段泛泛解读，答非所问；
+        反向也一样：第一个提问会把这段定制解读存成通用解读给后面的人用。
+        纯泛问之间仍要共享同一桶（防反复问刷版本）。
+        """
+        from data.plugins.astrbot_plugin_star_feather.daily import (
+            _GENERIC_TOPIC,
+            _norm_topic,
+        )
+
+        mixed = "今天运势如何，我该不该表白"
+        assert _norm_topic(mixed) == mixed
+        assert _norm_topic(mixed) != _GENERIC_TOPIC
+        # 纯泛问仍归通用桶，且不同措辞共享
+        for q in ("今天运势", "看看今天的运势", "每日一签", "最近怎么样"):
+            assert _norm_topic(q) == _GENERIC_TOPIC, q
+
     def test_same_specific_topic_reuses(self):
         kv = {}
         df, calls = self._daily(kv)
