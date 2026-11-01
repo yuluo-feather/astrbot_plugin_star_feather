@@ -13,17 +13,10 @@ import os
 import random
 import re
 
-# 导入模型（2026-10-12）：插件内一律包内相对导入（from .daily import ...），
-# 目录里不留 sys.path.insert、也不留 sys.modules.pop。老那套「顶层平铺名 + 手动清缓存」
-# 有两个洞：
-#   ① 子模块注册成顶层名（daily / prompts ...）后，框架按 data.plugins.<目录名>.* 前缀
-#      重载时永远清不到它——旧模块赖在 sys.modules 里、新名字（如 TOOL_EPILOGUE）读不到，
-#      于是被迫再写一段 pop 循环兜底，那是症状的症状；
-#   ② pop 清的是通用名字，同一解释器里别的插件或库若同名，会被无辜拆掉。
-# 框架的加载路径本就是 data.plugins.astrbot_plugin_star_feather.main 这一串包路径，包前缀
-# 已经在手上，相对导入是顺着它走，不是另开一条路。
-# 本插件的模块间引用（实现分别在 config / daily / gating / identity / prompts / settings / spreads）：
-# 测试与外部如需内部函数，请直接从实现模块导入，别绕道本入口文件转发。
+# 导入模型：插件内一律包内相对导入，目录里不留 sys.path.insert / sys.modules.pop。
+# 顶层平铺名会让同一个文件出现两套模块身份（补丁打空、按包前缀重载清不到），pop 循环
+# 还会误删同解释器里别人的同名模块。包前缀本来就在手上，相对导入是顺着它走。
+# 其余模块按域直接实现导入，入口不转发内部函数。红线：tests/test_import_model.py。
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.message_components import Plain
@@ -46,43 +39,13 @@ from .tarot_core import StarTarot
 
 VERSION = "0.8.2"
 
-# —— 配置新鲜度自证：那条「工具入口吃旧配置」孤例的止损手段（2026-10-01）——
-#
-# 现象：面板改配置 + 热重载后，命令入口吃新值，而自然语言入口（star_feather_divine）
-# 疑似仍走旧实例。当时把三条机制（`filter.llm_tool` 的 callable 未随重载重绑 /
-# 绑了但闭包持旧 self / config 与 tarot 对象跨重载被复用）逐条受控验倒，现象此后再没
-# 复现——**代码侧没有靶子可修**。于是把判据从「输出文案里有没有某句话」换成「每次
-# 进门时当场读到的值」，焊在下面这三处：
-#
-#   1. `initialize()` 把「当前代实例」登记到 context 上，并打一行 [cfg] LOAD。
-#      不用模块级全局：热重载会重置模块字典，而旧实例调用的正是旧模块里的那份全局，
-#      两边永远对得上、什么都报不出来。context 跨重载是同一个对象，才当得了这把尺子。
-#   2. 两个入口进门各打一行 [cfg] ENTRY 读数。
-#   3. 进门时若发现自己不是当前代登记的那个实例，直接 warning。
-#   4. 登记那句裹了 try：它是这里唯一写到外部对象的地方，而 initialize() 一抛就被
-#      框架判「加载失败」并摘干净（见 initialize 里那段注释）——诊断可以失效，
-#      插件加载不能失败。本行读数（LOAD）与进门那两行（ENTRY）也吃同一条保险丝：
-#      它们要么在 initialize 里、要么在两条入口的 try 之前，抛一次就带走一次加载
-#      或一次占卜——判据只有一条，不许只保一半。
-#
-# 为什么「跑在旧实例上」必然等于「读到旧值」：本插件的配置全在 __init__ 那一刻从
-# settings.TarotSettings 快照到实例与子组件上（见 tarot_core.StarTarot），实例不换代，
-# 快照就不会更新。所以那一行 warning 就是铁证——不必再去翻会被覆盖的
-# platform_message_history（20:06 那次正是栽在这上面）。
-#
-# 这句 warning 凭什么敢把话定死：它直接观测到的只有「入口 self ≠ 登记 active」，
-# 另两种解释都被框架结构排除（2026-10-01 按 star_manager 源码核对）：
-#   (a)「有实例但没登记过」——实例化（star_manager.py:1227）与 initialize（:1421）
-#      在同一个 try 里，中间任何异常都走 except 并被 _cleanup_plugin_state 摘掉本插件
-#      全部 handler，半成品实例接不到任何 entry；且 initialize 全仓只此一个调用点，
-#      没有「只换 config 不换实例」的分支（那种路径下实例没变，也没人会误报）。
-#   (b)「那是另一个插件实例」——Context 是进程级单例（core_lifecycle 只建一次
-#      PluginManager），登记键又是本插件专属，同进程内同一插件只有一个活实例。
-# 真要失真，前提是「两份同源副本同时装着」；那时两侧的模块名不同，而 warning 行里
-# 就带着这两个模块名——所以措辞不软化，改成把判别所需的读数补齐（结论仍是结论）。
-#
-# 日志走框架 logger（astrbot.api）：落点是 AstrBot 主日志——控制台、WebUI 日志台，
-# 以及开了文件日志时的 logs/astrbot.log（我们不再自建日志文件）。
+# 配置新鲜度自证：每次加载在 context 上登记「当前代实例」并打一行 [cfg] LOAD，
+# 两个入口进门各打一行 [cfg] ENTRY 读数；入口发现自己不是登记的那个实例就 warning。
+# 登记放 context 不放模块全局：热重载会重置模块字典，旧实例读的正是旧模块那份全局，
+# 永远对得上、什么都报不出来。配置在 __init__ 一次性快照到实例上，所以「跑在旧实例」
+# 必然等于「读到旧值」——这条 warning 就是铁证。
+# 所有诊断读写都包 try：诊断可以失效，插件加载与占卜不能因此失败。
+# 来龙去脉与被排除的几种解释见 tests/test_config_freshness.py 与 TODO 账本。
 _ACTIVE_INSTANCE_ATTR = "_sf_active_plugin_instance"
 
 # 读数里报哪几个开关：挑「面板上一改、用户侧立刻看得见」的四项——
@@ -90,14 +53,10 @@ _ACTIVE_INSTANCE_ATTR = "_sf_active_plugin_instance"
 # llm_tool_enabled 判自然语言入口开没开。不塞全量配置：读数要能一眼比对。
 _CFG_FIELD_NAMES = ("shuffle_lines", "enable_ai", "ai_timeout", "llm_tool_enabled")
 
-# 收尾句独立直发前的等待窗口（秒）。命令入口的结果交给响应阶段下发，而合并转发卡
-# 在协议端还要上传卡内图片、拼多消息，落地比紧随其后的纯文本慢——收尾句会抢在卡片
-# 前面到达（2026-10-13 实测：命令入口 5/5 倒序，工具入口 5/5 正常；进程内次序经探针
-# 核对是「结果先提交、收尾句后提交」，所以差别只在落地这一步）。
-# 现场调参口径：顺序正常 = 窗口够；仍倒序 = 这个值调大（卡片滞后的真实量级尚未测）。
-# 适用范围：只有「合并转发」需要这个窗口。plain / text_only 的结果与收尾句同走
-# 一条纯文本（或单条链）通道，提交次序即落地次序；AI 全失败回退本地牌义时交付的
-# 也是一条普通链消息。这两种情形睡窗口纯属白让用户多等，故只在小节末按条件睡。
+# 收尾句独立直发前的等待窗口（秒）：合并转发卡要在协议端上传图片、拼多消息，落地
+# 慢于紧随其后的纯文本，不等就会倒序（2026-10-13 实测命令入口 5/5 倒序）。
+# 只有转发模式需要；plain / text_only 与 AI 回退路径同走普通链消息，睡了白让用户等。
+# 现场调参：仍倒序就把这个值调大（卡片滞后的真实量级尚未测）。
 _EPILOGUE_DELAY_SECONDS = 2.0
 
 # 收尾句后台任务的强引用集合：asyncio 只对任务持弱引用，没人引用时可能被 GC 掉，
@@ -118,16 +77,13 @@ async def _send_epilogue_after_window(event, text: str, delay: float) -> None:
 def _schedule_epilogue(event, text: str, delay: float) -> bool:
     """把「等窗口 + 直发」放进后台任务，命令处理协程不再为此挂起。
 
-    窗口只买「合并转发卡落地慢」这一件事：结果已经提交给平台，收尾句晚几秒到即可。
-    冻结 event 引用交给任务持有；AstrBot 的 send 只依赖事件对象与平台通道，不要求
-    handler 还活着。
+    窗口只买「合并转发卡落地慢」这一件事：结果已提交给平台，收尾句晚几秒到即可。
+    冻结 event 引用交给任务持有：AstrBot 的 send 只依赖事件对象与平台通道，不要求
+    handler 还活着。只在确实走合并转发的平台上调用（见 deliver.supports_forward）——
+    将来把请求级队列平台加进白名单时，这里还要单独判「handler 结束后能不能发」。
 
-    只在平台确实会走合并转发时才被调用（见 deliver.supports_forward）；白名单外的
-    平台走同步直发。将来若把请求级队列平台（如 WeCom AI bot）加进转发白名单，这里
-    还要单独判「handler 结束后还能不能发」——别只看 Nodes 能力。
-
-    契约：本函数永不抛——调度失败（循环已在收尾）只告警并返回 False，由调用方退回
-    同步直发；协程先 close 掉，免得日志里多一条 never awaited。
+    契约：永不抛——调度失败只告警并返回 False，由调用方退回同步直发；协程先 close，
+    免得日志里多一条 never awaited。
     """
     coro = _send_epilogue_after_window(event, text, delay)
     try:
@@ -151,25 +107,12 @@ def _cfg_fingerprint(plugin) -> str:
     fields = " ".join(f"{n}={getattr(tarot, n, '?')!r}" for n in _CFG_FIELD_NAMES)
     return f"inst={id(plugin):#x} tarot={id(tarot):#x} {fields}"
 
-# 帮助请求判定：整句剥掉祈使词后只剩「帮助 / help / 说明」才算。
-# 旧版用 "帮助" in text，问题正文里带「帮助」（如「帮助我做出决定」）
-# 会误触发帮助页——踩过：占卜长问题里写「帮助我做出更清醒的决定」，
-# 用户收到的却是帮助文案。这里是收紧后的整句匹配，句中出现不算。
-# 2026-08-29 语料回归补充：
-# - 核心词与「一下」间允许空白（"help 一下"）；前缀扩入 说/讲/告诉/教 及 说下/讲下 等连缀；
-# - 独立宽松分支 _HELP_USAGE_RE：句中含「怎么用/怎么玩/怎么使用/怎么操作/用法」即算——
-#   这类功能问法引导词千变万化（告诉你怎么用/教我一下/这功能怎么玩），
-#   枚举祈使前缀不现实，改为按「功能意图词」判定，误伤率低（占卜问题里几乎不出现）。
-# 2026-10-01 CodeQL 首扫报 py/redos（指 ``main.py`` 那一行），是真阳性——这里就是那次修复。
-# 根因：前缀分支里的「说说」「讲讲」恰好等于「说+说」「讲+讲」，与单字分支重叠后，
-# 「说」×n 有 Fib(n) 种切法，尾词不匹配时整棵回溯树要遍历一遍。本机实测（3.12.10）
-# n = 10/16/20/24/28/32 → 0.05/0.6/4/29/224/1799 ms，每加两字翻一倍：40 字就是天文数字，
-# 用户粘一段这种文本进来会卡死进程。删掉这两个冗余分支，回溯就只剩唯一一条路。
-#
-# 为什么不用原子组 (?>…)：py3.11 起语法可用，但原子组会掐掉前缀的贪婪回退，而尾词本身
-# 以「说」「使」开头（说明 / 使用说明）——前缀吞掉后不肯吐，「说明」这类问法会被判成非帮助。
-# 那是改行为，不是修缺陷。等价性验收：字母表枚举 579,195 条 + 随机长样本 300,000 条，
-# 新旧判定逐条一致、零差异；防回归的计时红线在 tests/test_judgement_corpus.py。
+# 帮助请求判定：整句剥掉祈使词后只剩「帮助 / help / 说明」才算（"帮助" in text 的
+# 子串判定会把「帮助我做出决定」误当帮助页）。另有一条宽松分支：整段只有一句话、
+# 且带「怎么用 / 怎么玩 / 用法」也算——这类问法引导词太多，按意图词判定更稳。
+# 正则里冗余的「说说 / 讲讲」分支已删：前缀重叠会让回溯指数增长（py/redos 真阳性）；
+# 不用原子组是因为它会掐掉前缀的贪婪回退，把「说明」判成非帮助——那是改行为，不是修缺陷。
+# 防回归：语料与计时红线在 tests/test_judgement_corpus.py。
 _HELP_REQUEST_RE = re.compile(
     r"^(?:请|帮我|给我|麻烦|来|看看|看下|查一下|查查|使用|查看|瞅瞅|"
     r"说|讲|告诉|教|说下|讲下|说一下|讲一下)*\s*"
@@ -182,36 +125,25 @@ _HELP_USAGE_RE = re.compile(
 
 
 def _is_single_line(text: str) -> bool:
-    """「功能意图词」宽松分支的前置：整段只能有一行。
+    """宽松分支的前置：整段只能有一行。
 
-    该分支的判据是「整段就是一句话」（前置字符类不允许出现句末标点），而多行输入的
-    实际含义是「用户在铺陈问题」（多为从别处粘贴）——此时「我最近失眠 + 换行 + 怎么用」
-    会被误判成帮助页，用户的问题被整个吞掉、拿不到任何解读。漏判的代价只是走正常占卜、
-    用户再打一句「怎么用」就进帮助了。两个方向的错误严重度不对称，故此处偏保守。
-
-    不在正则里排除换行：str.splitlines() 认十种换行（LF / CR / CRLF / VT / FF /
-    文件分隔符 FS-GS-RS / NEL / 行分隔符 / 段分隔符），比列举转义符可靠——只排 LF
-    会漏掉 CRLF，而粘贴场景里最常见的恰恰是它。
+    多行输入通常是粘贴过来的问题（「我最近失眠 + 换行 + 怎么用」），判成帮助页会把
+    问题整个吞掉；漏判只是走正常占卜、用户再打一句「怎么用」就进帮助了。两个方向的
+    错误严重度不对称，所以这里偏保守。用 splitlines() 认十种换行，比枚举 \\n 可靠。
     """
     return len(text.splitlines()) == 1
 
 
 
 def _is_help_request(text: str) -> bool:
-    """帮助判定唯一入口：两个分支任一命中即算。
+    """帮助判定唯一入口：两个分支任一命中即算，命令入口与语料测试共用。
 
-    命令入口与语料回归测试共用本函数。不要在别处复刻这段判定——复刻的那份会在
-    调用方收紧（例如多行闸门）时失联：测试继续绿，而生产行为已经变了。
+    别在别处复刻这段判定：复刻的那份会在调用方收紧（例如多行闸门）时失联——
+    测试继续绿，生产行为却已经变了。
 
-    【两处 fullmatch 不是同一件事的两遍（2026-10-01 补）】
-    _HELP_REQUEST_RE 自身首尾锚定（^…$），再套 fullmatch 只是同义重申；真正靠
-    fullmatch 挡东西的是 _HELP_USAGE_RE——它的前置字符类 [^？?！!。]* 允许换行、
-    尾部又只有 [？?！!。]* 收尾、没有 \\s*，只有「整段匹配」才拦得住尾部那个换行。
-    而这份等价是上面那句 strip() 撑起来的：拿掉 strip 就现原形——「怎么用
-」在
-    _HELP_USAGE_RE 上 match 为真、fullmatch 为假（_HELP_REQUEST_RE 尾部有 \\s*，
-    不带 strip 也无差）。所以别把 strip 当顺手的多余，也别以「看着重复」为由把
-    任一处改成 match 或删掉一处：改的是行为，不是精简。
+    两处 fullmatch 各有职责，不是同一件事的两遍：_HELP_USAGE_RE 的前置字符类允许
+    换行、尾部又没有 \\s*，只有整段匹配才拦得住尾换行；这份等价靠上面的 strip() 撑着，
+    拿掉 strip 它就会在带尾换行的输入上退化成 match。别以「看着重复」为由动它们。
     """
     t = (text or "").strip()
     return bool(_HELP_REQUEST_RE.fullmatch(t)
@@ -264,16 +196,10 @@ class StarFeatherPlugin(Star):
             except Exception as e:
                 # 清扫只是磁盘回收，失败不该把插件加载带走
                 logger.warning(f"启动回收过期图片失败（不影响加载）: {e}")
-        # 登记本代实例 + 打一行快照：热重载每来一次，这里就多一行 [cfg] LOAD，
-        # 与入口那行 [cfg] ENTRY 对照就能看出「谁跑在谁身上、读到的是哪一代的配置」。
-        # 这一句是整套诊断里唯一写到外部对象的地方，而它跑在 initialize() 里：框架
-        # 那边 initialize 一抛就判「插件加载失败」并 _cleanup_plugin_state 摘掉全部
-        # handler（star_manager 插件加载流程那个大 try），代价是一次占卜都发不出去。
-        # 所以登记的代价必须比它保的东西便宜——哪天 Context 不许写（__slots__ /
-        # dataclass(frozen=True) / pydantic 模型）就让它静默退化：登记为空 ⇒ 入口读到
-        # active is None ⇒ 只报读数、不告警，机制空转而已。诊断失效可以，插件加载
-        # 失败不行（同 card_render._schedule_image_cleanup 那句「契约：本函数永不抛」）。
-        # 下面那行读数裹的是同一条保险丝：它跟登记同在 initialize 里，抛出去的后果一模一样。
+        # 登记本代实例并打一行 [cfg] LOAD：热重载每来一次就多一行，与入口的 [cfg] ENTRY
+        # 对照即可看出谁跑在谁身上。这一步跑在 initialize 里，一抛就被框架判加载失败，
+        # 所以登记与读数都包 try：Context 哪天不许写，就让机制静默空转。诊断可以失效，
+        # 插件加载不能失败（同 card_render._schedule_image_cleanup 的「永不抛」口径）。
         context = getattr(self, "context", None)
         if context is not None:
             try:
@@ -286,17 +212,12 @@ class StarFeatherPlugin(Star):
             logger.warning(f"[cfg] LOAD 读数行不可用（诊断失效，不影响加载）: {e}")
 
     def _note_entry_binding(self, entry: str) -> None:
-        """入口进门自报读数；跑在上一代实例上就当场 warning（见模块顶部那段说明）。
+        """入口进门自报读数；跑在上一代实例上就当场 warning。
 
-        两件事分开：读数行每次都有（正常运行时它就是「这一刻读到的值」，比输出文案可靠），
-        告警只在真的对不上时打一行——不吵，但对上了就是铁证。
-
-        契约：本函数永不抛——严格说挡的是 Exception：CancelledError 与 KeyboardInterrupt
-        属 BaseException，该穿就穿（诊断没资格吃取消）。它跑在每一次进门的路上，而两个入口
-        都把它裸放在自己的 try 之前——这里抛一次就带走那一次占卜。保险丝真正挡的是
-        求值那一步：指纹 f-string 在 logger 之前就算完了，logging 自带的 handleError
-        够不着；三参 getattr 的 default 也只吞 AttributeError。真出事就打一条降级读数行
-        ——「进门必留一行」不许落空，否则排查的人会以为压根没进门，那是最坏的一种误导。
+        读数行每次都有，告警只在对不上时打一行——不吵，对上了就是铁证。
+        契约：本函数永不抛（挡 Exception；取消与中断照穿）。它跑在每一次进门的路上，
+        两个入口又都把它放在自己的 try 之外：这里抛一次就带走一次占卜，所以连读数
+        求值那一步也在保险丝里。
         """
         try:
             logger.info(f"[cfg] ENTRY {entry} {_cfg_fingerprint(self)}")
@@ -329,13 +250,10 @@ class StarFeatherPlugin(Star):
         前缀/触发门槛由框架先行把关（CommandFilter 命中才进得来），
         这里不再有前缀检查与提示分支——别再把「必须带 /」的旧逻辑加回来。
         """
-        # 命令已由本插件处理：禁止默认 LLM 参与本次事件。
-        # 参数名反直觉，别读反：True = 禁止。框架 process_stage 以
-        # `and not event.call_llm` 判定是否走默认 LLM，且默认值是 False。
-        # 刻意不用 stop_event()：它在洋葱模型下于响应阶段清空 result 之后才执行，
-        # 会 set 出一个空 STOP result → RespondStage 收到空消息（Prepare 空日志）、
-        # 收口/统计类插件可能把它误判为「空回复」入账（见 changelogs/v0.4.8.md 的命令入口收尾修复）。
-        # 这坑踩过了，别再踩。
+        # 本次事件已由插件处理：should_call_llm(True) 的语义是「禁止默认 LLM」
+        # （框架按 `and not event.call_llm` 判定，默认值是 False，参数名别读反）。
+        # 不用 stop_event()：它在响应阶段清空 result 之后才执行，会塞出空 STOP 结果，
+        # 收口/统计类插件会当成「空回复」入账（见 changelogs/v0.4.8.md）。
         self._note_entry_binding("command")
         event.should_call_llm(True)
         try:
@@ -402,16 +320,14 @@ class StarFeatherPlugin(Star):
     async def divine_tool(self, event: AstrMessageEvent):
         """星羽塔罗占卜：78 张塔罗牌抽牌，输出牌面图与解读。
 
-        仅当用户**明确要求**塔罗占卜/抽牌/看运势时调用，例如「帮我算一卦」
-        「抽张牌看看」「占卜一下我和她的感情」「最近运势怎么样」。
-        用户的抱怨、感叹、闲聊（如「今天真倒霉」「她是不是不喜欢我」）不属于
-        占卜请求，不得调用。相邻调用若在节流期（llm_tool_cooldown 秒）内，
-        直接向用户说明并结束，不重复占卜。
+        仅当用户**明确要求**塔罗占卜/抽牌/看运势时调用，例如「帮我算一卦」「抽张牌看看」
+        「占卜一下我和她的感情」「最近运势怎么样」。用户的抱怨、感叹、闲聊（如「今天真倒霉」
+        「她是不是不喜欢我」）不属于占卜请求，不得调用。相邻调用若在节流期内，直接说明并结束，
+        不重复占卜。
 
-        发送约定：内容一律 event.send 直发，结尾 yield 一个字符串结果给
-        Agent Loop（LLM 据此生成简短收尾回复）。不能 yield MessageEventResult
-        或 None —— 否则 runner 判定无返回值并 DONE，respond 空消息跳过，
-        收口钩子不触发、群聊防并发门闩死锁（见 _tool_send）。
+        发送约定：内容一律 event.send 直发，结尾 yield 一个字符串给 Agent Loop 生成收尾回复。
+        不能 yield MessageEventResult 或 None —— 否则 runner 判定无返回值并 DONE，respond
+        空消息跳过，收口钩子不触发、群聊防并发门闩死锁（见 _tool_send）。
         """
         self._note_entry_binding("tool")
         # 打开开关：运行期判断（装饰器静态注册无法卸载，见 __init__ 注释）
@@ -475,14 +391,13 @@ class StarFeatherPlugin(Star):
                             fixed_formation: str = "") -> tuple:
         """统一抽牌入口：决定「抽什么牌、怎么抽」，三入口共用。
 
-        规则（与文档一致）：
-        - 运势类请求（含「运势/运气/牌运」等词，或 /单抽 的 force_daily）
-          且开关 daily_fixed 开启 → 今日固定牌运（同一天同一人同一张牌）；
-        - 具体问题（感情/事业等）或开关关闭/固定不可用 → 自由随机；
-          随机时可用 fixed_formation 锁定阵型（/单抽 固定羽签），否则按问题选阵。
+        - 运势类请求（运势/运气/牌运等词，或 /单抽 的 force_daily）且 daily_fixed 开启
+          → 今日固定牌运（同一天同一人同一张牌）；
+        - 具体问题、开关关闭或固定不可用 → 自由随机；随机时 fixed_formation 可锁定阵型
+          （/单抽 固定羽签），否则按问题选阵。
 
-        返回 (is_daily, daily_uid, formation, positions, picks)，
-        is_daily=True 时解读走当日缓存，False 走 AI 现场解读。
+        返回 (is_daily, daily_uid, formation, positions, picks)；is_daily=True 时解读走
+        当日缓存，False 走 AI 现场解读。
         """
         daily_uid = resolve_sender_uid(event)
         is_daily = self.daily_fixed and (force_daily or _is_daily_request(text))
@@ -497,23 +412,11 @@ class StarFeatherPlugin(Star):
 
     async def _ensure_image(self, img: str | None, formation: str,
                             positions: list[str], picks: list[dict]) -> str | None:
-        """发送前核验牌面图还在不在：不在就重渲染一次，渲染不出来就降级为无图。
+        """发送前核验牌面图：文件不在或为空就补渲染一次，再失败就降级为无图。
 
-        这道核验原本是主力：渲染过去发生在两次 AI 调用之前（牌灵的话 + 解读），而平台
-        是在**发送那一刻**才读文件的，中间隔着整段 AI 等待——2026-09-29 实机里一句
-        「牌灵的话」的 AI 请求跑了 63 秒，图早被清理定时器删掉，平台读到空，整条消息链
-        （图 + 解读 + 牌灵的话）一起被打回（判据与来龙去脉见 card_render.IMAGE_TTL_SECONDS
-        与 Issue #2）。那之后做过两次收窄：2026-10-12 起 AI 阶段有了总预算
-        （ai.ai_budget_seconds，默认 120s），把窗口上界从「没有上界」收到预算量级；
-        同日 ② 图片后置渲染把渲染点搬到两段 AI 之后，窗口进一步收到毫秒级。
-        本函数**只判文件在不在、不判图片年龄**，因此它守的从来不是「图会不会过期」，
-        而是「这一秒钟拿到的图存在且非空」——即清理定时器（600s 保险丝）之外，
-        外部因素（磁盘清理、别的进程、人工 rm）在最后几毫秒里删掉文件也在它的职责内。
-
-        所以清理定时器只当保险丝，真正的判据落在发送前这一刻：距离平台读取只剩
-        毫秒级，不看任何定时数字。重渲染走 _maybe_render_image（自带清理登记）；
-        海报卡被删时回退普通牌面图——与「海报渲染失败」同一条既有退路；再失败就
-        无图，调用方既有的「无图补逐牌牌义」分支会接住，主流程照样走完。
+        只判「这一秒拿到的图存在且非空」，不判图片年龄——渲染已经排到两段 AI 之后、
+        距平台读文件只剩毫秒，这里守的是出口纪律：图片问题绝不带走整条消息
+        （Issue #2 的教训；清理定时器只当保险丝，见 card_render.IMAGE_TTL_SECONDS）。
         """
         if not isinstance(img, str) or not img:
             return img  # 本就无图（text_only / 渲染失败）：无需核验，别白跑一次渲染
@@ -522,10 +425,8 @@ class StarFeatherPlugin(Star):
             # 两步时，文件可能正好在两步之间被删掉。
             size = os.path.getsize(img)
         except (OSError, ValueError) as e:
-            # 删除、权限、路径非法……只要问不出「非空文件」就当缺失处理，统一走
-            # 下面的补渲染：把未核验的路径交给发送侧只会让整条消息被打回。
-            # ValueError 也收：含 NUL 的路径会让 getsize 直接抛它（实测），
-            # 生产渲染路径不会产生，但出口纪律不该被一条畸形路径绕过。
+            # 删除、权限、路径非法（含 NUL）一律当缺失：问不出「非空文件」就交给补渲染，
+            # 把未核验的路径交给发送侧只会让整条消息被打回。
             size, why = 0, f"核验失败：{e}"
         else:
             why = "是空文件"
@@ -535,12 +436,8 @@ class StarFeatherPlugin(Star):
         try:
             new_img = await self.tarot._maybe_render_image(formation, positions, picks)
         except Exception as e:
-            # 渲染器自己吞异常（tarot_core._render_image），这里是第二道：补渲染跑在
-            # 原有正常路径之外，再炸一次就等于把整条消息也带走——Issue #2 的教训正是
-            # 「别让图片的问题变成结果发不出去」
-            # （2026-10-02 复核：两处「永不抛」相叠是有意的，不是把同一条不变量换个地方
-            #   重新论证——内层守的是渲染器实现，这里守的是「图片问题绝不带走消息」这条
-            #   出口纪律。写法不动。）
+            # 渲染器自己吞异常，这里是第二道：补渲染再炸一次就会把整条消息也带走。
+            # 两处「永不抛」相叠是有意的——内层守渲染实现，这里守「图片问题绝不带走消息」。
             logger.warning(f"重渲染牌面图异常，本签降级为无图: {e}")
             return None
         if not new_img:
@@ -552,22 +449,14 @@ class StarFeatherPlugin(Star):
                            daily_uid: str = "", fail_note: str = "",
                            empty_fallback: str = "（未提具体问题，请作一般运势解读）",
                            epilogue: bool = False):
-        """统一占卜流程：洗牌提示 → 两段 AI（牌灵的话 + 解读）→ 渲染牌面 → 分段发送。
+        """统一占卜流程：洗牌提示 → 两段 AI（牌灵的话 + 解读，并发）→ 渲染牌面 → 分段发送。
 
-        渲染排在 AI 之后是 ② 图片后置渲染（2026-10-12）的结果，理由与代价写在下面
-        调用点的注释里；两段 AI 共用同一笔总预算（见 AiBudget）。
-
-        解读来源：今日固定且已知用户时走当天解读缓存（没提主题一整天固定）；
-        否则 AI 现场解读（失败由 _deliver 回退牌义）。
-        洗牌提示语开关（shuffle_lines）、发送模式（send_mode）在此生效，
-        所有配置开关只写在这一处，入口无需感知。
-        单张牌阵（羽签/单抽）不发洗牌提示：仪式感只属于多张牌阵。
+        两段 AI 共用同一笔总预算（AiBudget）；解读来源：今日固定且已知用户时走当天
+        解读缓存，否则 AI 现场解读（失败由 _deliver 回退牌义）。
+        洗牌提示、发送模式等开关只在本函数生效，入口无需感知；单张牌阵不发洗牌提示。
         """
-        # 注意：洗牌提示不走 yield，用 event.send 直接独立发出——两种入口对 yield 的
-        # 处置不一样：命令入口每个 yield 都会被响应阶段各发一次，工具入口的 Agent Loop
-        # 只取最后一个 yield 的值（asyncgen 取末值），逐段 yield 在那边会被丢掉。
-        # 直发在两边语义一致，也天然独立成一条、不并入转发结果；asyncgen 都会被完整
-        # 迭代，循环前后的副作用照常执行。send 异常时降级为 preface 并入结果。
+        # 洗牌提示不走 yield，用 event.send 独立发出：命令入口每个 yield 都会各发一次，
+        # 工具入口的 Agent Loop 只取最后一个；直发在两边语义一致。send 失败并入结果。
         hint = self._shuffle_hint() if len(positions) > 1 else None
         preface = ""
         if hint:
@@ -578,22 +467,14 @@ class StarFeatherPlugin(Star):
                 preface = hint
         clean = clean_tool_question(question)  # 送 AI 的问题：剥祈使词+阵名（spreads）
         sig_text = ""
-        # 一次占卜只掷一次骰子：牌灵的话与解读正文必须是同一人格。
-        # resolve_persona 在 ai.persona=random 时每次都随机抽——两处各解析一次，
-        # 同一签就会「牌灵傲娇、正文温柔」两副腔调；而 v0.6.0 承诺的是一签固定
-        # 同一人格、next 签才换。所以在这里解析一次，全路径共用同一值。
+        # 一次占卜只掷一次骰子：牌灵的话与解读正文必须是同一人格（random 各自解析会
+        # 出现「牌灵傲娇、正文温柔」两副腔调），这里解析一次，全路径共用。
         persona_eff = resolve_persona(self.tarot.ai_persona)
-        # 一次占卜一笔 AI 总预算（ai.ai_budget_seconds，默认 120s）：牌灵的话与解读
-        # 共用同一个截止点，候选重试、不同供应商回退、结构重试都不得重置它（issue #21 ④）。
-        # 它管的是 AI 阶段的等待上界，不是这条消息端到端的上界——图渲染与平台发送
-        # 另有耗时；预算耗尽后的表现是回退本地牌义。渲染不吃这笔预算（② 之后它整段
-        # 排在预算窗口外面，不占用 AI 的等待时间）。
+        # 一次占卜一笔 AI 总预算（ai.ai_budget_seconds）：候选重试与供应商回退都不重置
+        # 截止点；它只管 AI 阶段，渲染在预算窗口之外。
         budget = self.tarot.new_budget()
-        # 牌灵的话与解读之间没有数据依赖（前者只用牌面与主题，后者只用牌面与问题），
-        # 两段共用同一个**绝对**截止点的预算——串行等待等于白等一个 LLM 往返。
-        # 并发后这段耗时 ≈ max(两段) 而不是两者相加（2026-11-01）。
-        # 失败语义不变：任一段抛异常仍旧冒泡到入口兜底；另一段此时已在跑，
-        # 它自己的结果会随 gather 一起被丢弃（只有装饰性文本，不影响整卦的正确性）。
+        # 两段 AI 没有数据依赖、共用同一个**绝对**截止点：并发后耗时 ≈ max(两段)，
+        # 串行等于白等一个 LLM 往返。失败语义不变，任一段抛异常仍旧冒泡到入口兜底。
         spirit_call = (self.daily.spirit_cached(event, daily_uid, picks, clean, persona_eff,
                                                 budget)
                        if picks else None)
@@ -611,20 +492,14 @@ class StarFeatherPlugin(Star):
         if sig_text:
             # 牌灵的话随 preface 进结果：AI 全失败回退牌义时，牌灵的话一句不丢
             preface = f"{preface}\n{sig_text}" if preface else sig_text
-        # ② 图片后置渲染（2026-10-12）：渲染点从「两段 AI 之前」搬到「两段 AI 之后、
-        # 发送之前」。收益是窗口长度——旧顺序下图得在整段 AI 阶段存活（两段 × 每段多
-        # 候选 × 供应商回退，最坏是 ai_budget_seconds 的量级，实机见过一次 63 秒），
-        # 30s 级别的清理保险丝到点就删，平台读到空文件反过来把整条消息打回（Issue #2）。
-        # 新顺序下渲染点到平台读文件只剩毫秒：窗口不是「变小」，是基本不存在了。
-        # 代价照实记：渲染耗时（0.3~2.5s）从「被 AI 等待掩盖」变成「摆在等待末尾」，
-        # 用户在 AI 出结果后还要多等这一段才收到图（洗牌提示早在最前面独立发出，
-        # 这段等待不是静默的）。渲染本身不吃 AI 预算：budget 只管两段 AI 请求。
+        # 图片后置渲染：排在两段 AI 之后、发送之前，渲染点到平台读文件只剩毫秒。
+        # 旧顺序下图要在整段 AI 等待里存活，清理保险丝到点就删、平台读到空文件会把
+        # 整条消息打回（Issue #2）。代价是渲染耗时（0.3~2.5s）落在等待末尾，但洗牌
+        # 提示早已发出，这段不是静默的；渲染不吃 AI 预算。
         img = None
         if is_daily and daily_uid and picks:
-            # 今日牌运卡：海报卡面印池内固定签文（卡面装饰）；聊天「牌灵的话」由 AI 按
-            # 人设生成（每日牌运与普通占卜共用：同人同日同牌组当天同句）——AI 失败回退
-            # 池内当日句。开关 output.daily_card 只控海报渲染：关掉回到普通牌面图，
-            # 牌灵的话照常；海报渲染失败或 text_only 时同样走下面的回退
+            # 今日牌运卡：海报印池内固定签文，聊天那句由 AI 按人设生成（同人同日同牌组
+            # 当天同句）。output.daily_card 只控海报：关掉/渲染失败/text_only 都回退普通牌面图。
             if self.daily_card and self.tarot.send_mode != "text_only":
                 img = await self.daily.render_daily_card(["今日牌运"], picks, daily_uid)
         if not img:
@@ -637,19 +512,14 @@ class StarFeatherPlugin(Star):
         async for r in self.tarot._deliver(event, interp, img, formation, positions, picks,
                                            fail_note=fail_note, preface=preface):
             yield r
-        # 收尾句独立直发，不并入合并转发消息（与洗牌提示同模式：asyncgen 被框架
-        # 完整迭代，循环后的副作用照常执行）。工具入口 epilogue=False 不触发，
-        # 其收尾由 Agent Loop 的 LLM 回复承担。send 失败仅告警，不追加回结果。
-        # 直发前先等一个窗口：结果这一笔「已交给平台」不等于「已经落到群里」——
-        # 合并转发卡落地慢于紧随其后的纯文本，收尾句会抢在前面到（见窗口常量）。
-        # 这个窗口放在后台任务里等：handler 立刻收尾，用户不再为一句收尾多等两秒。
+        # 收尾句独立直发，不并入合并转发（工具入口 epilogue=False，收尾交给 Agent Loop）；
+        # send 失败仅告警。转发卡落地慢于紧随其后的纯文本，所以先等一个窗口——窗口放在
+        # 后台任务里等，handler 立刻收尾，用户不为一句收尾多等两秒。
         if epilogue_text:
-            # 只有合并转发卡需要等：卡片要在协议端上传卡内图片、拼多消息，落地慢于
-            # 紧随其后的纯文本。plain / text_only 以及 AI 回退路径交付的都是普通链
-            # 消息，与收尾句同一条通道，提交次序即落地次序。
-            # 用 forward_for 而不是裸配置：平台收不下 Nodes 时（WebChat）实际走
-            # 普通链消息，就没有「卡片落地慢」这回事，不该再等窗口；后台任务
-            # 也不适用于 WebChat（handler 结束后请求队列会被移除）。
+            # 只有合并转发需要等：plain / text_only 与 AI 回退路径都是普通链消息，
+            # 提交次序即落地次序。用 forward_for 而不是裸配置：平台收不下 Nodes 时
+            # （WebChat）实际走普通链消息，不该再等；后台任务在那边也不适用
+            # （handler 结束后请求队列会被移除）。
             forwarded = bool(interp) and self.tarot.deliverer.forward_for(event)
             scheduled = (forwarded and _EPILOGUE_DELAY_SECONDS > 0
                          and _schedule_epilogue(event, epilogue_text, _EPILOGUE_DELAY_SECONDS))
