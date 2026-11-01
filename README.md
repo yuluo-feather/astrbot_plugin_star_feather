@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-<img src="https://img.shields.io/badge/version-v0.8.2-f8a5c2" alt="v0.8.2"/>
+<img src="https://img.shields.io/badge/version-v0.8.3-f8a5c2" alt="v0.8.3"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -258,6 +258,15 @@
 
 ## 📜 更新记录
 
+#### v0.8.3
+
+- 修复：注入过滤不再误伤正常问句（口语前缀、常见职业词、英文技术词原样通过）；用户问题改用分隔标签包裹，引号与标签关键词先行剥除——问题里写出结束标记也闭合不了数据块
+- 修复：今日牌运的解读按原句分桶——「今天运势如何，我该不该表白」不再拿到早上那段泛问解读；跨午夜生成的写回不再覆盖新一天的缓存
+- 修复：选阵不再被「他」「喜欢」的构词带偏；「表白」「暗恋」这类爱慕问法仍进恋爱阵
+- 优化：牌灵的话与解读并发执行、共用同一笔预算；牌面图改用 JPEG，体积约为原来的四分之一
+- 修复：未验证平台或取不到平台名时回退普通消息，结果不再可能被静默丢弃
+- 变更：`/单抽` 的说明与实际一致；框架导入改为显式导入，框架名字写错会被静态检查抓到
+
 #### v0.8.2
 
 - 修复：命中缓存时不再做任何写回——无 CAS 的 KV 上「读-改-写」维护可能覆盖并发生成的新主题，也会占住缓存锁；现在命中只读，超限的旧分桶在下一次问新主题（真正写入）时收口到 20 条
@@ -284,10 +293,6 @@
 #### v0.7.4
 
 - 修复：「最近其他事情怎么样」「今天弹吉他怎么样」这类问法，不再被当成有具体主题——句子里带一个「他」，从前就被看作是在为某件具体事发问，于是这类问法错过当天的固定牌、每问一次重新抽；现在它们跟「最近怎么样」一样，按泛问处理，给你当天那一张
-
-#### v0.7.3
-
-- 修复了一些已知 bug
 
 > 更早版本（v0.7.2 及以前）的逐条明细见 [CHANGELOG.md](CHANGELOG.md) 与 `changelogs/` 目录——这里只保留最近 6 个版本的摘要。
 

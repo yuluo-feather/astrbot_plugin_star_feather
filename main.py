@@ -37,7 +37,7 @@ from .prompts import (
 from .spreads import clean_tool_question, select_formation
 from .tarot_core import StarTarot
 
-VERSION = "0.8.2"
+VERSION = "0.8.3"
 
 # 配置新鲜度自证：每次加载在 context 上登记「当前代实例」并打一行 [cfg] LOAD，
 # 两个入口进门各打一行 [cfg] ENTRY 读数；入口发现自己不是登记的那个实例就 warning。

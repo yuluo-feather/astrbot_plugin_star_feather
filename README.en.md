@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-<img src="https://img.shields.io/badge/version-v0.8.2-f8a5c2" alt="v0.8.2"/>
+<img src="https://img.shields.io/badge/version-v0.8.3-f8a5c2" alt="v0.8.3"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -270,6 +270,15 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 
 ## 📜 Changelog
 
+#### v0.8.3
+
+- Fixed: the injection filter no longer mangles ordinary questions (colloquial prefixes, common professions and English technical terms pass through); user questions are fenced and stripped of quotes and fence keywords, so writing a closing marker in the question cannot end the data block early
+- Fixed: daily readings are bucketed by the cleaned question, so a mixed question no longer receives the morning's broad reading; a generation that crosses midnight no longer overwrites the new day's cache
+- Fixed: spread selection is no longer misled by pronoun and hobby substrings, while romance questions still pick the lovers cross
+- Improved: the spirit's line and the reading run concurrently on one shared budget; cards are delivered as JPEG at roughly a quarter of the previous size
+- Fixed: unverified platforms, and events whose platform name cannot be read, fall back to plain messages instead of risking a silently dropped result
+- Changed: the `/单抽` description matches its behaviour, and framework imports are explicit so a misspelled name is a static error
+
 #### v0.8.2
 
 - Fixed: a cache hit no longer writes anything back — on a KV store without compare-and-swap, the read-modify-write trim could overwrite a concurrently generated topic and could also pin the cache lock; hits are now read-only, and an oversized legacy bucket bag is trimmed to 20 on the next new topic (a real write)
@@ -296,10 +305,6 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 #### v0.7.4
 
 - Fixed: a question that merely contains the character 他 is no longer read as being about one specific matter — it used to miss the card of the day and get a fresh draw on every ask; now such a question counts as a general one and hands you today's card the same way a plain how-have-you-been does
-
-#### v0.7.3
-
-- Fixed a few known bugs.
 
 > Full per-version details for v0.7.2 and earlier live in [CHANGELOG.md](CHANGELOG.md) and the `changelogs/` directory — this page keeps only the six most recent releases.
 
