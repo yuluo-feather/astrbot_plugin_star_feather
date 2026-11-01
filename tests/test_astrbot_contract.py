@@ -8,8 +8,8 @@ conftest，import 到的才是真框架。
 
 **口径来源（不许手抄名单，两处都是现成事实）**：
 - 运行时依赖：插件根 `*.py` 里 `from astrbot... import ...` 的每一条（我们真正要的面）；
-- 打桩面：conftest 里 `_mk_module("astrbot...", 名字=...)` 的名单——main.py 有一句
-  `from astrbot.api.all import *`，星导入静态列不出名字，桩名单正是它的枚举替身。
+- 打桩面：conftest 里 `_mk_module("astrbot...", 名字=...)` 的名单。2026-11-01 起插件
+  不再用 `from astrbot.api.all import *`，运行时依赖已能逐条解析，桩名单只作补充。
 
 **管什么**：模块路径导得进来、点名属性存在（**子模块也算存在**：`astrbot.api.event.filter`
 是子模块而不是模块属性，只有真的 import 一次才会挂到父模块上，`hasattr` 单独看会误判
@@ -193,7 +193,7 @@ def _probe_report() -> dict:
 def test_surface_sources_are_parsable():
     """口径来源解析得出东西（解析失效=守卫空转，直接红）。本机无需框架即可跑。"""
     want = required_surface()
-    assert "astrbot.api.all" in want, "conftest 的桩名单没解析出来（星导入那份面靠它）"
+    assert "astrbot.api.star" in want, "插件根没解析出框架导入？口径来源失效：" + str(want)
     assert sum(len(v) for v in want.values()) >= 5, "框架面太少，解析多半失效了：" + str(want)
     assert declared_range(), "metadata.yaml 里没取到 astrbot_version"
 

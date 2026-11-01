@@ -8,8 +8,6 @@
 - 输出与兜底：deliver.py（发送编排）、card_render.py / fonts.py（渲染与字体）
 - 限流与存储：gating.py / limiter.py（限流闸门与纯逻辑）、kv_utils.py（KV 读写原语，daily/gating 共用）
 """
-# ruff: noqa: F403, F405, I001  # 星导入是 AstrBot 插件惯例，名字进来自框架，静态分析无从溯源；
-# I001 一并豁免：框架 logger 必须排在星导入之后重新绑一次（见下方导入处注释），isort 想对调。
 import asyncio
 import os
 import random
@@ -24,16 +22,12 @@ import re
 #   ② pop 清的是通用名字，同一解释器里别的插件或库若同名，会被无辜拆掉。
 # 框架的加载路径本就是 data.plugins.astrbot_plugin_star_feather.main 这一串包路径，包前缀
 # 已经在手上，相对导入是顺着它走，不是另开一条路。
-
 # 本插件的模块间引用（实现分别在 config / daily / gating / identity / prompts / settings / spreads）：
 # 测试与外部如需内部函数，请直接从实现模块导入，别绕道本入口文件转发。
-from astrbot.api.all import *
+from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.message_components import Plain
-
-# 框架 logger（astrbot.api 的插件代理）：必须在星导入之后重新绑一次——
-# all.py 里的 logger 是 from astrbot import logger 那位全局 logger，星导入会把它灌进来。
-from astrbot.api import logger
+from astrbot.api.star import Context, Star, register
 
 from .card_render import cleanup_stale_images
 from .daily import DailyFortune, _is_daily_request
@@ -323,21 +317,6 @@ class StarFeatherPlugin(Star):
             return None
         return random.choice(SHUFFLE_LINES)
 
-    def _require_prefix(self, event: AstrMessageEvent) -> bool:
-        """触发门槛：信任框架，不再自行校验前缀。
-
-        能走到这里说明 CommandFilter 已命中本命令——框架的 waking_check
-        （wake_prefix 触发词 / @ 机器人 / 私聊唤醒）先于插件完成了门槛判定，
-        插件重复检查前缀只会和 WebUI 配置的触发词打架（原「私聊必须带 /」
-        正是如此）。防误触由框架保证：命令名需以
-        「占卜 问题」整段开头（后跟空格或句尾），「占卜一下」这类闲聊措辞
-        不会被当成命令。哼，门槛交给框架，牌灵只管算牌。
-
-        注意：本方法恒为 True，是「不再收紧门槛」的设计哨兵（见 tests 的
-        TestRequirePrefix 防回归）；不要把它改回真正的校验。
-        """
-        return True
-
     async def _command_entry(self, event: AstrMessageEvent, text: str, *,
                              err_tpl: str, helpable: bool = False,
                              force_daily: bool = False, fixed_formation: str = "",
@@ -386,7 +365,7 @@ class StarFeatherPlugin(Star):
             # 异常细节只进日志：err_tpl 是纯友好文案，不把路径/内部结构发给用户
             yield event.plain_result(err_tpl)
 
-    @command("占卜", desc="78张塔罗牌 AI 占卜与深度解读")
+    @filter.command("占卜", desc="78张塔罗牌 AI 占卜与深度解读")
     async def divine(self, event: AstrMessageEvent, text: str = ""):
         async for r in self._command_entry(
                 event, text,
@@ -395,7 +374,7 @@ class StarFeatherPlugin(Star):
                 fail_note="📖 解读：\n（AI 今天闹脾气不肯开口，牌面先给你，自己琢磨~）"):
             yield r
 
-    @command("单抽", desc="随机抽取一张塔罗牌并解读")
+    @filter.command("单抽", desc="抽取一张塔罗牌并解读（默认当天固定）")
     async def single(self, event: AstrMessageEvent, text: str = ""):
         async for r in self._command_entry(
                 event, text,

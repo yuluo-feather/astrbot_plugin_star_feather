@@ -144,6 +144,8 @@ class TestDailyEventAttribution:
         "我今天这么倒霉是不是因为运气差",
         "考试没考好难道是因为运势不行吗",
         "工资没涨大概是因为运气不太好",
+        # 2026-11-01：「是不是运气问题」是归因宾语，不是查询运势值
+        "我最近老是丢东西，是不是运气问题",
     ])
     def test_event_attribution_not_daily(self, q):
         assert not _is_daily_request(q), f"事件归因式不应判为每日牌运: {q!r}"
@@ -180,6 +182,8 @@ class TestDailyGenericWhitelist:
         "这两天唉声叹气",
         "今天下午开会吗",
         "今天真的好累",
+        # 2026-11-01：句中「如何」是普通动词用法，不是「最近如何」那种整句泛问
+        "今天会下雨吗，如何出门",
     ])
     def test_event_state_not_daily(self, q):
         assert not _is_daily_request(q), f"事件/状态描述不应判为每日牌运: {q!r}"

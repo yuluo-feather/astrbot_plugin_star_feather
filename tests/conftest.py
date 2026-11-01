@@ -175,6 +175,7 @@ def llm_tool(*args, **kwargs):
 
 class _Filter:
     llm_tool = staticmethod(llm_tool)
+    command = staticmethod(command)
 
 
 # 框架 logger 桩：真框架里 astrbot.api.logger 是按插件路由的 logger 代理，运行时插件全走它。
@@ -182,9 +183,8 @@ class _Filter:
 _FRAMEWORK_LOGGER = logging.getLogger("astrbot.plugin.astrbot_plugin_star_feather")
 
 _mk_module("astrbot")
-_mk_module("astrbot.api", logger=_FRAMEWORK_LOGGER)
-_mk_module("astrbot.api.all", Context=Context, AstrBotConfig=AstrBotConfig,
-           Star=Star, register=register, command=command)
+_mk_module("astrbot.api", logger=_FRAMEWORK_LOGGER, AstrBotConfig=AstrBotConfig)
+_mk_module("astrbot.api.star", Context=Context, Star=Star, register=register)
 _mk_module("astrbot.api.event", AstrMessageEvent=AstrMessageEvent,
            MessageChain=MessageChain, filter=_Filter())
 _mk_module("astrbot.api.message_components", At=At, Image=Image,

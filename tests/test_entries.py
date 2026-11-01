@@ -513,17 +513,6 @@ class TestCommandEntry:
         assert "C:" not in joined and "leak" not in joined and "RuntimeError" not in joined
 
 
-class TestRequirePrefix:
-    """触发门槛信任框架：waking_check（wake_prefix 触发词 / @ 机器人 / 私聊唤醒）
-    与 CommandFilter 的精确匹配已在插件之前完成，插件不再重复校验前缀——
-    重复校验会与 WebUI 配置的触发词打架（issue「只能 / 加指令」的根因）。"""
-
-    def test_trusts_framework_private_bare_command(self):
-        # 私聊裸命令「占卜 感情」（无 /、无 @）放行；旧实现会拦截并提示带 /
-        p = StarFeatherPlugin.__new__(StarFeatherPlugin)
-        evt = types.SimpleNamespace(message_str="占卜 感情", is_private_chat=lambda: True)
-        assert p._require_prefix(evt) is True
-
 # ---------- 真实全链：命令入口 epilogue → 独立直发 ----------
 class TestRunReadingRealChain:
     """命令入口 epilogue=True → 真实 _run_reading → 真实 TarotCore._deliver →

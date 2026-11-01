@@ -381,7 +381,9 @@ def _background_cached(suit: str, num: str, cn: str, w: int, h: int) -> Image.Im
     path = _asset_path({"suit": suit, "num": num, "cn": cn})
     if not os.path.exists(path):
         raise FileNotFoundError(f"塔罗素材缺失: {path}")
-    src = Image.open(path).convert("RGBA")
+    # with 收口：convert() 已经把像素读进来，文件句柄不必拖到 GC（WebP 句柄尤其要收）
+    with Image.open(path) as raw:
+        src = raw.convert("RGBA")
     band = max(1, int(src.height * 0.72))
     band_top = (src.height - band) // 2
     src = src.crop((0, band_top, src.width, band_top + band))
@@ -416,13 +418,14 @@ def _load_card_image(path: str, upright: bool):
     结果按 (路径, 正逆) 缓存（LRU 8，约 6MB）：这一步是高清素材解码 + LANCZOS 缩放，
     实测本机 50~80ms/张（随负载浮动）——同一张牌再次出现（连续占卜、同群多签）时直接命中。
     返回的图是缓存本体，调用方只许 paste（不得就地改画）。"""
-    img: Image.Image = Image.open(path)
-    scale = min(INNER_W / img.width, INNER_H / img.height)
-    tw = max(1, int(img.width * scale))
-    th = max(1, int(img.height * scale))
-    img = img.resize((tw, th), _RESAMPLE)
-    if img.mode != "RGBA":
-        img = img.convert("RGBA")
+    # 单张解码在 with 里完成：resize/convert 产出的都是新图，句柄可以当场关掉
+    with Image.open(path) as raw:
+        scale = min(INNER_W / raw.width, INNER_H / raw.height)
+        tw = max(1, int(raw.width * scale))
+        th = max(1, int(raw.height * scale))
+        img: Image.Image = raw.resize((tw, th), _RESAMPLE)
+        if img.mode != "RGBA":
+            img = img.convert("RGBA")
     if not upright:
         img = img.rotate(180)
     return img, tw, th
