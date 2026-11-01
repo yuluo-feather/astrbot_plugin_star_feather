@@ -172,6 +172,20 @@ class TestTempCleanup:
         card_render._schedule_image_cleanup("C:/not/exist/tarot_x.png")
         card_render._schedule_image_cleanup(None)
 
+    def test_cleanup_task_is_referenced_until_it_finishes(self, tmp_path):
+        """任务必须留强引用：asyncio 只持弱引用，没人引用时可能被 GC，保险丝静默失效。"""
+        f = tmp_path / "tarot_keep.png"
+        f.write_bytes(b"x")
+
+        async def go():
+            card_render._schedule_image_cleanup(str(f), delay=0)
+            assert card_render._CLEANUP_TASKS, "任务应被集合引用"
+            await asyncio.sleep(0.05)
+            return not card_render._CLEANUP_TASKS
+
+        assert asyncio.run(go())
+        assert not f.exists()
+
     def test_ttl_is_one_number_and_it_is_a_fuse(self):
         """保险丝时长只有一份，且不许回落到「牌灵的话」都能跑过的量级。
 
@@ -260,12 +274,13 @@ class TestStaleCleanup:
         card_render.cleanup_stale_images(str(mine))
         assert (mine / "tarot_mine.png").exists()
 
-    def test_same_pid_other_instance_dir_never_reaped(self, tmp_path, monkeypatch):
-        """同进程的另一代实例目录免删：热重载的新实例不许回收旧实例还在等发送的图。
+    def test_same_pid_stale_non_empty_dir_kept(self, tmp_path, monkeypatch):
+        """同进程的另一代实例目录只要不是空壳就免删：热重载的新实例不许回收旧实例
+        还在等发送的图。
 
         这是①最危险的那一类：名字合规、确实过期、而且 pid 就是本进程——旧写法只跳过
         传入的 current_dir，于是刚出生的新实例会把隔壁老实例的目录整个删掉
-        （2026-10-13 外部复现已确认）。判据取 PID 解析：本进程的任何实例目录都不碰。
+        （2026-10-13 外部复现已确认）。判据取 PID 解析 + 目录非空即保留。
         """
         root = self._root(tmp_path, monkeypatch)
         old = root / f"inst_{os.getpid()}_1_deadbeef"
@@ -277,6 +292,38 @@ class TestStaleCleanup:
         card_render.cleanup_stale_images(str(new))   # 只传自己：旧实例目录仍须免删
         assert old.exists() and (old / "tarot_x.png").exists()
         assert new.exists()
+
+    def test_same_pid_empty_stale_dir_reaped(self, tmp_path, monkeypatch):
+        """同进程的旧实例目录只剩空壳时按过期回收：否则每次热重载都留下一个空目录，
+        进程不退出就永远清不掉。"""
+        root = self._root(tmp_path, monkeypatch)
+        old = root / f"inst_{os.getpid()}_1_deadbeef"
+        new = root / f"inst_{os.getpid()}_2_cafebabe"
+        for d in (old, new):
+            d.mkdir()
+        self._age(old, card_render.STALE_INSTANCE_DIR_AGE * 10)
+        card_render.cleanup_stale_images(str(new))
+        assert not old.exists(), "同进程的空壳过期目录应被回收"
+        assert new.exists(), "当前实例目录永不删"
+
+    def test_same_pid_empty_fresh_dir_kept(self, tmp_path, monkeypatch):
+        """同进程、空、但没过期：可能是旧实例刚建出来还没渲染，别动。"""
+        root = self._root(tmp_path, monkeypatch)
+        old = root / f"inst_{os.getpid()}_1_deadbeef"
+        new = root / f"inst_{os.getpid()}_2_cafebabe"
+        for d in (old, new):
+            d.mkdir()
+        card_render.cleanup_stale_images(str(new))
+        assert old.exists(), "没过期的空目录不许回收"
+
+    def test_same_pid_empty_current_dir_kept(self, tmp_path, monkeypatch):
+        """当前实例目录哪怕空且过期也不删：时钟被往回调时它可能正要落第一张图。"""
+        root = self._root(tmp_path, monkeypatch)
+        mine = root / f"inst_{os.getpid()}_3_0badc0de"
+        mine.mkdir()
+        self._age(mine, card_render.STALE_INSTANCE_DIR_AGE * 10)
+        card_render.cleanup_stale_images(str(mine))
+        assert mine.exists()
 
     def test_other_pid_stale_dir_is_still_reaped(self, tmp_path, monkeypatch):
         """反向一格：别的 PID 的过期目录照旧回收——① 改的是豁免面，不是停掉回收。"""
@@ -578,3 +625,27 @@ class TestBackgroundRandomHygiene:
         path = card_render.render_cards(positions, picks, "羽时三刻", save_dir=str(tmp_path))
         assert os.path.isfile(path)
         assert random.getstate() == before      # 全局随机序一模一样：一次都没被消耗
+
+
+# ---------- 保存与清理的竞态：目录被回收后要能补建 ----------
+class TestSavePngRace:
+    def test_recreates_directory_removed_before_save(self, tmp_path):
+        """启动清理若在保存前一刻回收了空目录，保存要重建目录，而不是丢掉整张图。"""
+        target = tmp_path / "inst_1_1_deadbeef"
+        target.mkdir()
+        out = target / "tarot_x.png"
+
+        class _Img:
+            calls = 0
+
+            def save(self, path, fmt):
+                self.calls += 1
+                if self.calls == 1:
+                    os.rmdir(os.path.dirname(path))     # 模拟清理抢在前面
+                with open(path, "wb") as f:
+                    f.write(b"PNG")
+
+        img = _Img()
+        card_render._save_png(img, str(out))
+        assert out.exists()
+        assert img.calls == 2, "第一次保存失败后应重建目录并重试一次"

@@ -604,6 +604,56 @@ class TestImageGoneBeforeSend:
         p.tarot._maybe_render_image = boom
         assert _run(p._ensure_image(missing, self.FORMATION, self.POSITIONS, [PICK])) is None
 
+    def test_verify_image_treats_a_vanishing_file_as_missing(self, tmp_path, monkeypatch):
+        """exists 与 getsize 之间的竞态：getsize 抛 FileNotFoundError 也要走补渲染。
+
+        两步式写法（先 exists 再 getsize）会让「正好在两步之间被外部删掉」落进
+        宽泛的 OSError 分支、把过期路径当健康图交出去。现在只调一次 getsize，
+        FileNotFoundError 按缺失处理；其他 OSError（权限/长度）维持原语义。
+        """
+        stale = str(tmp_path / "tarot_race.png")
+        fresh = str(tmp_path / "tarot_fresh.png")
+        open(stale, "wb").write(b"PNG")   # 先真实存在：模拟「判完之后、取值之前被删」
+
+        def render():
+            open(fresh, "wb").write(b"PNG")
+            return fresh
+
+        p, calls = self._plugin(render)
+        real_getsize = os.path.getsize
+
+        def flaky(path):
+            if path == stale:
+                os.remove(stale)          # 竞态正好发生在这里
+                raise FileNotFoundError(path)
+            return real_getsize(path)
+
+        monkeypatch.setattr(os.path, "getsize", flaky)
+        assert _run(p._ensure_image(stale, self.FORMATION, self.POSITIONS, [PICK])) == fresh
+        assert calls == [self.FORMATION], "消失的图必须补渲染一次"
+
+    def test_verify_image_treats_other_oserrors_as_missing(self, tmp_path, monkeypatch):
+        """权限 / 路径非法等 OSError 同样走补渲染：未核验的路径不交给发送侧。"""
+        stale = str(tmp_path / "tarot_unreadable.png")
+        fresh = str(tmp_path / "tarot_fresh2.png")
+        open(stale, "wb").write(b"PNG")   # 先存在，再让取值失败
+
+        def render():
+            open(fresh, "wb").write(b"PNG")
+            return fresh
+
+        p, calls = self._plugin(render)
+        real_getsize = os.path.getsize
+
+        def denied(path):
+            if path == stale:
+                raise PermissionError(13, "denied", path)
+            return real_getsize(path)
+
+        monkeypatch.setattr(os.path, "getsize", denied)
+        assert _run(p._ensure_image(stale, self.FORMATION, self.POSITIONS, [PICK])) == fresh
+        assert calls == [self.FORMATION], "问不出大小的图必须补渲染一次"
+
 
 # ============ ② 图片后置渲染：渲染排在两段 AI 之后（2026-10-12） ============
 class TestRenderAfterBothAI:

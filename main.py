@@ -106,6 +106,42 @@ _CFG_FIELD_NAMES = ("shuffle_lines", "enable_ai", "ai_timeout", "llm_tool_enable
 # 也是一条普通链消息。这两种情形睡窗口纯属白让用户多等，故只在小节末按条件睡。
 _EPILOGUE_DELAY_SECONDS = 2.0
 
+# 收尾句后台任务的强引用集合：asyncio 只对任务持弱引用，没人引用时可能被 GC 掉，
+# 收尾句就静默丢了。任务结束（含取消/异常）由 done callback 自摘。
+_EPILOGUE_TASKS: set = set()
+
+
+async def _send_epilogue_after_window(event, text: str, delay: float) -> None:
+    """等窗口再直发收尾句。异常只告警：收尾句是赠品，不许反噬已经交付的结果。"""
+    if delay > 0:
+        await asyncio.sleep(delay)
+    try:
+        await event.send(MessageChain([Plain(text)]))
+    except Exception as e:
+        logger.warning(f"收尾句独立发送失败: {e}")
+
+
+def _schedule_epilogue(event, text: str, delay: float) -> bool:
+    """把「等窗口 + 直发」放进后台任务，命令处理协程不再为此挂起。
+
+    窗口只买「合并转发卡落地慢」这一件事：结果已经提交给平台，收尾句晚几秒到即可。
+    冻结 event 引用交给任务持有；AstrBot 的 send 只依赖事件对象与平台通道，不要求
+    handler 还活着。
+
+    契约：本函数永不抛——调度失败（循环已在收尾）只告警并返回 False，由调用方退回
+    同步直发；协程先 close 掉，免得日志里多一条 never awaited。
+    """
+    coro = _send_epilogue_after_window(event, text, delay)
+    try:
+        task = asyncio.create_task(coro)
+    except Exception as e:
+        coro.close()
+        logger.warning(f"收尾句后台任务登记失败，改用同步直发: {e}")
+        return False
+    _EPILOGUE_TASKS.add(task)
+    task.add_done_callback(_EPILOGUE_TASKS.discard)
+    return True
+
 
 def _cfg_fingerprint(plugin) -> str:
     """一行配置读数：两个对象 id 取十六进制（够比对，又不至于长得读不下去）+ 四个开关值。
@@ -360,6 +396,7 @@ class StarFeatherPlugin(Star):
         async for r in self._command_entry(
                 event, text,
                 err_tpl="单抽断线了。牌灵今天不太配合，晚点再试。",
+                helpable=True,
                 force_daily=True, fixed_formation="羽签",
                 empty_fallback="（今日牌运）"):
             yield r
@@ -403,6 +440,12 @@ class StarFeatherPlugin(Star):
             return
         # message_str 属性异常/缺失时按空文本处理（保 Agent Loop 不中断）
         text = (getattr(event, "message_str", "") or "").strip()
+        # 帮助请求不占卜：模型偶尔会把「占卜怎么用」也调到这里，
+        # 命中帮助页就直发并结束，别真抽一副牌
+        if _is_help_request(text):
+            await self._tool_send(event, self._help())
+            yield "帮助页已发送。请自然回应一句，不必再调用工具。"
+            return
         if not text:
             yield "工具收到空文本：用户没说占卜什么。请回一句，引导用户说出想占卜的内容（如感情、事业、学业、今日运势）。"
             return
@@ -481,7 +524,7 @@ class StarFeatherPlugin(Star):
         （ai.ai_budget_seconds，默认 120s），把窗口上界从「没有上界」收到预算量级；
         同日 ② 图片后置渲染把渲染点搬到两段 AI 之后，窗口进一步收到毫秒级。
         本函数**只判文件在不在、不判图片年龄**，因此它守的从来不是「图会不会过期」，
-        而是「这一秒钟拿到的图真的能打开」——即清理定时器（600s 保险丝）之外，
+        而是「这一秒钟拿到的图存在且非空」——即清理定时器（600s 保险丝）之外，
         外部因素（磁盘清理、别的进程、人工 rm）在最后几毫秒里删掉文件也在它的职责内。
 
         所以清理定时器只当保险丝，真正的判据落在发送前这一刻：距离平台读取只剩
@@ -492,11 +535,18 @@ class StarFeatherPlugin(Star):
         if not isinstance(img, str) or not img:
             return img  # 本就无图（text_only / 渲染失败）：无需核验，别白跑一次渲染
         try:
-            if os.path.exists(img):
-                return img
-        except OSError:
-            return img  # 路径本身问不出来（权限/长度等）：交给发送侧，别在这里改语义
-        logger.warning(f"牌面图在发送前已不存在（多半是 AI 耗时超过清理保险丝）：{img}")
+            # getsize 一次调用同时判「在不在」与「是不是空」：分成 exists + getsize
+            # 两步时，文件可能正好在两步之间被删掉。
+            size = os.path.getsize(img)
+        except OSError as e:
+            # 删除、权限、路径非法……只要问不出「非空文件」就当缺失处理，统一走
+            # 下面的补渲染：把未核验的路径交给发送侧只会让整条消息被打回
+            size, why = 0, f"核验失败：{e}"
+        else:
+            why = "是空文件"
+        if size > 0:
+            return img
+        logger.warning(f"牌面图在发送前不可用（{why}）：{img}")
         try:
             new_img = await self.tarot._maybe_render_image(formation, positions, picks)
         except Exception as e:
@@ -600,17 +650,19 @@ class StarFeatherPlugin(Star):
         # 其收尾由 Agent Loop 的 LLM 回复承担。send 失败仅告警，不追加回结果。
         # 直发前先等一个窗口：结果这一笔「已交给平台」不等于「已经落到群里」——
         # 合并转发卡落地慢于紧随其后的纯文本，收尾句会抢在前面到（见窗口常量）。
+        # 这个窗口放在后台任务里等：handler 立刻收尾，用户不再为一句收尾多等两秒。
         if epilogue_text:
             # 只有合并转发卡需要等：卡片要在协议端上传卡内图片、拼多消息，落地慢于
             # 紧随其后的纯文本。plain / text_only 以及 AI 回退路径交付的都是普通链
             # 消息，与收尾句同一条通道，提交次序即落地次序。
             forwarded = bool(interp) and self.tarot.deliverer.forward_result
-            if forwarded and _EPILOGUE_DELAY_SECONDS > 0:
-                await asyncio.sleep(_EPILOGUE_DELAY_SECONDS)
-            try:
-                await event.send(MessageChain([Plain(epilogue_text)]))
-            except Exception as e:
-                logger.warning(f"收尾句独立发送失败: {e}")
+            scheduled = (forwarded and _EPILOGUE_DELAY_SECONDS > 0
+                         and _schedule_epilogue(event, epilogue_text, _EPILOGUE_DELAY_SECONDS))
+            if not scheduled:
+                try:
+                    await event.send(MessageChain([Plain(epilogue_text)]))
+                except Exception as e:
+                    logger.warning(f"收尾句独立发送失败: {e}")
 
 
     # ---------- 今日固定牌运（实现全在 daily.py，入口层不设转发层） ----------

@@ -69,6 +69,7 @@ class TestToolQuestion:
         assert clean_tool_question("帮我算一卦我和她的感情") == "我和她的感情"
         assert clean_tool_question("麻烦看看我的事业") == "我的事业"
         assert clean_tool_question("给我抽一张牌") == ""
+        assert clean_tool_question("来一卦") == ""      # 长词优先：别剥成「一卦」
 
     def test_strip_alias_in_tool(self):
         assert clean_tool_question("圣三角 考研如何") == "考研如何"
