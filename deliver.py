@@ -22,17 +22,19 @@ _WARNED_FORWARD_PLATFORMS: set[str] = set()
 def supports_forward(event) -> bool:
     """该事件所在平台能不能收 Nodes（合并转发）。
 
-    取不到平台名（空串 / 事件桩 / 老版本事件）时按「支持」处理：诊断字段缺失
-    不该改变既有发送形态。非空但不在白名单里的平台回退普通消息，并在首次遇到时
-    留一条 warning——静默降级正是这条要修的毛病（用户配着默认值却看不到结果，
-    日志里也没有一句解释）。
+    判据取白名单，且**取不到平台名时按不支持处理**：普通链消息在任何适配器都送得出去，
+    而未知平台发 Nodes 可能被静默丢掉——诊断字段缺失（空串 / 事件桩 / 老版本事件）
+    不该赌用户能不能看到结果。非白名单平台回退普通消息，并在首次遇到时留一条 warning
+    ——静默降级正是这条要修的毛病（用户配着默认值却看不到结果，日志里也没有一句解释）。
     """
     try:
         name = str(event.get_platform_name() or "").strip().lower()
     except Exception:
+        name = ""
+    if name in _FORWARD_SUPPORTED_PLATFORMS:
         return True
-    if not name or name in _FORWARD_SUPPORTED_PLATFORMS:
-        return True
+    if not name:
+        return False
     if name not in _WARNED_FORWARD_PLATFORMS:
         _WARNED_FORWARD_PLATFORMS.add(name)
         logger.warning(

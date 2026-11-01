@@ -159,6 +159,8 @@ class TestDailyEventAttribution:
         "今天感情运势",
         "他有运气吗",
         "我今天的运气怎么样",
+        # 2026-11-01 review：「是不是运气好」是查询运势值，不是归因宾语
+        "今天是不是运气好",
     ])
     def test_still_daily(self, q):
         assert _is_daily_request(q), f"仍是每日牌运: {q!r}"
@@ -191,6 +193,8 @@ class TestDailyGenericWhitelist:
     @pytest.mark.parametrize("q", [
         # a. 泛问句式
         "最近怎么样", "今天怎么样", "这个月如何", "近期如何", "这两天还好吗",
+        # 句尾口语语气词（review 复核）：啊 / 呀 / 嘛 不能把泛问挡在牌运之外
+        "最近怎么样啊", "这个月如何呀", "今天怎么样嘛",
         # b. 签文类
         "每日塔罗", "今天来一签", "每日一签",
     ])

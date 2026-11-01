@@ -206,8 +206,19 @@ class TestDailyInterpTopic:
         assert _norm_topic(mixed) == mixed
         assert _norm_topic(mixed) != _GENERIC_TOPIC
         # 纯泛问仍归通用桶，且不同措辞共享
-        for q in ("今天运势", "看看今天的运势", "每日一签", "最近怎么样"):
+        for q in ("今天运势", "看看今天的运势", "每日一签", "最近怎么样", "今天来一签"):
             assert _norm_topic(q) == _GENERIC_TOPIC, q
+
+    def test_writeback_skipped_when_new_day_already_cached(self):
+        """跨午夜生成：KV 已是新一天记录时，前一晚的写回不许覆盖（review 复核）。"""
+        kv = {"sf_daily_u1": {"date": "20991231",
+                              "interps": {"（今日牌运）": "新一天的解读"}}}
+        df, calls = self._daily(kv)
+        df.clock = types.SimpleNamespace(today=lambda: "20260101")
+        out = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], "今天运势"))
+        assert out == "解读:今天运势"
+        assert kv["sf_daily_u1"]["date"] == "20991231", "昨天的写回盖掉了新一天的记录"
+        assert kv["sf_daily_u1"]["interps"] == {"（今日牌运）": "新一天的解读"}
 
     def test_same_specific_topic_reuses(self):
         kv = {}

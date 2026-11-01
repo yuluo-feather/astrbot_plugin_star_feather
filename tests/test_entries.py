@@ -530,6 +530,8 @@ class TestRunReadingRealChain:
         evt = types.SimpleNamespace()
         evt.result = None
         evt.get_self_id = lambda: "12345"
+        # 转发路径需要白名单平台名；取不到平台名现在按「不支持」回退普通链（review 复核）
+        evt.get_platform_name = lambda: "aiocqhttp"
         def chain_result(chain):
             evt.result = chain
             return evt.result
@@ -777,6 +779,7 @@ class TestEpilogueWindow:
         evt = types.SimpleNamespace()
         evt.result = None
         evt.get_self_id = lambda: "12345"
+        evt.get_platform_name = lambda: "aiocqhttp"   # 转发路径要白名单平台名
 
         def chain_result(chain):
             evt.result = chain
@@ -879,6 +882,7 @@ class TestEpilogueWindow:
         evt = types.SimpleNamespace()
         evt.result = None
         evt.get_self_id = lambda: "12345"
+        evt.get_platform_name = lambda: "aiocqhttp"   # 转发路径要白名单平台名
 
         def chain_result(chain):
             evt.result = chain

@@ -34,6 +34,10 @@ class TestRenderSmoke:
         path = card_render.render_cards(positions, picks, "羽时三刻", save_dir=str(tmp_path))
         assert os.path.isfile(path)
         assert path.endswith(".jpg") and os.path.getsize(path) > 10_000
+        # 扩展名与编码必须一致：保存实现若退回 PNG，只查后缀/尺寸会静默放行（review 复核）
+        from PIL import Image
+        with Image.open(path) as im:
+            assert im.format == "JPEG"
 
     def test_background_cache_returns_independent_copy(self):
         """背景缓存必须返回独立副本。
@@ -113,6 +117,7 @@ class TestRenderSmoke:
         with Image.open(path) as im:
             assert im.size == (card_render.DAILY_CARD_W, card_render.DAILY_CARD_H)
             assert im.mode == "RGB"
+            assert im.format == "JPEG"
 
     def test_daily_card_poster_missing_asset_raises(self, tmp_path):
         # 素材缺失：向调用方抛异常（编排层负责回退，渲染层只保证 fail loudly）

@@ -74,6 +74,8 @@ class TestDeliverEpilogue:
             return e.result
         e.chain_result = chain_result
         e.get_self_id = lambda: "12345"
+        # 转发形态需要白名单平台名；取不到平台名现在按不支持回退普通链（review 复核）
+        e.get_platform_name = lambda: "aiocqhttp"
         return e
 
     @staticmethod
@@ -163,6 +165,22 @@ class TestForwardPlatformFallback:
         text = "".join(getattr(c, "text", "") for c in comps)
         assert "【总结】结论" in text
 
+    def test_unknown_platform_name_falls_back_to_plain(self):
+        """拿不到平台名按不支持处理：普通链总能送达，未知平台发 Nodes 可能被丢掉（review 复核）。"""
+        evt = self._evt("")
+        self._collect(Deliverer(300, "", True), evt)
+        assert not any(isinstance(c, Nodes) for c in list(evt.result))
+
+    def test_platform_name_exception_falls_back_to_plain(self):
+        """平台名查询抛异常同样回退普通消息，不许拿「诊断缺失」赌结果能送达。"""
+        evt = self._evt("aiocqhttp")
+
+        def boom():
+            raise RuntimeError("no platform info")
+        evt.get_platform_name = boom
+        self._collect(Deliverer(300, "", True), evt)
+        assert not any(isinstance(c, Nodes) for c in list(evt.result))
+
 
 def _plain_text(formation, positions, picks):
     """仿 tarot_core._render_text 的逐牌牌义兜底文案（回归用例用）。
@@ -194,6 +212,8 @@ class TestDeliverAIlessFallback:
 
         e.chain_result = chain_result
         e.get_self_id = lambda: "12345"
+        # 转发形态需要白名单平台名；取不到平台名现在按不支持回退普通链（review 复核）
+        e.get_platform_name = lambda: "aiocqhttp"
         return e
 
     @staticmethod

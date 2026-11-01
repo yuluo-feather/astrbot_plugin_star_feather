@@ -46,6 +46,12 @@ class TestSelectFormation:
         """「喜欢」不再单独作为恋爱关键词：爱好类问题不判恋爱阵。"""
         assert select_formation("我喜欢做设计，要不要转行") == "羽时三刻"
 
+    def test_romance_phrases_without_pronoun(self):
+        """没有「他/她」时，爱慕短语也要进恋爱阵（review 复核）。"""
+        assert select_formation("我该不该表白") == "恋羽十字"
+        assert select_formation("暗恋一个人很久了") == "恋羽十字"
+        assert select_formation("我喜欢你，怎么办") == "恋羽十字"
+
     def test_pronoun_relation_still_lovers(self):
         """摘构词的同时不能把真有关系主体的问题一起摘掉。"""
         assert select_formation("她会喜欢我吗") == "恋羽十字"

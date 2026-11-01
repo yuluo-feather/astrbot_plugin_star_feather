@@ -148,8 +148,8 @@ def build_spirit_line_prompt(cards: list, topic: str, persona_eff) -> str:
     输出约定：只输出那句话本身（引号剥除/截断在 interpret.spirit_line）。
     """
     shown = "、".join(f"{cn}·{'正位' if upright else '逆位'}" for cn, upright in cards)
-    # 主题同样来自用户原话：剥掉引号类字符，别让它跳出「」改写句子结构
-    topic = _QUESTION_QUOTE_RE.sub("", topic or "").strip()
+    # 主题同样来自用户原话：剥引号类字符与分隔标签关键词，别让它跳出「」或提前闭合数据块
+    topic = _FENCE_WORD_RE.sub("", _QUESTION_QUOTE_RE.sub("", topic or "")).strip()
     topic_part = f"，主题是「{topic}」" if topic else ""
     base = _SPIRIT_TEMPLATE.format(shown=shown, topic_part=topic_part)
     if persona_eff:
@@ -168,6 +168,10 @@ SECTION_MARK_RE = re.compile(r"(?=【(?:第\d+张[^】]*|总结)】)")
 # 剥引号只是不给它借力的地方。
 _QUESTION_QUOTE_RE = re.compile(r"[“”\"「」『』]")
 
+# 分隔标签里的关键词：用户原样写出「用户问题结束」就能提前闭合数据块，后面的文字
+# 随之变成指令。把这两个词从用户输入里删掉，标记行就再也拼不出来（引号剥除同理）。
+_FENCE_WORD_RE = re.compile(r"用户问题(?:开始|结束)")
+
 
 def build_reading_prompt(user_input: str, formation: str, detail: str) -> str:
     """AI 解读用户提示：问题 + 牌阵 + 抽牌结果 + 输出格式要求。
@@ -176,7 +180,7 @@ def build_reading_prompt(user_input: str, formation: str, detail: str) -> str:
     用户问题用分隔标签包成一段数据：引号类字符先剥除，system prompt 里也已声明
     标签内只是待解读的问题——两处配合，用户输入改不动提示词结构。
     """
-    question = _QUESTION_QUOTE_RE.sub("", user_input or "").strip()
+    question = _FENCE_WORD_RE.sub("", _QUESTION_QUOTE_RE.sub("", user_input or "")).strip()
     return (
         "你是一位温柔而专业的塔罗占卜师。\n"
         "--- 用户问题开始 ---\n"
