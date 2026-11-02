@@ -318,6 +318,12 @@ def _wrap_text(draw, text, font, max_w):
             cur = ch
     if cur:
         lines.append(cur)
+    # 均衡断行：最后一行只剩一个字（「延迟的快 / 乐」）时从上一行借一个字下来，
+    # 两行都不至于孤零零。只在两行时做——三行起后两行会被 _draw_card 的 [:2] 截掉。
+    if (len(lines) == 2 and len(lines[-1]) == 1 and len(lines[0]) > 1
+            and draw.textlength(lines[0][-1] + lines[-1], font=font) <= max_w):
+        lines[-1] = lines[0][-1] + lines[-1]
+        lines[0] = lines[0][:-1]
     return lines
 
 

@@ -24,6 +24,7 @@ class TestDivineToolDirect:
     def _plugin(throttle_remain=0, limit_block=None):
         p = StarFeatherPlugin.__new__(StarFeatherPlugin)
         p.tarot = types.SimpleNamespace(llm_tool_cooldown=30, llm_tool_enabled=True)
+        p.daily_fixed = True
 
         async def fake_throttle(key, cooldown):
             return throttle_remain
@@ -32,8 +33,8 @@ class TestDivineToolDirect:
             return limit_block
         p.gate = types.SimpleNamespace(session_throttle=fake_throttle, check=fake_gate)
 
-        async def fake_pick(event, text, force_daily=False, fixed_formation=""):
-            return (False, "", "羽签", ["你的当下"], [PICK])
+        async def fake_pick(event, request):
+            return ("", "羽签", ["你的当下"], [PICK])
         p._pick_reading = fake_pick
 
         async def fake_run(event, fmt, pos, picks, question, **kw):
@@ -67,6 +68,23 @@ class TestDivineToolDirect:
         # 内容被 event.send 直发（洗牌结果）
         assert len(evt.sent) == 1
         assert evt.sent[0].chain[0].text == "按规矩洗牌"
+
+    def test_formation_hint_only_fills_the_no_signal_case(self):
+        """工具参数只补「规则没信号」这一档；规则命中时不采纳模型给的阵型。"""
+        p = self._plugin()
+        seen = []
+
+        async def spy_pick(event, request):
+            seen.append(request)
+            return ("", request.formation, ["你的当下"], [PICK])
+        p._pick_reading = spy_pick
+
+        self._collect(p.divine_tool(self._evt("今天天气不错"), formation="羽镜"))
+        assert seen[0].formation == "羽镜"
+
+        seen.clear()
+        self._collect(p.divine_tool(self._evt("考研复习"), formation="羽签"))
+        assert seen[0].formation == "羽镜"  # 事业词命中，模型输入被忽略
 
     def test_result_object_is_sent_as_is(self):
         """直发的是结果对象本身，不是拆包重装的 MessageChain。
@@ -195,6 +213,7 @@ class TestDivineToolDirect:
         from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
         p = StarFeatherPlugin.__new__(StarFeatherPlugin)
         p.tarot = types.SimpleNamespace(llm_tool_cooldown=30, llm_tool_enabled=True)
+        p.daily_fixed = True
         seen = []
 
         async def spy_throttle(key, cooldown):
@@ -205,8 +224,8 @@ class TestDivineToolDirect:
             return None
         p.gate = types.SimpleNamespace(session_throttle=spy_throttle, check=fake_gate)
 
-        async def fake_pick(event, text, force_daily=False, fixed_formation=""):
-            return (False, "", "羽签", ["你的当下"], [PICK])
+        async def fake_pick(event, request):
+            return ("", "羽签", ["你的当下"], [PICK])
         p._pick_reading = fake_pick
 
         async def fake_run(event, fmt, pos, picks, question, **kw):

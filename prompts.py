@@ -81,20 +81,28 @@ PERSONA_PROFILES = {
 }
 
 
-def resolve_persona(persona: str | None) -> str | None:
+def resolve_persona(persona: str | None, seed: str | None = None) -> str | None:
     """把配置值解析成实际人格：off / 空 / 未知 → None（中立，不注入人设）；
-    random → 从人格池随机抽一个；池内人格原样返回。
+    random → 从人格池抽一个；池内人格原样返回。
 
     入参收 None：配置里该键可以缺（settings 已把它放宽成 str | None），
     这里再用 `persona or ""` 去空——签名跟着放宽，省得每个调用点先判一遍。
 
-    None 即「无牌灵人设」：解读保持 SYSTEM_PROMPT_DIVINE 的中立语气。
-    随机在调用时发生（每次占卜随机人设），配置本身不动。
+    Args:
+        persona: 配置原值（off / random / 人格名），None 与空串都按 off 处理。
+        seed: random 的确定性种子，通常是「用户标识|日期」。给了就按种子固定抽取
+            ——同一天同一用户始终同一人格，换主题再问也不会换一副腔调；不给才每次真随机。
+
+    Returns:
+        解析出的人格名，或 None（中立，保持 SYSTEM_PROMPT_DIVINE 的中立语气）。
     """
     p = (persona or "").strip().lower()
     if not p or p == "off":
         return None
     if p == "random":
+        if seed:
+            digest = hashlib.md5(seed.encode("utf-8")).digest()  # nosec B324 非安全用途：确定性选择
+            return PERSONA_POOL[digest[0] % len(PERSONA_POOL)]
         return random.choice(PERSONA_POOL)
     return p if p in PERSONA_PROFILES else None
 
@@ -148,8 +156,13 @@ def build_spirit_line_prompt(cards: list, topic: str, persona_eff) -> str:
     输出约定：只输出那句话本身（引号剥除/截断在 interpret.spirit_line）。
     """
     shown = "、".join(f"{cn}·{'正位' if upright else '逆位'}" for cn, upright in cards)
-    # 主题同样来自用户原话：剥引号类字符与分隔标签关键词，别让它跳出「」或提前闭合数据块
-    topic = _FENCE_WORD_RE.sub("", _QUESTION_QUOTE_RE.sub("", topic or "")).strip()
+    # 主题同样来自用户原话：剥引号类字符与分隔标签关键词，别让它跳出「」或提前闭合数据块。
+    # 剥除必须循环到不动点：单次替换会被「用户问题用户问题结束结束」骗过——删掉内层
+    # 那个「用户问题结束」后，前缀与后缀又拼出一个完整标记（2026-11-02 复核）。
+    topic = _QUESTION_QUOTE_RE.sub("", topic or "")
+    while (stripped := _FENCE_WORD_RE.sub("", topic)) != topic:
+        topic = stripped
+    topic = topic.strip()
     topic_part = f"，主题是「{topic}」" if topic else ""
     base = _SPIRIT_TEMPLATE.format(shown=shown, topic_part=topic_part)
     if persona_eff:
@@ -179,8 +192,13 @@ def build_reading_prompt(user_input: str, formation: str, detail: str) -> str:
     f-string 构造（不经过 .format），用户问题中的 % / {} 不会破坏格式化。
     用户问题用分隔标签包成一段数据：引号类字符先剥除，system prompt 里也已声明
     标签内只是待解读的问题——两处配合，用户输入改不动提示词结构。
+    标签关键词的剥除循环到不动点：单次替换下「用户问题用户问题结束结束」会先删内层、
+    再由前后缀拼出一个完整结束标记，等于让用户伪造了数据块边界（2026-11-02 复核）。
     """
-    question = _FENCE_WORD_RE.sub("", _QUESTION_QUOTE_RE.sub("", user_input or "")).strip()
+    question = _QUESTION_QUOTE_RE.sub("", user_input or "")
+    while (stripped := _FENCE_WORD_RE.sub("", question)) != question:
+        question = stripped
+    question = question.strip()
     return (
         "你是一位温柔而专业的塔罗占卜师。\n"
         "--- 用户问题开始 ---\n"
@@ -254,7 +272,8 @@ FAIL_NOTE_TOOL = (
 # ---- 命令帮助文案（main._help 只拼版本号，正文一律在此维护） ----
 HELP_TEXT = (
     "「/占卜 [问题]」- 智能选牌阵，可带关键词（情感/事业/运势）\n"
-    "「/单抽」- 快速抽一张，今日牌运\n"
+    "「/单抽 [问题]」- 快速抽一张，每次现抽（不按天固定）\n"
+    "「/今日牌运 [主题]」- 今天固定的一张牌与解读（别名 /运势、/每日一签）\n"
     "牌阵：羽签 / 羽时三刻 / 羽镜 / 恋羽十字（经典名 单张问询·时间之流·圣三角·恋人十字 也认）\n"
     "显式指定：/占卜 圣三角 考研如何（新名/经典名均可）\n"
     "触发：私聊直接说「占卜 问题」（带 / 前缀也行）；群聊 @ 我，或在 WebUI 设置唤醒词后「唤醒词 占卜 …」\n"

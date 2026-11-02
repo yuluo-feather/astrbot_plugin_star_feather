@@ -25,7 +25,7 @@ T = StarTarot.__new__(StarTarot)  # 绕过 __init__（不依赖 Context），供
 class TestDailyCacheMerge:
     """模拟 KV：解读先被写入时，抽牌重生成不得覆盖丢掉解读分桶。
 
-    字段名是 interps（主题指纹 → 解读文本的分桶 dict，见 daily._norm_topic /
+    字段名是 interps（主题指纹 → 解读文本的分桶 dict，见 daily.norm_topic /
     interp_cached），不是 interp。旧用例写的是 interp（实现里根本没有这个键），
     合并写原样保留未知键所以恒绿——既测不到真字段的保留语义，也测不到跨天清理。
     """
@@ -145,7 +145,7 @@ class TestDailyCachedCardAnchor:
 
 
 class TestDailyInterpTopic:
-    """解读缓存按主题指纹（_norm_topic）分桶：同主题复用、换主题现场生成。
+    """解读缓存按主题指纹（norm_topic）分桶：同主题复用、换主题现场生成。
 
     旧版无主题区分：同一天问什么都返回当天第一段解读（「事业运」的解读
     被「感情运」「学业运」共用），这是「不管问什么答案都一样」的元凶之一。
@@ -172,22 +172,22 @@ class TestDailyInterpTopic:
     def test_topic_table_decoupled_from_daily_judgement(self):
         """分桶与判定解耦：有具体主题仍走每日固定牌，但解读不与泛问共用。
 
-        SPECIFIC_WORDS 一度一份词表两处用（既是 _is_daily_request 的排除条件、
-        又是 _norm_topic 的分桶判据），于是「今天财运怎么样」只有两种命：与
+        SPECIFIC_WORDS 一度一份词表两处用（既是 is_daily_request 的排除条件、
+        又是 norm_topic 的分桶判据），于是「今天财运怎么样」只有两种命：与
         「今天运势」共用解读，或被踢出每日牌运、每问重抽。拆表后两者兼得——
-        牌仍是当天同一张（_is_daily_request 为真），解读各归各（topic 不同）。
+        牌仍是当天同一张（is_daily_request 为真），解读各归各（topic 不同）。
         """
-        from data.plugins.astrbot_plugin_star_feather.daily import (
+        from data.plugins.astrbot_plugin_star_feather.intent import (
             _GENERIC_TOPIC,
-            _is_daily_request,
-            _norm_topic,
+            is_daily_request,
+            norm_topic,
         )
 
-        assert _is_daily_request("今天财运怎么样")
-        assert _norm_topic("今天财运怎么样") != _GENERIC_TOPIC
+        assert is_daily_request("今天财运怎么样")
+        assert norm_topic("今天财运怎么样") != _GENERIC_TOPIC
         # 无主题的泛问仍共享同一段（防反复问刷版本）
         for q in ("今天运势", "看看今天的运势", "每日一签"):
-            assert _norm_topic(q) == _GENERIC_TOPIC, q
+            assert norm_topic(q) == _GENERIC_TOPIC, q
 
     def test_mixed_generic_question_gets_own_bucket(self):
         """泛问混着具体诉求时不能进通用桶（2026-11-01 复核）。
@@ -197,17 +197,17 @@ class TestDailyInterpTopic:
         反向也一样：第一个提问会把这段定制解读存成通用解读给后面的人用。
         纯泛问之间仍要共享同一桶（防反复问刷版本）。
         """
-        from data.plugins.astrbot_plugin_star_feather.daily import (
+        from data.plugins.astrbot_plugin_star_feather.intent import (
             _GENERIC_TOPIC,
-            _norm_topic,
+            norm_topic,
         )
 
         mixed = "今天运势如何，我该不该表白"
-        assert _norm_topic(mixed) == mixed
-        assert _norm_topic(mixed) != _GENERIC_TOPIC
+        assert norm_topic(mixed) == mixed
+        assert norm_topic(mixed) != _GENERIC_TOPIC
         # 纯泛问仍归通用桶，且不同措辞共享
         for q in ("今天运势", "看看今天的运势", "每日一签", "最近怎么样", "今天来一签"):
-            assert _norm_topic(q) == _GENERIC_TOPIC, q
+            assert norm_topic(q) == _GENERIC_TOPIC, q
 
     def test_writeback_skipped_when_new_day_already_cached(self):
         """跨午夜生成：KV 已是新一天记录时，前一晚的写回不许覆盖（review 复核）。"""
@@ -265,9 +265,9 @@ class TestDailyInterpTopic:
 
     def test_prompt_version_change_invalidates_same_day_interp(self):
         """提示词/人设换版：牌组没变，当天也要重新生成，不能继续吐旧口吻。"""
-        from data.plugins.astrbot_plugin_star_feather.daily import _norm_topic
+        from data.plugins.astrbot_plugin_star_feather.intent import norm_topic
 
-        topic = _norm_topic("今天感情运势")
+        topic = norm_topic("今天感情运势")
         sig = "|".join(f"{p['card']['id']}:{1 if p['upright'] else 0}" for p in [PICK])
         kv = {"sf_daily_u1": {"date": "20990101", "card": PICK["card"], "upright": True,
                               "sign": sig, "v": "oldver", "persona": "",
@@ -282,12 +282,10 @@ class TestDailyInterpTopic:
 
     def test_persona_switch_invalidates_same_day_interp(self):
         """面板切人设：牌组与 prompt 版本都没变，当天也要重新生成。"""
-        from data.plugins.astrbot_plugin_star_feather.daily import (
-            DailyFortune,
-            _norm_topic,
-        )
+        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.intent import norm_topic
 
-        topic = _norm_topic("今天感情运势")
+        topic = norm_topic("今天感情运势")
         sig = "|".join(f"{p['card']['id']}:{1 if p['upright'] else 0}" for p in [PICK])
         kv = {"sf_daily_u1": {"date": "20990101", "card": PICK["card"], "upright": True,
                               "sign": sig, "v": READING_PROMPT_V, "persona": "gentle",
@@ -345,10 +343,8 @@ class TestDailyInterpTopic:
         加锁 + 写回前重读之前，两条协程各自读旧值再写回，后写的会把先写的整个覆盖
         （实测 KV 里只剩一个分桶，另一个主题白花一次 AI 调用）。
         """
-        from data.plugins.astrbot_plugin_star_feather.daily import (
-            DailyFortune,
-            _norm_topic,
-        )
+        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.intent import norm_topic
         kv = {}
 
         class _SlowCtx:
@@ -374,7 +370,7 @@ class TestDailyInterpTopic:
 
         a, b = asyncio.run(go())
         assert a == f"解读:{t1}" and b == f"解读:{t2}"
-        assert set(kv["sf_daily_u1"]["interps"]) == {_norm_topic(t1), _norm_topic(t2)}
+        assert set(kv["sf_daily_u1"]["interps"]) == {norm_topic(t1), norm_topic(t2)}
 
     def test_stale_day_slots_dropped_when_pick_read_recovers(self):
         """跨天 + pick_cached 读故障：写入端自己判跨天，昨天的分桶不得盖章复活。
@@ -686,7 +682,7 @@ class TestDailyPoisonedCacheValue:
         """truthy 非 dict：既不抛异常，也要把坏值覆盖成合法结构（真正自愈）。"""
         import time as _time
 
-        from data.plugins.astrbot_plugin_star_feather.daily import _norm_topic
+        from data.plugins.astrbot_plugin_star_feather.intent import norm_topic
         today = _time.strftime("%Y%m%d")
         topic = "今天感情运势"
         for poison in (["a"], "abc", 123):
@@ -697,7 +693,7 @@ class TestDailyPoisonedCacheValue:
             cached = kv["sf_daily_u1"]
             assert isinstance(cached, dict), f"毒值 {poison!r} 未被覆盖成合法结构"
             assert cached.get("date") == today
-            assert cached["interps"] == {_norm_topic(topic): out}
+            assert cached["interps"] == {norm_topic(topic): out}
             assert len(calls) == 1
 
     def test_falsy_non_dict_cache_value_also_survives(self):
@@ -743,9 +739,9 @@ class TestDailyNullInterp:
     def test_none_interp_not_written_into_slots(self):
         import time as _time
 
-        from data.plugins.astrbot_plugin_star_feather.daily import _norm_topic
+        from data.plugins.astrbot_plugin_star_feather.intent import norm_topic
         today = _time.strftime("%Y%m%d")
-        topic = _norm_topic("今天感情运势")
+        topic = norm_topic("今天感情运势")
         for ret in (None, ""):
             kv = {}
             df, calls = self._daily(kv, ret)
@@ -763,9 +759,9 @@ class TestDailyNullInterp:
         """AI 失败只影响本主题：别的主题已缓存内容不得被清掉或改写。"""
         import time as _time
 
-        from data.plugins.astrbot_plugin_star_feather.daily import _norm_topic
+        from data.plugins.astrbot_plugin_star_feather.intent import norm_topic
         today = _time.strftime("%Y%m%d")
-        other = _norm_topic("最近事业运")
+        other = norm_topic("最近事业运")
         sig = "|".join(f"{p['card']['id']}:{1 if p['upright'] else 0}" for p in [PICK])
         kv = {"sf_daily_u1": {"date": today, "sign": sig, "v": READING_PROMPT_V,
                               "persona": "",
@@ -775,4 +771,4 @@ class TestDailyNullInterp:
         assert out is None
         slots = kv["sf_daily_u1"]["interps"]
         assert slots.get(other) == "事业解读"
-        assert _norm_topic("今天感情运势") not in slots
+        assert norm_topic("今天感情运势") not in slots

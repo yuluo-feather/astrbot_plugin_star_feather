@@ -106,9 +106,9 @@ class Deliverer:
         生成无 AI 解读时的本地牌义兜底文案。
         preface: 牌面之后的独立前置行（正常路径是「牌灵的话」；亦承接洗牌提示
         独立发送失败时的降级并入），排在图片之后、解读段之前。产出统一为单次
-        yield——两种入口的 yield 语义不同：工具入口那侧只取最后一个 yield 的值
-        （asyncgen 取末值），命令入口则每个 yield 都会被响应阶段各发一次；
-        单次 yield 在两种语义下推出同一个结果。
+        yield——两个入口的消费方式不同：工具入口只取最后一个 yield 的值
+        （asyncgen 取末值），命令入口则在 _command_entry 里 await event.send 直发；
+        单次 yield 保证两边都只发一份结果。
         收尾句不带在这里：命令入口在 _run_reading 里独立直发（不入合并转发），
         工具入口收尾由 Agent Loop 的 LLM 回复承担——本分发器只发结果本体。
         """
