@@ -16,28 +16,18 @@
    formation（枚举外一律忽略，回落默认阵）。命令入口不采纳模型输入，保持可预测。
 """
 import re
-from dataclasses import dataclass
 
+from .core.models import (
+    KIND_DAILY,
+    KIND_HELP,
+    KIND_SINGLE,
+    KIND_SPREAD,
+    ReadingRequest,
+)
 from .spreads import FORMATIONS
-
-KIND_DAILY = "daily"
-KIND_SINGLE = "single"
-KIND_SPREAD = "spread"
-KIND_HELP = "help"
 
 DEFAULT_FORMATION = "羽时三刻"
 _GENERIC_TOPIC = "（今日牌运）"
-
-
-@dataclass(frozen=True)
-class ReadingRequest:
-    """一次占卜请求的结构化描述：入口层只消费它，不再各自做判定。"""
-
-    kind: str          # daily / single / spread / help
-    formation: str     # 牌阵名（help 时为空串）
-    fixed: bool        # 是否走今日固定牌运缓存
-    question: str      # 清洗后的问题主体（送 AI / 做主题指纹）
-    topic: str         # 解读缓存的主题分桶键
 
 
 # ---- 语义关键词 → 牌阵（权重累计）----
@@ -359,11 +349,11 @@ def clean_question(text: str) -> str:
 
 
 # ---- 结构化请求 ----
-def _make(kind: str, formation: str, fixed: bool, text: str) -> ReadingRequest:
+def _make(kind: str, spread: str, fixed_for_day: bool, text: str) -> ReadingRequest:
     """把已选定的 kind / 阵名 / 固定位与清洗结果打成一个 ReadingRequest。"""
     question = clean_question(text)
-    return ReadingRequest(kind=kind, formation=formation, fixed=fixed,
-                          question=question, topic=norm_topic(question))
+    return ReadingRequest(kind=kind, spread=spread, question=question,
+                          topic_key=norm_topic(question), fixed_for_day=fixed_for_day)
 
 
 def build_request(kind: str = "auto", text: str = "", *,
@@ -385,7 +375,7 @@ def build_request(kind: str = "auto", text: str = "", *,
     """
     text = (text or "").strip()
     if is_help_request(text):
-        return ReadingRequest(KIND_HELP, "", False, "", "")
+        return ReadingRequest(KIND_HELP, "", "", "", False)
     if kind == KIND_SINGLE:
         return _make(KIND_SINGLE, "羽签", False, text)
     if kind == KIND_DAILY:

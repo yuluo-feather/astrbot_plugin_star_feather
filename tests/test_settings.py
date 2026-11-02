@@ -157,3 +157,45 @@ class TestTarotSettings:
         s = TarotSettings({"show_image": False, "forward_result": True})
         assert s.send_mode == "forward"
         assert TarotSettings({"ai_timeout": 9}).ai_timeout == 9
+
+
+class TestSettingsDataclass:
+    """冻结的嵌套 Settings：默认值只在这里，扁平视图只是迁移期兼容层。"""
+
+    def test_defaults_are_grouped_and_frozen(self):
+        import dataclasses
+
+        import pytest
+        from data.plugins.astrbot_plugin_star_feather.settings import (
+            DEFAULT_AI_BUDGET,
+            DEFAULT_AI_TIMEOUT,
+            DEFAULT_DAILY_COUNT,
+            DEFAULT_SEND_MODE,
+            Settings,
+            parse,
+        )
+        s = parse(None)
+        assert isinstance(s, Settings)
+        assert s.ai.timeout == DEFAULT_AI_TIMEOUT
+        assert s.ai.budget_seconds == DEFAULT_AI_BUDGET
+        assert s.ai.persona == DEFAULT_AI_PERSONA
+        assert s.limit.daily_count == DEFAULT_DAILY_COUNT
+        assert s.output.send_mode == DEFAULT_SEND_MODE
+        assert s.tool.llm_enabled is True
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            s.ai.timeout = 1
+
+    def test_parse_nested_matches_flat_view(self):
+        from data.plugins.astrbot_plugin_star_feather.settings import parse
+        cfg = {"ai": {"ai_timeout": 7, "parallel_stages": False, "ai_budget_seconds": 60},
+               "tool": {"llm_tool_cooldown": 5},
+               "limit": {"daily_count": 3},
+               "output": {"send_mode": "plain", "segment_size": 120}}
+        s = parse(cfg)
+        t = TarotSettings(cfg)
+        assert (s.ai.timeout, s.ai.parallel_stages, s.ai.budget_seconds) == (7, False, 60)
+        assert (t.ai_timeout, t.ai_parallel_stages, t.ai_budget) == (7, False, 60)
+        assert s.tool.llm_cooldown == t.llm_tool_cooldown == 5
+        assert s.limit.daily_count == t.daily_count_limit == 3
+        assert (s.output.send_mode, s.output.segment_size) == (t.send_mode, t.segment_size) \
+            == ("plain", 120)

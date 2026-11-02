@@ -161,36 +161,36 @@ class TestBuildRequest:
     def test_daily_kind_respects_switch(self):
         from data.plugins.astrbot_plugin_star_feather.intent import build_request
         req = build_request("auto", "今日运势")
-        assert req.kind == "daily" and req.fixed and req.formation == "羽签"
+        assert req.kind == "daily" and req.fixed_for_day and req.spread == "羽签"
         # 开关关闭：普通问法不再路由到固定牌运
         assert build_request("auto", "今日运势", daily_enabled=False).kind == "spread"
         # 显式 /今日牌运 仍走 daily，但 fixed 跟随开关
-        assert build_request("daily", "今日运势", daily_enabled=False).fixed is False
+        assert build_request("daily", "今日运势", daily_enabled=False).fixed_for_day is False
 
     def test_single_kind_is_never_fixed(self):
         from data.plugins.astrbot_plugin_star_feather.intent import build_request
         req = build_request("single", " 帮我算一卦 ")
-        assert req.kind == "single" and req.formation == "羽签" and req.fixed is False
+        assert req.kind == "single" and req.spread == "羽签" and req.fixed_for_day is False
         assert req.question == ""
 
     def test_tool_hint_only_when_rules_have_no_signal(self):
         from data.plugins.astrbot_plugin_star_feather.intent import build_request
         # 规则没信号：采纳模型给的枚举值
         assert build_request("auto", "今天天气不错", source="tool",
-                             formation_hint="羽镜").formation == "羽镜"
+                             formation_hint="羽镜").spread == "羽镜"
         # 规则命中事业组：模型的话不算数
         assert build_request("auto", "考研复习", source="tool",
-                             formation_hint="羽签").formation == "羽镜"
+                             formation_hint="羽签").spread == "羽镜"
         # 枚举外的值一律忽略，回落默认阵
         assert build_request("auto", "今天天气不错", source="tool",
-                             formation_hint="乱写的").formation == "羽时三刻"
+                             formation_hint="乱写的").spread == "羽时三刻"
 
     def test_command_never_accepts_a_hint(self):
         from data.plugins.astrbot_plugin_star_feather.intent import build_request
         assert build_request("auto", "今天天气不错", source="command",
-                             formation_hint="羽镜").formation == "羽时三刻"
+                             formation_hint="羽镜").spread == "羽时三刻"
 
     def test_topic_bucket_matches_daily_cache(self):
         from data.plugins.astrbot_plugin_star_feather.intent import build_request
-        assert build_request("daily", "今天运势").topic == "（今日牌运）"
-        assert build_request("daily", "今天财运怎么样").topic == "今天财运怎么样"
+        assert build_request("daily", "今天运势").topic_key == "（今日牌运）"
+        assert build_request("daily", "今天财运怎么样").topic_key == "今天财运怎么样"
