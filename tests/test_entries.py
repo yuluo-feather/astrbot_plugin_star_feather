@@ -107,7 +107,7 @@ class TestPickReading:
         cached = ("羽签", ["你的当下"], [PICK])
         p = self._plugin(cached=cached)
         req = build_request("auto", "看看今日运势")
-        assert req.kind == "daily" and req.fixed
+        assert req.kind == "daily" and req.fixed_for_day
         r = asyncio.run(p._pick_reading(self._evt(), req))
         assert r[0] == "u1" and r[1] == "羽签" and r[2] == ["你的当下"]
 
@@ -120,7 +120,7 @@ class TestPickReading:
 
     def test_single_request_never_uses_daily_cache(self):
         req = build_request("single", "")
-        assert req.kind == "single" and not req.fixed
+        assert req.kind == "single" and not req.fixed_for_day
         p = self._plugin(cached=("羽签", ["你的当下"], [PICK]))
         r = asyncio.run(p._pick_reading(self._evt(), req))
         assert r[1] == "羽签"
@@ -134,7 +134,7 @@ class TestPickReading:
     def test_specific_question_uses_selected_formation(self):
         p = self._plugin()
         req = build_request("auto", "考研复习计划")
-        assert req.formation == "羽镜"
+        assert req.spread == "羽镜"
         r = asyncio.run(p._pick_reading(self._evt(), req))
         assert r[1] == "羽镜"
 
@@ -787,7 +787,7 @@ class TestCommandIntent:
 
         async def spy_pick(event, request):
             seen.append(request)
-            return ("", request.formation, ["你的当下"], [PICK])
+            return ("", request.spread, ["你的当下"], [PICK])
         p._pick_reading = spy_pick
 
         async def fake_run(event, fmt, pos, picks, question, **kw):
@@ -805,20 +805,20 @@ class TestCommandIntent:
         seen = []
         p = self._plugin(seen)
         self._collect(p.single(TestCommandEntry._evt(), "我的事业"))
-        assert seen[0].kind == "single" and seen[0].fixed is False
-        assert seen[0].formation == "羽签"
+        assert seen[0].kind == "single" and seen[0].fixed_for_day is False
+        assert seen[0].spread == "羽签"
 
     def test_daily_command_is_fixed(self):
         seen = []
         p = self._plugin(seen)
         self._collect(p.daily(TestCommandEntry._evt(), "财运"))
-        assert seen[0].kind == "daily" and seen[0].fixed is True
+        assert seen[0].kind == "daily" and seen[0].fixed_for_day is True
 
     def test_divine_command_uses_rules_only(self):
         seen = []
         p = self._plugin(seen)
         self._collect(p.divine(TestCommandEntry._evt(), "考研复习"))
-        assert seen[0].kind == "spread" and seen[0].formation == "羽镜"
+        assert seen[0].kind == "spread" and seen[0].spread == "羽镜"
 
 
 class TestEpilogueOrder:

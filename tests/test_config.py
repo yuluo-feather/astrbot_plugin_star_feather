@@ -282,3 +282,16 @@ class TestConfSchemaMechanical:
         assert not only_schema and not only_code, (
             "schema 有而代码未读：" + str(only_schema)
             + "；代码读了但 schema 没有：" + str(only_code))
+
+
+def test_defaults_single_source_across_settings_schema_and_readme():
+    """默认值只在 Settings dataclass 写一次；schema 与两份 README 必须与它一致。
+
+    生成/回写入口：`python -m scripts.gen_config --write`；本测试与 `--check` 同源。
+    """
+    from data.plugins.astrbot_plugin_star_feather.settings import parse
+
+    from scripts.config_docs import check
+
+    problems = check(parse)
+    assert not problems, "配置默认值与 Settings 不一致：" + "；".join(problems)

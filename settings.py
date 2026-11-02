@@ -1,13 +1,14 @@
-"""配置语义层：全部默认值、旧配置迁移与 TarotSettings（一份配置的解析结果）。
+"""配置语义层：Settings（冻结 dataclass）+ parse()，默认值只在这里写一次。
 
 config.py 只提供读取原语（分组优先 / 扁平回退 / 类型转换）；
 「默认值是什么、旧字段怎么迁移、解析成什么样子」全在这一层。
-StarTarot / AiInterpreter / Deliverer 只消费解析后的数值，不碰配置结构。
+消费方拿 `parse(config)` 返回的 `Settings`，不再各自对着原始配置问第二遍。
 
-——默认值、迁移规则都只在这里维护，其他地方别自作主张。
+TarotSettings 是迁移期的兼容视图（扁平字段），第 3/4 步消费者改完后删除。
 """
 import decimal
 import math
+from dataclasses import dataclass, field
 
 from .config import _cfg_bool, _cfg_get, _cfg_int
 
@@ -27,23 +28,73 @@ DEFAULT_AI_PERSONA = "random"   # 牌灵人设（ai.persona）：off=中立 / ts
 PERSONA_VALUES = ("off", "tsundere", "gentle", "mystic", "random")  # 与 _conf_schema.json 的 options 一一对应
 # 解读结构校验强度（ai.structure_check）：loose=只按宽松口径（标记段数≥牌数），
 # shadow=照旧放行但把严格口径的判定记一行（先量再收紧，默认），strict=按严格口径拒候选。
-# 严格口径的三条判据见 hardening.validate_interpret_structure_strict。
-# 影子档量两件事（缺一不可，口径见 interpret._log_shadow_summary）：① 候选拒绝率；
-# ② 「按严格口径这一次会不会整段降级」——按候选链的三个出口给三态判决：链中出现严格
-# 通过者=不降级、链已观测完且无严格通过者=降级、因宽松放行提前收尾=未观测（不硬报降级）。
+# 严格口径的三条判据见 ai/parse.py（迁移后）；当前仍在 hardening.validate_interpret_structure_strict。
 STRUCTURE_CHECK_LOOSE = "loose"
 STRUCTURE_CHECK_SHADOW = "shadow"
 STRUCTURE_CHECK_STRICT = "strict"
 DEFAULT_STRUCTURE_CHECK = STRUCTURE_CHECK_SHADOW
 STRUCTURE_CHECK_VALUES = (STRUCTURE_CHECK_LOOSE, STRUCTURE_CHECK_SHADOW,
                           STRUCTURE_CHECK_STRICT)  # 与 _conf_schema.json 的 options 一一对应
-DEFAULT_DAILY_CARD = True       # 今日牌运卡（output.daily_card）：/单抽 与运势请求输出竖版卡片图，关闭则回到普通牌面图
+DEFAULT_DAILY_CARD = True       # 今日牌运卡（output.daily_card）：/今日牌运 输出竖版卡片图，关闭则回到普通牌面图
 DEFAULT_TOOL_COOLDOWN = 60      # 自然语言占卜节流（秒），同会话冷却期内不重复触发
-DEFAULT_CMD_RATE_LIMIT = 10     # /占卜、/单抽 命令入口的同会话节流（秒），0=关闭
+DEFAULT_CMD_RATE_LIMIT = 10     # /占卜、/单抽、/今日牌运 命令入口的同会话节流（秒），0=关闭
 DEFAULT_DAILY_COUNT = 0         # 每用户每日占卜次数上限，0=关闭（默认不开，防止升级即限流）
 DEFAULT_QUESTION_MAX_LEN = 200  # 送 AI 的问题长度上限（字符，0=不压缩）：ai.question_max_len
 DEFAULT_SEND_MODE = "forward"   # 输出呈现模式（见 SEND_MODES）：默认合并转发，占卜结果一条消息收齐
 SEND_MODES = ("plain", "forward", "text_only")  # 与 _conf_schema.json 的 options 一一对应
+
+
+@dataclass(frozen=True)
+class AiSettings:
+    """ai 组：模型调用、超时、预算与人设。"""
+
+    enable_ai: bool = True
+    provider_id: str = ""
+    timeout: int = DEFAULT_AI_TIMEOUT
+    fail_cooldown: int = DEFAULT_AI_COOLDOWN
+    budget_seconds: int = DEFAULT_AI_BUDGET
+    parallel_stages: bool = DEFAULT_AI_PARALLEL_STAGES
+    persona: str = DEFAULT_AI_PERSONA
+    question_max_len: int = DEFAULT_QUESTION_MAX_LEN
+    structure_check: str = DEFAULT_STRUCTURE_CHECK
+
+
+@dataclass(frozen=True)
+class ToolSettings:
+    """tool 组：自然语言入口与命令节流。"""
+
+    llm_enabled: bool = True
+    llm_cooldown: int = DEFAULT_TOOL_COOLDOWN
+    cmd_rate_limit: int = DEFAULT_CMD_RATE_LIMIT
+
+
+@dataclass(frozen=True)
+class LimitSettings:
+    """limit 组：每用户每日次数。"""
+
+    daily_count: int = DEFAULT_DAILY_COUNT
+
+
+@dataclass(frozen=True)
+class OutputSettings:
+    """output 组：发送模式、分段、洗牌提示、免责声明与每日牌运。"""
+
+    send_mode: str = DEFAULT_SEND_MODE
+    segment_size: int = DEFAULT_SEGMENT_SIZE
+    daily_fixed: bool = True
+    daily_card: bool = DEFAULT_DAILY_CARD
+    shuffle_lines: bool = True
+    disclaimer: str = DEFAULT_DISCLAIMER
+
+
+@dataclass(frozen=True)
+class Settings:
+    """一份配置的解析结果：四组值，不可变。"""
+
+    ai: AiSettings = field(default_factory=AiSettings)
+    tool: ToolSettings = field(default_factory=ToolSettings)
+    limit: LimitSettings = field(default_factory=LimitSettings)
+    output: OutputSettings = field(default_factory=OutputSettings)
 
 
 def resolve_send_mode(config) -> str:
@@ -56,6 +107,12 @@ def resolve_send_mode(config) -> str:
       默认                           → forward
     新 key 一旦命中立即采用（包括空串等非三态值走默认兜底），
     避免旧扁平字段残留覆盖用户后来在面板上的选择。
+
+    Args:
+        config: 原始 AstrBotConfig 或等价的扁平/分组 dict。
+
+    Returns:
+        plain / forward / text_only 之一。
     """
     raw = _cfg_get(config, "output", "send_mode", None)
     if raw is None:
@@ -126,67 +183,97 @@ def _is_negative_number(raw) -> bool:
         return False
 
 
-class TarotSettings:
-    """一份配置的解析结果：字段即插件运行所需的全部配置值。
+def parse(config) -> Settings:
+    """把一份原始配置解析成 Settings：默认值、旧字段迁移与坏值归一都在这里。
 
-    分组读取（ai / tool / output / limit），旧扁平配置自动兼容；
-    各字段含义与默认值见上方 DEFAULT_* 常量与 _conf_schema.json。
+    Args:
+        config: 原始 AstrBotConfig；None 表示全默认。
+
+    Returns:
+        冻结的 Settings（ai / tool / limit / output 四组）。
+    """
+    # 单次 AI 解读超时（秒）：**0 = 不限制单个请求**；其余取值一律不低于
+    # MIN_AI_TIMEOUT（5 秒）——1~4 秒那种「请求还没发出去就注定超时」的设置不是
+    # 自由度，是自残；负数更是坏值。下限只对非 0 值生效：0 是「关掉这一档」的开关。
+    _raw_timeout = _cfg_int(config, "ai", "ai_timeout", DEFAULT_AI_TIMEOUT)
+    ai_timeout = (_raw_timeout if _raw_timeout == 0
+                  else max(MIN_AI_TIMEOUT, _raw_timeout))
+    # 送 AI 的问题长度上限（字符，0=不压缩）：负数不是「更不压缩」而是坏值，
+    # 与预算同口径回默认，0 才表示明确关闭截断。
+    _max_len_raw = _cfg_get(config, "ai", "question_max_len", DEFAULT_QUESTION_MAX_LEN)
+    _max_len = _cfg_int(config, "ai", "question_max_len", DEFAULT_QUESTION_MAX_LEN)
+    ai_max_len = (DEFAULT_QUESTION_MAX_LEN
+                  if _max_len < 0 or (_max_len == 0 and _is_negative_number(_max_len_raw))
+                  else _max_len)
+    # 牌灵人设（ai.persona）：非法值回退默认（off=恢复中立语气）。
+    persona = str(_cfg_get(config, "ai", "persona", DEFAULT_AI_PERSONA) or "").strip().lower()
+    if persona not in PERSONA_VALUES:
+        persona = DEFAULT_AI_PERSONA
+    # 解读结构校验强度（ai.structure_check）：非法值回退默认（shadow=先量不拦）。
+    structure_check = str(
+        _cfg_get(config, "ai", "structure_check", DEFAULT_STRUCTURE_CHECK) or "").strip().lower()
+    if structure_check not in STRUCTURE_CHECK_VALUES:
+        structure_check = DEFAULT_STRUCTURE_CHECK
+    return Settings(
+        ai=AiSettings(
+            enable_ai=_cfg_bool(config, "ai", "enable_ai", True),
+            provider_id=str(_cfg_get(config, "ai", "ai_provider", "") or "").strip(),
+            timeout=ai_timeout,
+            fail_cooldown=_cfg_int(config, "ai", "ai_fail_cooldown", DEFAULT_AI_COOLDOWN),
+            # 预算归一只认显式 0（不限制），其余坏值回默认；别让取整/溢出把保护关掉。
+            budget_seconds=_budget_seconds(
+                _cfg_get(config, "ai", "ai_budget_seconds", DEFAULT_AI_BUDGET)),
+            parallel_stages=_cfg_bool(config, "ai", "parallel_stages",
+                                      DEFAULT_AI_PARALLEL_STAGES),
+            persona=persona,
+            question_max_len=ai_max_len,
+            structure_check=structure_check,
+        ),
+        tool=ToolSettings(
+            llm_enabled=_cfg_bool(config, "tool", "llm_tool_enabled", True),
+            llm_cooldown=_cfg_int(config, "tool", "llm_tool_cooldown", DEFAULT_TOOL_COOLDOWN),
+            cmd_rate_limit=_cfg_int(config, "tool", "cmd_rate_limit", DEFAULT_CMD_RATE_LIMIT),
+        ),
+        limit=LimitSettings(
+            daily_count=_cfg_int(config, "limit", "daily_count", DEFAULT_DAILY_COUNT),
+        ),
+        output=OutputSettings(
+            send_mode=resolve_send_mode(config),
+            segment_size=_cfg_int(config, "output", "segment_size",
+                                  DEFAULT_SEGMENT_SIZE, floor=MIN_SEGMENT_SIZE),
+            daily_fixed=_cfg_bool(config, "output", "daily_fixed", True),
+            daily_card=_cfg_bool(config, "output", "daily_card", DEFAULT_DAILY_CARD),
+            shuffle_lines=_cfg_bool(config, "output", "shuffle_lines", True),
+            disclaimer=str(_cfg_get(config, "output", "disclaimer", DEFAULT_DISCLAIMER)),
+        ),
+    )
+
+
+class TarotSettings:
+    """迁移期兼容视图：把嵌套 Settings 摊平成旧字段名。
+
+    StarTarot / AiInterpreter / Deliverer 仍按扁平字段消费；第 3/4 步把它们改成
+    直接用 Settings 后，本类删除。
     """
 
     def __init__(self, config):
-        """把一份配置解析成插件真正用得上的字段——所有默认值/迁移规则
-        都在 settings 层，解析完的数值不对着配置继续问第二遍。"""
-        self.enable_ai = _cfg_bool(config, "ai", "enable_ai", True)
-        self.segment_size = _cfg_int(config, "output", "segment_size",
-                                     DEFAULT_SEGMENT_SIZE, floor=MIN_SEGMENT_SIZE)
-        # 输出组：发送模式 / 洗牌提示语 / 免责声明（呈现方式三件套）
-        self.send_mode = resolve_send_mode(config)
-        self.shuffle_lines = _cfg_bool(config, "output", "shuffle_lines", True)
-        self.disclaimer = str(_cfg_get(config, "output", "disclaimer", DEFAULT_DISCLAIMER))
-        # 今日固定牌运开关：抽取规则归属 spreads/daily，开关归属这里
-        self.daily_fixed = _cfg_bool(config, "output", "daily_fixed", True)
-        # 今日牌运卡开关：/单抽 与运势请求输出竖版海报卡，关闭则回退普通牌面图
-        self.daily_card = _cfg_bool(config, "output", "daily_card", DEFAULT_DAILY_CARD)
-        # 单次 AI 解读超时（秒）：**0 = 不限制单个请求**（2026-10-14 主人定）；**其余取值
-        # 一律不低于 MIN_AI_TIMEOUT（5 秒）**——1~4 秒那种「请求还没发出去就注定超时」的
-        # 设置不是自由度，是自残；负数更是坏值。下限只对非 0 值生效：别顺手把 0 也夹了，
-        # 0 是「关掉这一档」的开关（同日主人追补的一句）。不限制时仍有总预算
-        # （ai_budget_seconds）与牌灵的话的阶段上限这两道独立约束兜着，最坏耗时照旧有界。
-        _raw_timeout = _cfg_int(config, "ai", "ai_timeout", DEFAULT_AI_TIMEOUT)
-        self.ai_timeout = (_raw_timeout if _raw_timeout == 0
-                           else max(MIN_AI_TIMEOUT, _raw_timeout))
-        self.ai_cooldown = _cfg_int(config, "ai", "ai_fail_cooldown", DEFAULT_AI_COOLDOWN)
-        # 单次占卜的 AI 总预算（秒）：归一规则全在 _budget_seconds 里——只有显式 0
-        # 表示「不限制」，其余坏值一律回退默认，别让取整/溢出把保护悄悄关掉
-        self.ai_budget = _budget_seconds(
-            _cfg_get(config, "ai", "ai_budget_seconds", DEFAULT_AI_BUDGET))
-        # 两段 AI 是否并发（ai.parallel_stages）：默认开，耗时取较慢的一段；
-        # 单槽本地模型或对同一 Provider 限流严格的环境可关掉，改成顺序执行。
-        self.ai_parallel_stages = _cfg_bool(config, "ai", "parallel_stages",
-                                            DEFAULT_AI_PARALLEL_STAGES)
-        # 自然语言入口开关：默认值在 settings，工具注册是静态的，开关只在运行期判断（见 main.divine_tool）
-        self.llm_tool_enabled = _cfg_bool(config, "tool", "llm_tool_enabled", True)
-        self.llm_tool_cooldown = _cfg_int(config, "tool", "llm_tool_cooldown",
-                                          DEFAULT_TOOL_COOLDOWN)
-        # 命令入口会话级节流（/占卜、/单抽）：tool.cmd_rate_limit，0=关闭
-        self.cmd_rate_limit = _cfg_int(config, "tool", "cmd_rate_limit", DEFAULT_CMD_RATE_LIMIT)
-        # 每用户每日次数上限（三入口统一）：limit.daily_count，0=关闭
-        self.daily_count_limit = _cfg_int(config, "limit", "daily_count", DEFAULT_DAILY_COUNT)
-        # 指定 AI 解读模型（provider id，留空 = 用当前会话模型）
-        self.ai_provider_id = str(_cfg_get(config, "ai", "ai_provider", "") or "").strip()
-        # 牌灵人设（ai.persona）：非法值回退默认（off=恢复中立语气）
-        self.ai_persona = str(_cfg_get(config, "ai", "persona", DEFAULT_AI_PERSONA) or "").strip().lower()
-        if self.ai_persona not in PERSONA_VALUES:
-            self.ai_persona = DEFAULT_AI_PERSONA
-        # 送 AI 的问题长度上限（字符，0=不压缩）：ai.question_max_len
-        # 负数不是「更不压缩」而是坏值：与预算同口径回默认，0 才表示明确关闭截断
-        _max_len_raw = _cfg_get(config, "ai", "question_max_len", DEFAULT_QUESTION_MAX_LEN)
-        _max_len = _cfg_int(config, "ai", "question_max_len", DEFAULT_QUESTION_MAX_LEN)
-        self.ai_max_len = (DEFAULT_QUESTION_MAX_LEN
-                           if _max_len < 0 or (_max_len == 0 and _is_negative_number(_max_len_raw))
-                           else _max_len)
-        # 解读结构校验强度（ai.structure_check）：非法值回退默认（shadow=先量不拦）
-        self.structure_check = str(
-            _cfg_get(config, "ai", "structure_check", DEFAULT_STRUCTURE_CHECK) or "").strip().lower()
-        if self.structure_check not in STRUCTURE_CHECK_VALUES:
-            self.structure_check = DEFAULT_STRUCTURE_CHECK
+        s = parse(config)
+        self.enable_ai = s.ai.enable_ai
+        self.segment_size = s.output.segment_size
+        self.send_mode = s.output.send_mode
+        self.shuffle_lines = s.output.shuffle_lines
+        self.disclaimer = s.output.disclaimer
+        self.daily_fixed = s.output.daily_fixed
+        self.daily_card = s.output.daily_card
+        self.ai_timeout = s.ai.timeout
+        self.ai_cooldown = s.ai.fail_cooldown
+        self.ai_budget = s.ai.budget_seconds
+        self.ai_parallel_stages = s.ai.parallel_stages
+        self.llm_tool_enabled = s.tool.llm_enabled
+        self.llm_tool_cooldown = s.tool.llm_cooldown
+        self.cmd_rate_limit = s.tool.cmd_rate_limit
+        self.daily_count_limit = s.limit.daily_count
+        self.ai_provider_id = s.ai.provider_id
+        self.ai_max_len = s.ai.question_max_len
+        self.ai_persona = s.ai.persona
+        self.structure_check = s.ai.structure_check

@@ -22,10 +22,11 @@ from astrbot.api.message_components import Plain
 from astrbot.api.star import Context, Star, register
 
 from .card_render import cleanup_stale_images
+from .core.models import KIND_DAILY, KIND_HELP, ReadingRequest
 from .daily import DailyFortune
 from .gating import LimitGate
 from .identity import resolve_sender_uid
-from .intent import KIND_DAILY, KIND_HELP, ReadingRequest, build_request, norm_topic
+from .intent import build_request, norm_topic
 from .prompts import (
     FAIL_NOTE_TOOL,
     HELP_TEXT,
@@ -187,8 +188,8 @@ class StarFeatherPlugin(Star):
             daily_uid, formation, positions, picks = await self._pick_reading(event, request)
             async for r in self._run_reading(
                     event, formation, positions, picks, request.question,
-                    is_daily=request.kind == KIND_DAILY and request.fixed,
-                    daily_uid=daily_uid, topic=request.topic,
+                    is_daily=request.kind == KIND_DAILY and request.fixed_for_day,
+                    daily_uid=daily_uid, topic=request.topic_key,
                     fail_note=fail_note, empty_fallback=empty_fallback,
                     # 命令入口恒发收尾句（工具入口不发，由 Agent Loop 的 LLM 回复承担）。
                     # 这里刻意写死 True 而不是暴露成 _command_entry 的参数：没有「命令
@@ -308,8 +309,8 @@ class StarFeatherPlugin(Star):
             daily_uid, formation, positions, picks = await self._pick_reading(event, request)
             async for r in self._run_reading(
                     event, formation, positions, picks, request.question,
-                    is_daily=request.kind == KIND_DAILY and request.fixed,
-                    daily_uid=daily_uid, topic=request.topic,
+                    is_daily=request.kind == KIND_DAILY and request.fixed_for_day,
+                    daily_uid=daily_uid, topic=request.topic_key,
                     fail_note=FAIL_NOTE_TOOL):
                 # 直发原结果对象而非拆包重装：它是 MessageChain 的子类（另带 use_t2i_ /
                 # result_content_type），拆出 chain 再套一层会把这些字段静默丢回默认值；
@@ -328,19 +329,19 @@ class StarFeatherPlugin(Star):
         """统一抽牌入口：按意图决定「抽什么牌、怎么抽」，三入口共用。
 
         request 由 intent.build_request 产出：kind=daily 且 fixed 时走今日固定牌运
-        （同一天同一人同一张牌）；其余按 request.formation 自由抽。
+        （同一天同一人同一张牌）；其余按 request.spread 自由抽。
         固定牌运拿不到（无用户标识 / KV 不可用）时回退自由随机，不拦占卜主流程。
 
         返回 (daily_uid, formation, positions, picks)。
         """
         daily_uid = resolve_sender_uid(event)
-        if request.kind == KIND_DAILY and request.fixed:
+        if request.kind == KIND_DAILY and request.fixed_for_day:
             picked = await self.daily.pick_cached(daily_uid)
             if picked:
                 return daily_uid, *picked
             logger.warning("每日牌运不可用（无用户标识），回退自由随机")
-        positions, picks = self.tarot._draw(request.formation)
-        return daily_uid, request.formation, positions, picks
+        positions, picks = self.tarot._draw(request.spread)
+        return daily_uid, request.spread, positions, picks
 
     async def _ensure_image(self, img: str | None, formation: str,
                             positions: list[str], picks: list[dict]) -> str | None:

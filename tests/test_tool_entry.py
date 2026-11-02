@@ -76,15 +76,15 @@ class TestDivineToolDirect:
 
         async def spy_pick(event, request):
             seen.append(request)
-            return ("", request.formation, ["你的当下"], [PICK])
+            return ("", request.spread, ["你的当下"], [PICK])
         p._pick_reading = spy_pick
 
         self._collect(p.divine_tool(self._evt("今天天气不错"), formation="羽镜"))
-        assert seen[0].formation == "羽镜"
+        assert seen[0].spread == "羽镜"
 
         seen.clear()
         self._collect(p.divine_tool(self._evt("考研复习"), formation="羽签"))
-        assert seen[0].formation == "羽镜"  # 事业词命中，模型输入被忽略
+        assert seen[0].spread == "羽镜"  # 事业词命中，模型输入被忽略
 
     def test_result_object_is_sent_as_is(self):
         """直发的是结果对象本身，不是拆包重装的 MessageChain。
