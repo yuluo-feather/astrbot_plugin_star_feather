@@ -1,0 +1,63 @@
+"""今日牌运的持久化记录：一个用户一个键，schema 2。
+
+旧版拆成 `sf_daily_*`（牌 + 解读分桶）与 `sf_spirit_*`（牌灵的话）两个键；
+现在合并成 `sf_daily_*` 一条记录，牌、解读与牌灵的话共用一个日期边界。
+升级时旧记录（没有 schema=2）直接视为未命中，由下一次读写覆盖。
+"""
+from dataclasses import dataclass, field
+
+SCHEMA = 2
+
+
+def _str(value, default: str = "") -> str:
+    return value if isinstance(value, str) else default
+
+
+@dataclass
+class DailyRecord:
+    date: str = ""
+    card_id: str = ""
+    upright: bool = False
+    sign: str = ""
+    prompt_v: str = ""
+    persona: str = ""
+    interps: dict = field(default_factory=dict)
+    spirit_line: str = ""
+    spirit_sign: str = ""
+    schema: int = SCHEMA
+
+    @classmethod
+    def from_raw(cls, raw) -> "DailyRecord":
+        if not isinstance(raw, dict) or raw.get("schema") != SCHEMA:
+            return cls()
+        interps = raw.get("interps")
+        return cls(
+            date=_str(raw.get("date")),
+            card_id=_str(raw.get("card_id")),
+            upright=bool(raw.get("upright")),
+            sign=_str(raw.get("sign")),
+            prompt_v=_str(raw.get("prompt_v")),
+            persona=_str(raw.get("persona")),
+            interps=dict(interps) if isinstance(interps, dict) else {},
+            spirit_line=_str(raw.get("spirit_line")),
+            spirit_sign=_str(raw.get("spirit_sign")),
+        )
+
+    def to_raw(self) -> dict:
+        return {
+            "schema": SCHEMA,
+            "date": self.date,
+            "card_id": self.card_id,
+            "upright": self.upright,
+            "sign": self.sign,
+            "prompt_v": self.prompt_v,
+            "persona": self.persona,
+            "interps": self.interps,
+            "spirit_line": self.spirit_line,
+            "spirit_sign": self.spirit_sign,
+        }
+
+    def same_context(self, date: str, sign: str, prompt_v: str, persona: str) -> bool:
+        """同一天、同一牌组、同一版提示词、同一人设才沿用旧分桶。"""
+        return (self.schema == SCHEMA and self.date == date and self.sign == sign
+                and self.prompt_v == prompt_v and self.persona == persona)

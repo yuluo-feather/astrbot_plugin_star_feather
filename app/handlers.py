@@ -7,11 +7,11 @@
 import random
 
 from ..adapters.astrbot_io import messenger_for
+from ..ai.prompts import FAIL_NOTE_TOOL, HELP_TEXT, TOOL_EPILOGUE
 from ..core.log import log
 from ..core.models import KIND_HELP
 from ..identity import resolve_sender_uid
 from ..intent import build_request
-from ..prompts import FAIL_NOTE_TOOL, HELP_TEXT, TOOL_EPILOGUE
 from ..services.reading import ReadingContext
 from .diagnostics import note_entry_binding
 

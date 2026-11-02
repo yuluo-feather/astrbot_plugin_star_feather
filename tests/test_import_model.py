@@ -74,7 +74,7 @@ main1 = importlib.import_module(pkg + ".main")
 core1 = importlib.import_module(pkg + ".services.render")
 tracked = sorted(n for n in sys.modules if n.startswith(pkg + "."))
 assert len(tracked) >= 10, "插件模块没挂在包名下：" + repr(tracked)
-assert pkg + ".daily" in tracked and pkg + ".prompts" in tracked, str(tracked)
+assert pkg + ".daily" in tracked and pkg + ".ai.prompts" in tracked, str(tracked)
 
 # 模拟框架的重载清理：按 data.plugins.<目录名>.* 前缀删（AstrBot 的清理就是这个口径）
 for name in tracked:

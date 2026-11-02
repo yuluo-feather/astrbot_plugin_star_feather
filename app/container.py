@@ -3,12 +3,12 @@ from dataclasses import dataclass
 
 from ..adapters.astrbot_io import PluginKV
 from ..adapters.presenter import Presenter
+from ..ai.chain import AiInterpreter
 from ..card_render import new_instance_image_dir
 from ..clock import Clock
 from ..daily import DailyFortune
 from ..deliver import Deliverer
 from ..gating import LimitGate
-from ..interpret import AiInterpreter
 from ..services.reading import ReadingService
 from ..services.render import Renderer
 from ..settings import Settings, parse
@@ -42,6 +42,8 @@ def build_container(context, plugin, config) -> Container:
         persona=settings.ai.persona,
         ai_budget=settings.ai.budget_seconds,
         structure_check=settings.ai.structure_check,
+        max_concurrency=settings.ai.max_concurrency,
+        all_providers_fallback=settings.ai.all_providers_fallback,
     )
     daily = DailyFortune(kv, clock, settings.ai.persona, interpreter)
     gate = LimitGate(kv, settings.tool.cmd_rate_limit, settings.limit.daily_count, clock)

@@ -18,10 +18,10 @@ import os
 import time
 import types
 
-from data.plugins.astrbot_plugin_star_feather import interpret as interpret_mod
+from data.plugins.astrbot_plugin_star_feather.ai import chain as interpret_mod
+from data.plugins.astrbot_plugin_star_feather.ai.chain import AiBudget, AiInterpreter
 from data.plugins.astrbot_plugin_star_feather.core.draw import render_text
 from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
-from data.plugins.astrbot_plugin_star_feather.interpret import AiBudget, AiInterpreter
 from data.plugins.astrbot_plugin_star_feather.settings import (
     DEFAULT_AI_BUDGET,
     DEFAULT_SPIRIT_STAGE_BUDGET,
@@ -68,6 +68,7 @@ class _KV:
 
 
 def _interp(providers, using=None, **kw):
+    kw.setdefault("all_providers_fallback", True)
     return AiInterpreter(FakeContext(using=using, others=providers), **kw)
 
 
@@ -464,7 +465,8 @@ class TestEndToEndDeliveryUnderSpentBudget:
         from data.plugins.astrbot_plugin_star_feather.settings import parse
 
         ctx = FakeContext(using=None, others=list(providers))
-        it = AiInterpreter(ctx, ai_timeout=30, ai_budget=1.2)
+        it = AiInterpreter(ctx, ai_timeout=30, ai_budget=1.2,
+                           all_providers_fallback=True)
         created = []
         real_new_budget = it.new_budget
 

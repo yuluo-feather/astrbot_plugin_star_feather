@@ -123,13 +123,13 @@
          └─ 都猜不中 → 兜底「羽时三刻」
    │
    ▼
-④ 执行占卜（ReadingService.run）【core/draw.py 抽牌 · services/render.py 渲染 · interpret.py + hardening.py 解读】
+④ 执行占卜（ReadingService.run）【core/draw.py 抽牌 · services/render.py 渲染 · ai/chain.py + ai/parse.py + hardening.py 解读】
    ├─ 洗牌提示：多张牌阵随机发一句「✨ 洗牌中……」(shuffle_lines 可关)
    ├─ 牌灵的话：所有牌阵都有一句牌灵开口——AI 按人设现生成（贴合本签牌面与主题，同人同日同牌组当天同句、次日换新），AI 不可用回退池内当日签文；裸句直出（无「牌灵的话：」标签与引号）；另受 20 秒阶段上限（候选获取与每次请求共用一个阶段截止点，累计不按候选数翻倍）
    ├─ 生成解读：
    │     ├─ 今日固定 → 当天解读缓存（没提主题就一整天不变）
    │     └─ 自由随机 → AI 现场解读
-   │           ├─ 候选链：指定模型 → 会话模型 → 全局默认 → 全部已加载（单个请求超时 `ai_timeout`，默认 30s；设 0 = 不限制该档）
+   │           ├─ 候选链：指定模型 → 会话模型 → 全局默认（`ai.all_providers_fallback` 打开时才继续枚举全部已加载；单个请求超时 `ai_timeout`，默认 30s；设 0 = 不限制该档；同一 Provider 并发上限 `ai.max_concurrency`，默认 2）
    │           ├─ 问题先清洗：截断 200 字（头尾保号） + 剥注入句式（hardening）
    │           ├─ 与牌灵的话共用一笔 AI 总预算（ai_budget_seconds，默认 120s），阶段之间不重置
    │           └─ 全部失败 → 回退内置牌义（+ 失败冷却 60s，不空等）
@@ -144,7 +144,7 @@
    └─ 末尾追加免责声明（disclaimer，可留空）
    │
    ▼
-⑥ 收尾【prompts.py 文案池 · main.py 独立直发】
+⑥ 收尾【ai/prompts.py 文案池 · Presenter 独立直发】
    ├─ 命令入口：结果发出后独立直发一句收尾（RESULT_EPILOGUE 7 句池随机）
    └─ 自然语言入口：结果经 event.send 直发后，yield 一句收尾引导给模型 →
         模型原样说出随机一句「✨ 牌灵已把答案交到你手上了，祝好运～」（同池）
@@ -168,6 +168,8 @@
 | `ai.question_max_len` | int | `200` | 发送给 AI 解读的问题长度上限（字符）。超长问题先「头尾保号」压缩（保留开头主体与结尾关键意图，省 token 且缩小提示注入面）；设为 0 不压缩。 |
 | `ai.ai_budget_seconds` | int | `120` | 单次占卜的 AI 总预算（秒）：一次占卜里所有 AI 调用（牌灵的话 + 深度解读，含候选重试与切换其他模型）共用一个截止点，耗尽即回退本地牌义、不再发起新请求；牌灵的话另受 20 秒阶段上限（候选获取与每次请求都在同一阶段截止点内，累计不按候选数翻倍）。设为 0 表示不限制——会关闭总预算保护（AI 阶段等待将没有上界，日志留一条告警），但牌灵的话那条阶段上限仍生效。它只约束 AI 阶段耗时，不代表整条结果消息在该时间内发送完成。 |
 | `ai.parallel_stages` | bool | `true` | 牌灵的话与深度解读是否并发请求。开启后总耗时取较慢的一段；关闭则先出牌灵的话、再出解读。单槽本地模型或对同一 Provider 限流严格时建议关闭，避免同一时刻两个请求触发排队或限流。 |
+| `ai.max_concurrency` | int | `2` | 同一 Provider 的最大并发请求数。默认 2：牌灵的话与解读可以并发，又不会在单槽本地模型或限流严格的服务上排长队；设为 0 表示不限制，负数按默认值处理。 |
+| `ai.all_providers_fallback` | bool | `false` | 候选链走到「指定模型 → 当前会话模型 → 全局默认」之后，是否再把所有已加载 Provider 逐个试一遍。默认关闭，避免在未预期的模型上产生请求与费用。 |
 | `ai.structure_check` | select | `shadow` | 解读结构校验强度：`loose`-宽松（只要求按【第N张·位置】分段、段数不少于牌数，旧行为）；`shadow`-影子（默认，照旧放行，同时用严格口径判一遍并落一行汇总日志：候选拒绝率 + 「按严格口径这一次会不会整段降级」的三态判决与实例级累计）；`strict`-严格（编号 1..N 各出现一次、【总结】0 或 1 次、位置名非空，不合规的候选弃用并继续尝试下一个模型）。 |
 
 ### [自然语言入口] 对话触发与节流
@@ -234,7 +236,7 @@
 
 ## 🤍 技术实现
 
-- **代码结构（分层，依赖单向）**：入口层 `main.py`（≤150 行，只注册命令/工具）→ `app/`（`container.py` 唯一装配、`handlers.py` 三入口、`diagnostics.py` 配置新鲜度）；编排层 `services/`（`reading.py` 占卜流水线、`render.py` 渲染与图片生命周期）；纯逻辑层 `core/`（`models.py` / `draw.py` / `ports.py`，不 import astrbot）与 `intent.py` / `spreads.py` / `hardening.py` / `limiter.py` / `dailylines.py` / `tarot_data.py` / `prompts.py` / `fonts.py` / `config.py` / `settings.py` / `clock.py`；适配层 `adapters/`（`astrbot_io.py` KV 与消息、`presenter.py` 有序发送）；其余为 `daily.py` 今日缓存、`gating.py` 限流闸门、`deliver.py` 分段、`interpret.py` AI 候选链、`card_render.py` 渲染实现、`kv_utils.py` KV 原语、`identity.py` 用户标识——每个模块一句话说清职责，纯逻辑均可独立单测
+- **代码结构（分层，依赖单向）**：入口层 `main.py`（≤150 行，只注册命令/工具）→ `app/`（`container.py` 唯一装配、`handlers.py` 三入口、`diagnostics.py` 配置新鲜度）；编排层 `services/`（`reading.py` 占卜流水线、`render.py` 渲染与图片生命周期、`daily_store.py` 单键记录、`singleflight.py` 同键去重）；纯逻辑层 `core/`（`models.py` / `draw.py` / `ports.py`，不 import astrbot）与 `intent.py` / `spreads.py` / `hardening.py` / `limiter.py` / `dailylines.py` / `tarot_data.py` / `ai/prompts.py` / `ai/persona.py` / `ai/parse.py` / `fonts.py` / `config.py` / `settings.py` / `clock.py`；适配层 `adapters/`（`astrbot_io.py` KV 与消息、`presenter.py` 有序发送）；其余为 `daily.py` 今日缓存、`gating.py` 限流闸门、`deliver.py` 分段、`ai/chain.py` AI 候选链、`card_render.py` 渲染实现、`kv_utils.py` KV 原语、`identity.py` 用户标识——每个模块一句话说清职责，纯逻辑均可独立单测
 - **模块分层（依赖单向，无回边）**：
   - 入口层：`main.py`（只注册命令/工具）→ `app/`（装配、三入口、诊断）
   - 编排层：`services/reading.py` / `services/render.py`；其余粘合层：`daily` / `gating` / `deliver` / `interpret` / `card_render`（KV、限流、发送、渲染、AI 解读的读写与降级裁定）
@@ -247,7 +249,7 @@
 - 渲染前对文本做字形覆盖校验：内置子集缺字时自动回退到能覆盖该文本的系统字体——校验自带静态字形清单兜底，`fonttools` 缺失也不影响回退（仍列入 requirements，首选动态校验）。当前牌库文案全覆盖子集，此机制是为未来新增生僻字牌义兜底
 - 每次抽牌从 78 张中无放回随机抽取，正逆位各 50% 概率
 - 命令触发不强制前缀：门槛由框架把关（WebUI 唤醒词 / 群聊 @ / 私聊直接说），私聊裸文本「占卜 问题」即可触发，不再要求带 `/`（插件不复制框架的门槛逻辑，避免与 WebUI 唤醒词配置打架）
-- AI 解读采用「候选链 + 超时 + 失败冷却」：按指定模型（`ai.ai_provider`）→ 当前会话 Provider → 全局默认 → 全部已加载 Provider 依次尝试（按 id 去重），单个请求超时 `ai_timeout`（默认 30s；设 0 = 不限制单个请求，此时仍受总预算与牌灵阶段上限约束），全部失败回退本地牌义；失败按 **Provider 粒度**冷却 `ai_fail_cooldown`（默认 60s）——某个模型挂掉只冷却它自己，其余模型照常服务，避免反复空等。整段 AI 阶段另有共享总预算 `ai_budget_seconds`（默认 120s）：牌灵的话与解读（含候选重试、供应商回退、取候选本身的等待）共用一个截止点，耗尽即回退本地牌义，不再发起新请求
+- AI 解读采用「候选链 + 超时 + 失败冷却」：按指定模型（`ai.ai_provider`）→ 当前会话 Provider → 全局默认 依次尝试（按 id 去重）；只有 `ai.all_providers_fallback` 打开时才继续枚举全部已加载 Provider（默认关，避免在未预期的模型上烧请求）。同一 Provider 最多 `ai.max_concurrency` 个并发请求（默认 2，0=不限制），单槽本地模型不会因为两段并发排队超时、再被误记成失败冷却。单个请求超时 `ai_timeout`（默认 30s；设 0 = 不限制单个请求，此时仍受总预算与牌灵阶段上限约束），全部失败回退本地牌义；失败按 **Provider 粒度**冷却 `ai_fail_cooldown`（默认 60s）——某个模型挂掉只冷却它自己，其余模型照常服务，避免反复空等。整段 AI 阶段另有共享总预算 `ai_budget_seconds`（默认 120s）：牌灵的话与解读（含候选重试、供应商回退、取候选本身的等待）共用一个截止点，耗尽即回退本地牌义，不再发起新请求
 - 支持**自然语言入口**：对话中说「帮我算一卦」「看看我今天的运势」即可触发（`star_feather_divine` LLM 工具），工具描述限定「明确请求」才调用，抱怨/闲聊不会误触；同会话 `llm_tool_cooldown`（默认 60s）节流防刷屏
 - **今日固定牌运**：`/今日牌运`（别名 `/运势`、`/每日一签`）与含「运势/运气/牌运」等词的请求按（用户, 日期）确定性出牌（md5 种子 + 独立 RNG，不污染全局随机），用户标识两级降级（发送者 ID → 原始字段直读，兼容 int 型；群聊不回落会话 ID，防止同群共享），带平台前缀 `platform_id:uid`（多平台隔离；ID 里的 `%` / `:` 会转义，取不到平台 ID 时退回裸 uid），每日解读按牌组指纹缓存（牌变了旧解读作废），KV 单 key 覆盖缓存且牌面固定不依赖 KV（确定性保证）；`output.daily_fixed` 可关闭恢复自由随机。`/单抽` 不再走这条线：每次现抽羽签、解读现场生成，不缓存
 - **KV 保留口径**：`sf_daily_*` / `sf_spirit_*` / `sf_cmd_cnt_*` 按（平台, 用户）各占一个键，插件不主动删除——宿主 `PluginKVStoreMixin` 只有 get/put/delete、没有枚举接口，扫不了全量；卸载插件时随宿主数据一起清理
@@ -304,7 +306,7 @@
 
 ## 🌙 注意事项
 
-- AI 解读按**候选链**调用：指定模型（`ai.ai_provider`）→ 当前会话 Provider → 全局默认 → 全部已加载；全部失败或未配置时自动使用本地牌义，占卜不会被卡住
+- AI 解读按**候选链**调用：指定模型（`ai.ai_provider`）→ 当前会话 Provider → 全局默认（`ai.all_providers_fallback` 默认关，需要时才枚举全部已加载）；全部失败或未配置时自动使用本地牌义，占卜不会被卡住
 - 占卜结果仅供娱乐参考，请理性看待 🍀 牌给的是方向，路还得你自己走——本羽只负责把牌摆明白
 
 ---

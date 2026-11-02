@@ -7,15 +7,26 @@ import asyncio
 import json
 import types
 
+import pytest
 from data.plugins.astrbot_plugin_star_feather.daily import (
     _daily_pick,
 )
 from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
-from data.plugins.astrbot_plugin_star_feather.prompts import READING_PROMPT_V
 from data.plugins.astrbot_plugin_star_feather.tarot_data import (
     TAROT_CARDS,
 )
 from stubs import PICK
+
+
+def _rec(**over):
+    """schema 2 记录的最小夹具：字段名跟 services/daily_store.DailyRecord 一致。"""
+    from data.plugins.astrbot_plugin_star_feather.daily import _PROMPT_V
+    base = {"schema": 2, "date": "", "card_id": PICK["card"]["id"],
+            "upright": True, "sign": f"{PICK['card']['id']}:1",
+            "prompt_v": _PROMPT_V, "persona": "", "interps": {},
+            "spirit_line": "", "spirit_sign": ""}
+    base.update(over)
+    return base
 
 
 class _Interp:
@@ -58,14 +69,16 @@ class TestDailyCacheMerge:
         import time as _time
         today = _time.strftime("%Y%m%d")
         slots = {"（今日牌运）": "旧解读文本"}
-        # 只有解读分桶、无 card（模拟「解读先写入、抽牌重生成」的异常时序）
-        kv = {"sf_daily_u1": {"date": today, "interps": dict(slots)}}
+        card, upright = _daily_pick("u1", today)
+        sig = f"{card['id']}:{1 if upright else 0}"
+        kv = {"sf_daily_u1": _rec(date=today, card_id=card["id"], upright=upright,
+                                  sign=sig, interps=dict(slots))}
         p = self._plugin(kv)
         result = asyncio.run(p.daily.pick_cached("u1"))
         assert result is not None
         cached = kv["sf_daily_u1"]
         # 牌被补上，且当天已写入的解读分桶原样保留（不被抽牌重生成覆盖）
-        assert cached["card"] in TAROT_CARDS and isinstance(cached["upright"], bool)
+        assert cached["card_id"] in {c["id"] for c in TAROT_CARDS} and isinstance(cached["upright"], bool)
         assert cached["interps"] == slots
         assert cached["date"] == today
 
@@ -74,22 +87,22 @@ class TestDailyCacheMerge:
         p = self._plugin(kv)
         asyncio.run(p.daily.pick_cached("u1"))
         cached = kv["sf_daily_u1"]
-        assert cached["card"] in TAROT_CARDS
-        assert "interps" not in cached  # 首次写入不虚构解读分桶
+        assert cached["card_id"] in {c["id"] for c in TAROT_CARDS}
+        assert cached["interps"] == {}  # 首次写入不虚构解读分桶
 
     def test_stale_day_interps_dropped_on_regenerate(self):
         """跨天：旧解读分桶随抽牌重生成一并作废，不盖章复活。"""
         import time as _time
         stale = {"（今日牌运）": "昨天的解读", "最近事业运": "前天的解读"}
-        kv = {"sf_daily_u1": {"date": "19700101", "card": TAROT_CARDS[0],
-                              "upright": True, "interps": dict(stale)}}
+        kv = {"sf_daily_u1": _rec(date="19700101", card_id=TAROT_CARDS[0]["id"],
+                                  upright=True, interps=dict(stale))}
         p = self._plugin(kv)
         result = asyncio.run(p.daily.pick_cached("u1"))
         assert result is not None
         cached = kv["sf_daily_u1"]
         assert cached["date"] == _time.strftime("%Y%m%d")
-        assert "interps" not in cached      # 跨天作废：旧分桶不得跟着新日期复活
-        assert cached["card"] in TAROT_CARDS
+        assert cached["interps"] == {}      # 跨天作废：旧分桶不得跟着新日期复活
+        assert cached["card_id"] in {c["id"] for c in TAROT_CARDS}
 class TestDailyCachedCardAnchor:
     """缓存里的牌按 id 锚点回查牌库，而不是整字典值相等。
 
@@ -122,7 +135,7 @@ class TestDailyCachedCardAnchor:
         drifted = copy.deepcopy(cached_card)
         drifted["num"] = int(drifted["num"])        # 类型漂移：整字典值相等不再成立
         assert drifted not in TAROT_CARDS           # 前提：旧判据在这份副本上确实失配
-        kv = {"sf_daily_u1": {"date": today, "card": drifted, "upright": True}}
+        kv = {"sf_daily_u1": _rec(date=today, card_id=drifted["id"], upright=True)}
         _formation, _positions, picks = asyncio.run(self._fortune(kv).pick_cached("u1"))
         # 比牌 id 而不是对象身份：牌库对象会在 deepcopy 与缓存里往返，id 才是这里真正
         # 要断言的东西（「同名模块两份」那类身份问题已由包内相对导入收口）
@@ -137,7 +150,7 @@ class TestDailyCachedCardAnchor:
         import time as _time
         today = _time.strftime("%Y%m%d")
         det_card, det_upright = _daily_pick("u1", today)
-        kv = {"sf_daily_u1": {"date": today, "card": {"id": "no_such_card"}, "upright": True}}
+        kv = {"sf_daily_u1": _rec(date=today, card_id="no_such_card", upright=True)}
         _formation, _positions, picks = asyncio.run(self._fortune(kv).pick_cached("u1"))
         assert picks[0]["card"]["id"] == det_card["id"]
         assert picks[0]["upright"] == det_upright
@@ -147,7 +160,7 @@ class TestDailyCachedCardAnchor:
         import time as _time
         today = _time.strftime("%Y%m%d")
         for bad in (["不是字典"], "不是字典", 12345):
-            kv = {"sf_daily_u1": {"date": today, "card": bad, "upright": True}}
+            kv = {"sf_daily_u1": _rec(date=today, card_id=bad, upright=True)}
             out = asyncio.run(self._fortune(kv).pick_cached("u1"))
             assert out is not None and out[0] == "羽签"
 
@@ -220,8 +233,8 @@ class TestDailyInterpTopic:
 
     def test_writeback_skipped_when_new_day_already_cached(self):
         """跨午夜生成：KV 已是新一天记录时，前一晚的写回不许覆盖（review 复核）。"""
-        kv = {"sf_daily_u1": {"date": "20991231",
-                              "interps": {"（今日牌运）": "新一天的解读"}}}
+        kv = {"sf_daily_u1": _rec(date="20991231",
+                                  interps={"（今日牌运）": "新一天的解读"})}
         df, calls = self._daily(kv)
         df.clock = types.SimpleNamespace(today=lambda: "20260101")
         out = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], "今天运势"))
@@ -278,9 +291,8 @@ class TestDailyInterpTopic:
 
         topic = norm_topic("今天感情运势")
         sig = "|".join(f"{p['card']['id']}:{1 if p['upright'] else 0}" for p in [PICK])
-        kv = {"sf_daily_u1": {"date": "20990101", "card": PICK["card"], "upright": True,
-                              "sign": sig, "v": "oldver", "persona": "",
-                              "interps": {topic: "旧口吻"}}}
+        kv = {"sf_daily_u1": _rec(date="20990101", sign=sig, prompt_v="oldver",
+                                  interps={topic: "旧口吻"})}
         df, calls = self._daily(kv)
         # 用今天重写日期，只留版本号不匹配这一个差异
         kv["sf_daily_u1"]["date"] = df.clock.today()
@@ -296,9 +308,8 @@ class TestDailyInterpTopic:
 
         topic = norm_topic("今天感情运势")
         sig = "|".join(f"{p['card']['id']}:{1 if p['upright'] else 0}" for p in [PICK])
-        kv = {"sf_daily_u1": {"date": "20990101", "card": PICK["card"], "upright": True,
-                              "sign": sig, "v": READING_PROMPT_V, "persona": "gentle",
-                              "interps": {topic: "温柔口吻"}}}
+        kv = {"sf_daily_u1": _rec(date="20990101", sign=sig, persona="gentle",
+                                  interps={topic: "温柔口吻"})}
         calls = []
 
         class _Ctx:
@@ -538,11 +549,9 @@ class TestDailyInterpCap:
         df, calls = self._daily(kv)
         extra = self.CAP + 5
         legacy = {self.TOPIC.format(n): f"旧解读{n}" for n in range(1, extra + 1)}
-        kv.raw[self.KEY] = json.dumps({"date": df.clock.today(),
-                                       "sign": self._sign([PICK]),
-                                       "v": READING_PROMPT_V,
-                                       "persona": "",
-                                       "interps": legacy})
+        kv.raw[self.KEY] = json.dumps(_rec(date=df.clock.today(),
+                                           sign=self._sign([PICK]),
+                                           interps=legacy))
 
         hit = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK],
                                            self.TOPIC.format(1)))
@@ -557,11 +566,9 @@ class TestDailyInterpCap:
         df, calls = self._daily(kv)
         extra = self.CAP + 5
         legacy = {self.TOPIC.format(n): f"旧解读{n}" for n in range(1, extra + 1)}
-        kv.raw[self.KEY] = json.dumps({"date": df.clock.today(),
-                                       "sign": self._sign([PICK]),
-                                       "v": READING_PROMPT_V,
-                                       "persona": "",
-                                       "interps": legacy})
+        kv.raw[self.KEY] = json.dumps(_rec(date=df.clock.today(),
+                                           sign=self._sign([PICK]),
+                                           interps=legacy))
 
         new_topic = self.TOPIC.format(extra + 1)
         out = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], new_topic))
@@ -575,10 +582,9 @@ class TestDailyInterpCap:
         """同一天换牌（升级 / 修 KV / 牌库变动）：旧解读不再命中，旧分桶整体作废。"""
         kv = self._JsonKv()
         df, calls = self._daily(kv)
-        kv.raw[self.KEY] = json.dumps({
-            "date": df.clock.today(), "sign": self._sign([PICK]),
-            "v": READING_PROMPT_V, "persona": "",
-            "interps": {self.TOPIC.format(1): "旧解读"}})
+        kv.raw[self.KEY] = json.dumps(_rec(
+            date=df.clock.today(), sign=self._sign([PICK]),
+            interps={self.TOPIC.format(1): "旧解读"}))
 
         other = {"card": {**PICK["card"], "id": "another_card"}, "upright": False}
         out = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [other],
@@ -598,12 +604,11 @@ class TestDailyInterpCap:
         kv = self._JsonKv()
         df, _ = self._daily(kv)
         today = df.clock.today()
-        kv.raw[self.KEY] = json.dumps({"date": today, "card": PICK["card"],
-                                       "upright": True, "interps": {}})
+        kv.raw[self.KEY] = json.dumps(_rec(date=today, interps={}))
         self._ask(df, range(1, self.CAP + 2))
         rec = kv.record()
         assert rec["date"] == today
-        assert rec["card"] == PICK["card"] and rec["upright"] is True
+        assert rec["card_id"] == PICK["card"]["id"] and rec["upright"] is True
 
     def test_eviction_order_survives_a_json_round_trip(self):
         """落盘再读回后淘汰顺序与内存一致——选 FIFO 的前提就是这一条。
@@ -701,7 +706,8 @@ class TestDailyPoisonedCacheValue:
             cached = kv["sf_daily_u1"]
             assert isinstance(cached, dict), f"毒值 {poison!r} 未被覆盖成合法结构"
             assert cached.get("date") == today
-            assert cached["interps"] == {norm_topic(topic): out}
+            from data.plugins.astrbot_plugin_star_feather.ai.parse import Interpretation
+            assert Interpretation.from_record(cached["interps"][norm_topic(topic)]) == out
             assert len(calls) == 1
 
     def test_falsy_non_dict_cache_value_also_survives(self):
@@ -771,12 +777,106 @@ class TestDailyNullInterp:
         today = _time.strftime("%Y%m%d")
         other = norm_topic("最近事业运")
         sig = "|".join(f"{p['card']['id']}:{1 if p['upright'] else 0}" for p in [PICK])
-        kv = {"sf_daily_u1": {"date": today, "sign": sig, "v": READING_PROMPT_V,
-                              "persona": "",
-                              "interps": {other: "事业解读"}}}
+        kv = {"sf_daily_u1": _rec(date=today, sign=sig, interps={other: "事业解读"})}
         df, calls = self._daily(kv, None)
         out = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], "今天感情运势"))
         assert out is None
         slots = kv["sf_daily_u1"]["interps"]
         assert slots.get(other) == "事业解读"
         assert norm_topic("今天感情运势") not in slots
+
+
+class TestSingleFlight:
+    """通用同键去重：owner 只跑一次，等待者拿同一结果，取消不连带。"""
+
+    def test_waiters_share_one_result(self):
+        from data.plugins.astrbot_plugin_star_feather.services.singleflight import (
+            SingleFlight,
+        )
+        sf, calls = SingleFlight(), []
+
+        async def factory():
+            calls.append(1)
+            await asyncio.sleep(0.01)
+            return "x"
+
+        async def go():
+            return await asyncio.gather(sf.run("k", factory), sf.run("k", factory))
+
+        assert asyncio.run(go()) == ["x", "x"]
+        assert len(calls) == 1
+
+    def test_waiter_cancel_does_not_cancel_owner(self):
+        from data.plugins.astrbot_plugin_star_feather.services.singleflight import (
+            SingleFlight,
+        )
+        sf = SingleFlight()
+        started, release = asyncio.Event(), asyncio.Event()
+
+        async def factory():
+            started.set()
+            await release.wait()
+            return "owner-result"
+
+        async def go():
+            owner = asyncio.create_task(sf.run("k", factory))
+            await started.wait()
+            waiter = asyncio.create_task(sf.run("k", factory))
+            await asyncio.sleep(0)
+            waiter.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await waiter
+            release.set()
+            return await owner
+
+        assert asyncio.run(go()) == "owner-result"
+
+
+class TestSchema2Reset:
+    """旧缓存直接重置：两个旧键里的数据不再参与命中，下一次读写写回 schema 2。"""
+
+    @staticmethod
+    def _daily(kv, line="新牌灵句", interp="新解读"):
+        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+
+        class _Ctx:
+            async def get_kv_data(self, key, default=None):
+                return kv.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                kv[key] = value
+
+        class _Interp:
+            async def spirit_line(self, *a, **kw):
+                return line
+
+            async def interpret(self, *a, **kw):
+                return interp
+
+        return DailyFortune(_Ctx(), persona="", interpreter=_Interp())
+
+    def test_old_spirit_key_is_ignored(self):
+        import time
+        today = time.strftime("%Y%m%d")
+        kv = {"sf_spirit_u1": {"date": today, "sign": f"{PICK['card']['cn']}:1",
+                               "line": "旧句", "v": "old"}}
+        df = self._daily(kv)
+        got = asyncio.run(df.spirit_cached(None, "u1", [PICK], "今日运势", None))
+        assert got == "新牌灵句"
+        assert kv["sf_daily_u1"]["schema"] == 2
+        assert kv["sf_daily_u1"]["spirit_line"] == "新牌灵句"
+
+    def test_schema_less_record_is_reset(self):
+        import time
+        today = time.strftime("%Y%m%d")
+        kv = {"sf_daily_u1": {"date": today, "sign": f"{PICK['card']['id']}:1",
+                              "v": "old", "persona": "",
+                              "interps": {"（今日牌运）": "旧解读"}}}
+        df = self._daily(kv)
+        out = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"],
+                                           [PICK], "今日运势"))
+        assert out == "新解读"
+        rec = kv["sf_daily_u1"]
+        assert rec["schema"] == 2
+        assert "（今日牌运）" in rec["interps"]
+        assert "old" not in str(rec)

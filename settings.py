@@ -17,6 +17,8 @@ DEFAULT_AI_TIMEOUT = 30         # 单次 AI 解读超时（秒）；0 = 不限�
 MIN_AI_TIMEOUT = 5              # 非 0 取值的下限：不足 5 秒按 5 秒算（0 是特例，表示不限制）
 DEFAULT_AI_BUDGET = 120         # 单次占卜的 AI 总预算（秒，ai.ai_budget_seconds）：所有 AI 阶段共用一个截止点
 DEFAULT_AI_PARALLEL_STAGES = True  # 牌灵的话与解读两段 AI 并发（ai.parallel_stages）：关掉则顺序执行
+DEFAULT_AI_MAX_CONCURRENCY = 2  # 同一 Provider 的最大并发请求数（ai.max_concurrency）：0 = 不限制
+DEFAULT_ALL_PROVIDERS_FALLBACK = False  # 候选链最后是否回退到「全部已加载 Provider」（ai.all_providers_fallback）
 MAX_AI_BUDGET = 24 * 3600       # 预算上限（秒）：一次占卜超过一天没有意义，再大也只会让截止点算不出来
 AI_BUDGET_MIN_ATTEMPT = 1.0     # 剩余预算不足此值（秒）就不再发起新请求——注定超时，只是白等一次
 DEFAULT_SPIRIT_STAGE_BUDGET = 20  # 牌灵的话的阶段上限（秒）：次要内容不许独吞整笔预算
@@ -52,6 +54,8 @@ class AiSettings:
     fail_cooldown: int = DEFAULT_AI_COOLDOWN
     budget_seconds: int = DEFAULT_AI_BUDGET
     parallel_stages: bool = DEFAULT_AI_PARALLEL_STAGES
+    max_concurrency: int = DEFAULT_AI_MAX_CONCURRENCY
+    all_providers_fallback: bool = DEFAULT_ALL_PROVIDERS_FALLBACK
     persona: str = DEFAULT_AI_PERSONA
     question_max_len: int = DEFAULT_QUESTION_MAX_LEN
     structure_check: str = DEFAULT_STRUCTURE_CHECK
@@ -212,6 +216,10 @@ def parse(config) -> Settings:
         _cfg_get(config, "ai", "structure_check", DEFAULT_STRUCTURE_CHECK) or "").strip().lower()
     if structure_check not in STRUCTURE_CHECK_VALUES:
         structure_check = DEFAULT_STRUCTURE_CHECK
+    # 同一 Provider 的并发上限：0 = 不限制；负数属坏值，回默认而不是当成不限制。
+    _max_conc = _cfg_int(config, "ai", "max_concurrency", DEFAULT_AI_MAX_CONCURRENCY)
+    if _max_conc < 0:
+        _max_conc = DEFAULT_AI_MAX_CONCURRENCY
     return Settings(
         ai=AiSettings(
             enable_ai=_cfg_bool(config, "ai", "enable_ai", True),
@@ -223,6 +231,9 @@ def parse(config) -> Settings:
                 _cfg_get(config, "ai", "ai_budget_seconds", DEFAULT_AI_BUDGET)),
             parallel_stages=_cfg_bool(config, "ai", "parallel_stages",
                                       DEFAULT_AI_PARALLEL_STAGES),
+            max_concurrency=_max_conc,
+            all_providers_fallback=_cfg_bool(config, "ai", "all_providers_fallback",
+                                             DEFAULT_ALL_PROVIDERS_FALLBACK),
             persona=persona,
             question_max_len=ai_max_len,
             structure_check=structure_check,

@@ -133,6 +133,19 @@ class TestParsedSettings:
         assert parse({"ai": {"ai_budget_seconds": 24 * 3600 + 1}}).ai.budget_seconds == DEFAULT_AI_BUDGET
         assert parse({"ai": {"ai_budget_seconds": 24 * 3600}}).ai.budget_seconds == 24 * 3600
 
+    def test_ai_concurrency_and_fallback_defaults(self):
+        from data.plugins.astrbot_plugin_star_feather.settings import (
+            DEFAULT_AI_MAX_CONCURRENCY,
+            DEFAULT_ALL_PROVIDERS_FALLBACK,
+        )
+        s = parse(None)
+        assert s.ai.max_concurrency == DEFAULT_AI_MAX_CONCURRENCY == 2
+        assert s.ai.all_providers_fallback is DEFAULT_ALL_PROVIDERS_FALLBACK is False
+        assert parse({"ai": {"max_concurrency": 0}}).ai.max_concurrency == 0
+        assert parse({"ai": {"max_concurrency": 5}}).ai.max_concurrency == 5
+        assert parse({"ai": {"max_concurrency": -3}}).ai.max_concurrency == 2
+        assert parse({"ai": {"all_providers_fallback": True}}).ai.all_providers_fallback is True
+
     def test_legacy_flat_still_loads(self):
         # 升级前扁平配置：分组缺失时回退顶层读取
         s = parse({"show_image": False, "forward_result": True})

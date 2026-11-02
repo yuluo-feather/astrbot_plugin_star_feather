@@ -4,6 +4,11 @@
 行为时，先改这里并写进 changelog，别让重构顺手改掉结果。
 """
 import pytest
+from data.plugins.astrbot_plugin_star_feather.ai.prompts import (
+    build_reading_prompt,
+    build_spirit_line_prompt,
+    resolve_persona,
+)
 from data.plugins.astrbot_plugin_star_feather.card_render import (
     _render_daily_card_img,
     render_cards,
@@ -14,11 +19,6 @@ from data.plugins.astrbot_plugin_star_feather.intent import (
     is_daily_request,
     norm_topic,
     select_formation,
-)
-from data.plugins.astrbot_plugin_star_feather.prompts import (
-    build_reading_prompt,
-    build_spirit_line_prompt,
-    resolve_persona,
 )
 from data.plugins.astrbot_plugin_star_feather.tarot_data import TAROT_CARDS
 from PIL import Image

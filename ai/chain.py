@@ -1,8 +1,7 @@
-"""AI 解读：候选 Provider 链、超时切换、失败冷却——纯「找模型 → 发请求 → 拿文本」。
+"""AI 解读：候选 Provider 链、超时切换、失败冷却、并发上限与总预算。
 
-输入侧安全（越狱剥除 / 截断）与输出侧结构校验在 hardening.py；
-提示词与格式协议在 prompts.py；
-本模块只做模型调用本身。
+输入侧安全（越狱剥除 / 截断）在 hardening.py，输出侧结构校验与解析在 ai/parse.py，
+提示词与格式协议在 ai/prompts.py；本模块只做模型调用本身。
 
 说人话：牌抽好了，怎么让 AI 好好讲话，这里管——但它的嘴要听话，由 hardening 管。
 """
@@ -10,23 +9,13 @@ import asyncio
 import time
 from collections import Counter
 
-from astrbot.api import logger
-
-from .hardening import (
+from ..core.log import log as logger
+from ..hardening import (
     clip_question,
     normalize_injection_input,
     strip_injection_fragments,
-    validate_interpret_structure,
-    validate_interpret_structure_strict,
 )
-from .prompts import (
-    SYSTEM_PROMPT_DIVINE,
-    build_reading_prompt,
-    build_spirit_line_prompt,
-    build_system_prompt,
-    resolve_persona,
-)
-from .settings import (
+from ..settings import (
     AI_BUDGET_MIN_ATTEMPT,
     DEFAULT_AI_BUDGET,
     DEFAULT_AI_PERSONA,
@@ -37,6 +26,19 @@ from .settings import (
     STRUCTURE_CHECK_SHADOW,
     STRUCTURE_CHECK_STRICT,
     _budget_seconds_float,
+)
+from .parse import (
+    Interpretation,
+    parse_interpretation,
+    validate_interpret_structure,
+    validate_interpret_structure_strict,
+)
+from .prompts import (
+    SYSTEM_PROMPT_DIVINE,
+    build_reading_prompt,
+    build_spirit_line_prompt,
+    build_system_prompt,
+    resolve_persona,
 )
 
 # 输出清洗用的引号集：中英引号 + 直角引号 + 单引号。用码点拼出，避开源码里的转义
@@ -189,6 +191,8 @@ class AiInterpreter:
                  persona: str = DEFAULT_AI_PERSONA,
                  ai_budget: int = DEFAULT_AI_BUDGET,
                  structure_check: str = DEFAULT_STRUCTURE_CHECK,
+                 max_concurrency: int = 2,
+                 all_providers_fallback: bool = False,
                  clock=time.monotonic):
         self.context = context
         self.enable_ai = enable_ai
@@ -207,6 +211,13 @@ class AiInterpreter:
         self.ai_budget = ai_budget  # 单次占卜的 AI 总预算（秒），0=不限制；见 AiBudget
         # 输出结构校验强度（ai.structure_check）：见 _accept_structure
         self.structure_check = structure_check
+        # 同一 Provider 的并发上限：单槽本地模型 / 限流严格时，两段 AI 同时压过去会
+        # 排队甚至触发限流，随后还会被误记成失败冷却。0 = 不限制。
+        self.max_concurrency = max_concurrency
+        self._semaphores: dict[tuple[int, str], asyncio.Semaphore] = {}
+        # 是否在「指定 → 会话 → 全局默认」之后回退到全部已加载 Provider。
+        # 默认关：未预期的模型不该被悄悄拉进来烧请求。
+        self.all_providers_fallback = all_providers_fallback
         # 影子读数的实例级累计：单签样本太小，判断「要不要收紧」得看长期分布，
         # 所以每次汇总都把累计一并落进同一行（见 _log_shadow_summary）。
         self._shadow_totals: dict[str, int] = {
@@ -319,11 +330,12 @@ class AiInterpreter:
             _add(await self.context.get_using_provider_async())
         except Exception as e:
             logger.warning(f"候选来源[全局默认]取用失败，本签该来源缺席: {e}")
-        try:
-            for provider in self.context.get_all_providers():
-                _add(provider)
-        except Exception as e:
-            logger.warning(f"候选来源[全部已加载]枚举失败，本签该来源缺席: {e}")
+        if self.all_providers_fallback:
+            try:
+                for provider in self.context.get_all_providers():
+                    _add(provider)
+            except Exception as e:
+                logger.warning(f"候选来源[全部已加载]枚举失败，本签该来源缺席: {e}")
         return out
 
     async def _gather_candidates(self, umo: str | None,
@@ -443,6 +455,22 @@ class AiInterpreter:
                 f"牌灵的话候选[{pid}]输出不合规（len={len(line)}，只收 1~40 字），继续下一候选")
         return None
 
+    def _semaphore_for(self, provider) -> asyncio.Semaphore | None:
+        """该 Provider 的并发闸；0 = 不限制，返回 None。
+
+        键里带事件循环 id：同一解释器可能被多个 asyncio.run 依次使用（测试与
+        诊断脚本），Semaphore 绑在创建它的循环上，跨循环复用会直接报错。
+        """
+        if self.max_concurrency <= 0:
+            return None
+        loop = asyncio.get_running_loop()
+        key = (id(loop), self._provider_id(provider))
+        sem = self._semaphores.get(key)
+        if sem is None:
+            sem = asyncio.Semaphore(self.max_concurrency)
+            self._semaphores[key] = sem
+        return sem
+
     async def _chat_once(self, provider, prompt: str, system_prompt: str,
                          timeout: float | None = None) -> str | None:
         """对单个候选发起解读请求：超时或异常一律返回 None，交给下一个候选。
@@ -457,14 +485,12 @@ class AiInterpreter:
         try:
             # 调用本身也放进 try：同步抛异常（签名不匹配、参数校验失败）同样
             # 只是「这个候选失败」，不许绕过 AI 失败的兜底边界带走整条卦
-            call = provider.text_chat(
-                prompt=prompt, session_id=None, contexts=[], image_urls=[],
-                system_prompt=system_prompt,
-            )
-            if limit == UNLIMITED_TIMEOUT:
-                resp = await call          # 不限制：让这个请求一直等到模型开口
+            sem = self._semaphore_for(provider)
+            if sem is not None:
+                async with sem:
+                    resp = await self._await_chat(provider, prompt, system_prompt, limit)
             else:
-                resp = await asyncio.wait_for(call, timeout=limit)
+                resp = await self._await_chat(provider, prompt, system_prompt, limit)
         except asyncio.TimeoutError:
             logger.warning(f"AI 解读超时（>{limit:g}s），放弃该提供商")
             return None
@@ -475,6 +501,17 @@ class AiInterpreter:
             return (resp.completion_text or "").strip() or None
         except Exception:
             return None
+
+    async def _await_chat(self, provider, prompt: str, system_prompt: str,
+                          limit: float):
+        """真正发请求：超时/不限制两档在这里落地。"""
+        call = provider.text_chat(
+            prompt=prompt, session_id=None, contexts=[], image_urls=[],
+            system_prompt=system_prompt,
+        )
+        if limit == UNLIMITED_TIMEOUT:
+            return await call
+        return await asyncio.wait_for(call, timeout=limit)
 
     def _accept_structure(self, text: str, n_positions: int,
                           tally: _ShadowTally | None = None) -> bool:
@@ -581,7 +618,7 @@ class AiInterpreter:
                         positions: list[str],
                         picks: list[dict], user_input: str, detail: str,
                         persona_eff: str | None = None,
-                        budget: AiBudget | None = None) -> str | None:
+                        budget: AiBudget | None = None) -> Interpretation | None:
         """AI 结构化解读。返回 None 表示本轮没有 AI 解读（候选全部失败或全部处于冷却期），
         由调用方回退本地牌义。给用户的感觉是：解读要么有，要么是牌义，不会等成雕塑。
 
@@ -632,11 +669,14 @@ class AiInterpreter:
             # 严格口径的拒绝率得先用真实候选统计出来再决定是否启用）
             if not self._accept_structure(text, len(positions), tally):
                 continue
+            parsed = parse_interpretation(text)
+            if parsed is None:
+                continue
             if tally is not None:
-                # 因宽松口径放行而收尾：严格口径下会继续往下试，判决要落在「未观测」
+                # 因宽松口径放行而收尾：严格口径会继续往下试，判决要落在「未观测」
                 tally.closed_by_loose_return = True
                 self._log_shadow_summary(tally)
-            return text
+            return parsed
         if tally is not None:
             self._log_shadow_summary(tally)
         if _STAGE_INTERPRET in bd.stopped:

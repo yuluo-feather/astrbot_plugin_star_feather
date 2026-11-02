@@ -49,6 +49,18 @@
         "default": true,
         "hint": "开启后两段 AI 同时请求，总耗时取较慢的一段；关闭则先出牌灵的话、再出解读。单槽本地模型或对同一 Provider 限流严格时建议关闭，避免同一时刻压两个请求触发排队或限流。默认值：true。"
       },
+      "max_concurrency": {
+        "description": "同一 Provider 的最大并发请求数",
+        "type": "int",
+        "default": 2,
+        "hint": "同时向同一个 Provider 发起请求的上限。默认 2：牌灵的话与解读可以并发，又不会在单槽本地模型或限流严格的服务上排长队。设为 0 表示不限制；负数按默认值处理。"
+      },
+      "all_providers_fallback": {
+        "description": "全部 Provider 兜底",
+        "type": "bool",
+        "default": false,
+        "hint": "候选链走到「指定模型 → 当前会话模型 → 全局默认」之后，是否再把所有已加载 Provider 逐个试一遍。默认关闭：避免在未预期的模型上产生请求与费用；需要更激进的兜底时再打开。"
+      },
       "question_max_len": {
         "description": "发送给 AI 解读的问题长度上限（字符）",
         "type": "int",

@@ -29,6 +29,8 @@ def flatten(settings) -> dict[str, object]:
         "ai.ai_fail_cooldown": settings.ai.fail_cooldown,
         "ai.ai_budget_seconds": settings.ai.budget_seconds,
         "ai.parallel_stages": settings.ai.parallel_stages,
+        "ai.max_concurrency": settings.ai.max_concurrency,
+        "ai.all_providers_fallback": settings.ai.all_providers_fallback,
         "ai.question_max_len": settings.ai.question_max_len,
         "ai.structure_check": settings.ai.structure_check,
         "tool.llm_tool_enabled": settings.tool.llm_enabled,
