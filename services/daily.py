@@ -15,12 +15,13 @@ import random
 
 from ..adapters.clock import Clock
 from ..adapters.kv_utils import kv_delete, kv_get, kv_put
-from ..ai.parse import Interpretation, parse_interpretation
+from ..ai.parse import interpretation_from_record, parse_interpretation
 from ..ai.prompts import READING_PROMPT_V, SPIRIT_PROMPT_V
 from ..core.dailylines import pick_signature
 from ..core.draw import render_detail
 from ..core.intent import norm_topic
 from ..core.log import log
+from ..core.models import Interpretation
 from ..core.settings import DEFAULT_AI_PERSONA
 from ..core.tarot_data import TAROT_CARDS
 from .daily_store import DailyRecord
@@ -168,7 +169,7 @@ class DailyFortune:
             if ok and record.same_context(today, sig, _PROMPT_V, self.persona):
                 hit = record.interps.get(topic)
         if hit is not None:
-            return Interpretation.from_record(hit)
+            return interpretation_from_record(hit)
 
         async def generate():
             return await _ai_output(

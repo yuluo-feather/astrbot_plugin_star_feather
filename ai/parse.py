@@ -1,79 +1,53 @@
 """解读解析与结构校验：一次解析，产出的 Interpretation 同时供缓存与发送使用。"""
 import re
 
+from ..core.models import Interpretation
 from .prompts import SECTION_MARK_RE
 
 
-class Interpretation(str):
-    """一次 AI 解读：文本本身 + 预切分好的段落与总结。
-
-    继承 str 是为了让既有比较/日志/缓存文本保持原样；额外属性只在需要结构化发送
-    或结构化缓存时读取。解析只做一次：AI 返回时构造，发送与写缓存都复用。
-    """
-
-    sections: tuple[str, ...]
-    summary: str
-    structured: bool
-
-    def __new__(cls, text: str):
-        obj = super().__new__(cls, text)
-        obj._parse()
-        return obj
-
-    def _parse(self) -> None:
-        text = str(self).strip()
-        segs = SECTION_MARK_RE.split(text)
-        # 与 deliver.split_sections 同口径：segs[0] 是标记前前言，其余是标记段。
-        if len(segs) < 3:
-            self.sections = (text,) if text else ()
-            self.summary = ""
-            self.structured = False
-            return
-        parts = [s.strip() for s in segs if s.strip()]
-        summary = ""
-        sections = []
-        for part in parts:
-            if part.startswith("【总结】"):
-                summary = part
-            else:
-                sections.append(part)
-        self.sections = tuple(sections)
-        self.summary = summary
-        self.structured = True
-
-    def to_record(self) -> dict:
-        """缓存里的结构：文本 + 段落 + 总结，读取时不再重新切分。"""
-        return {"text": str(self), "sections": list(self.sections),
-                "summary": self.summary, "structured": self.structured}
-
-    @classmethod
-    def from_record(cls, record) -> "Interpretation":
-        """缓存记录 → Interpretation；旧版纯文本字符串仍能读。"""
-        if isinstance(record, str):
-            return cls(record)
-        if not isinstance(record, dict):
-            return cls("")
-        text = record.get("text")
-        if not isinstance(text, str) or not text:
-            return cls("")
-        obj = cls(text)
-        sections = record.get("sections")
-        if isinstance(sections, list) and all(isinstance(s, str) for s in sections):
-            obj.sections = tuple(sections)
-        summary = record.get("summary")
-        if isinstance(summary, str):
-            obj.summary = summary
-        structured = record.get("structured")
-        if isinstance(structured, bool):
-            obj.structured = structured
-        return obj
-
-
 def parse_interpretation(text: str | None) -> Interpretation | None:
-    """AI 原文 → Interpretation；空文本返回 None。"""
-    if not text or not text.strip():
+    """AI 原文 → Interpretation；空文本返回 None。
+
+    切分只做一次：sections / summary 随对象一起产出，发送与写缓存都复用。
+    """
+    if not text or not str(text).strip():
         return None
-    return Interpretation(text)
+    raw = str(text).strip()
+    segs = SECTION_MARK_RE.split(raw)
+    if len(segs) < 3:
+        return Interpretation(text=raw, sections=(raw,))
+    parts = [s.strip() for s in segs if s.strip()]
+    summary = ""
+    sections = []
+    for part in parts:
+        if part.startswith("【总结】"):
+            summary = part
+        else:
+            sections.append(part)
+    return Interpretation(text=raw, sections=tuple(sections), summary=summary,
+                          structured=True)
+
+
+def interpretation_from_record(record) -> Interpretation:
+    """缓存记录 → Interpretation；旧版纯文本字符串仍能读。"""
+    if isinstance(record, str):
+        return parse_interpretation(record) or Interpretation(text="")
+    if not isinstance(record, dict):
+        return Interpretation(text="")
+    text = record.get("text")
+    if not isinstance(text, str) or not text:
+        return Interpretation(text="")
+    parsed = parse_interpretation(text) or Interpretation(text="")
+    sections = record.get("sections")
+    summary = record.get("summary")
+    structured = record.get("structured")
+    return Interpretation(
+        text=parsed.text,
+        sections=tuple(sections) if isinstance(sections, list)
+        and all(isinstance(s, str) for s in sections) else parsed.sections,
+        summary=summary if isinstance(summary, str) else parsed.summary,
+        structured=structured if isinstance(structured, bool) else parsed.structured,
+    )
 
 
 def validate_interpret_structure(text: str, n_positions: int) -> bool:

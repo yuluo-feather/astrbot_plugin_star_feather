@@ -208,7 +208,7 @@ class TestStagesShareTheDeadline:
         assert seen == [("s", float(DEFAULT_SPIRIT_STAGE_BUDGET))]   # 先被阶段上限卡在 20 秒
         out = asyncio.run(_interp([FakeProvider("r")]).interpret(
             EVENT, "羽签", ["你的当下"], [PICK], "问感情", "详情", budget=bd))
-        assert out == OK_INTERP
+        assert out.text == OK_INTERP
         assert seen[1] == ("r", 30)            # 60 - 30 = 30：解读吃上一段剩下的
         assert bd.remaining() == 0
 
@@ -278,7 +278,7 @@ class TestSpiritStageBudgetAccumulates:
         seen = _spy_chat(monkeypatch, clk, 0, {"r": OK_INTERP})
         it2 = _interp([FakeProvider("r", result=OK_INTERP)], ai_timeout=30)
         assert asyncio.run(it2.interpret(EVENT, "羽签", ["你的当下"], [PICK], "问感情",
-                                         "详情", budget=bd)) == OK_INTERP
+                                         "详情", budget=bd)).text == OK_INTERP
         assert seen == [("r", 30.0)]
 
     def test_unlimited_budget_still_honours_the_stage_cap(self, monkeypatch):
@@ -626,7 +626,7 @@ class TestCandidateFetchWithinBudget:
         """
         prov = FakeProvider("p0", result=OK_INTERP)
         it = AiInterpreter(_SlowContext(using=prov, delay=1.5), ai_timeout=1, ai_budget=0)
-        assert self._run(it, AiBudget(0)) == OK_INTERP
+        assert self._run(it, AiBudget(0)).text == OK_INTERP
 
     def test_zero_budget_and_zero_timeout_stay_unbounded_by_design(self, monkeypatch):
         """两个 0 = 真的不设上限（README 的公开口径）：解读阶段不得偷偷加暗上限。
@@ -637,7 +637,7 @@ class TestCandidateFetchWithinBudget:
         clk = Clock()
         it = _interp([FakeProvider("p0", result=OK_INTERP)], ai_timeout=0, ai_budget=0)
         seen = _spy_chat(monkeypatch, clk, 0, {"p0": OK_INTERP})
-        assert self._run(it, AiBudget(0, clk)) == OK_INTERP
+        assert self._run(it, AiBudget(0, clk)).text == OK_INTERP
         assert seen == [("p0", float("inf"))]
 
     def test_candidate_fetch_timeout_does_not_freeze_the_provider(self):

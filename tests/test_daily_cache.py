@@ -18,6 +18,11 @@ from data.plugins.astrbot_plugin_star_feather.services.daily import (
 from stubs import PICK
 
 
+def _text(value):
+    """缓存命中返回 Interpretation、生成路径的替身返回纯字符串：断言统一取文本。"""
+    return value.text if hasattr(value, "text") else value
+
+
 def _rec(**over):
     """schema 2 记录的最小夹具：字段名跟 services/daily_store.DailyRecord 一致。"""
     from data.plugins.astrbot_plugin_star_feather.services.daily import _PROMPT_V
@@ -250,7 +255,7 @@ class TestDailyInterpTopic:
             b = await df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], "今天感情运势")
             return a, b
         a, b = asyncio.run(go())
-        assert a == b == "解读:今天感情运势"
+        assert _text(a) == _text(b) == "解读:今天感情运势"
         assert len(calls) == 1  # 同主题只生成一次
 
     def test_concurrent_same_topic_generates_once(self):
@@ -340,8 +345,8 @@ class TestDailyInterpTopic:
             c = await df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], "最近事业运")
             return a, b, c
         a, b, c = asyncio.run(go())
-        assert a == "解读:最近事业运" and b == "解读:今天感情运势"
-        assert c == "解读:最近事业运"  # 换主题后回来仍复用
+        assert _text(a) == "解读:最近事业运" and _text(b) == "解读:今天感情运势"
+        assert _text(c) == "解读:最近事业运"  # 换主题后回来仍复用
         assert len(calls) == 2  # 两个主题各生成一次，不串答
 
     def test_generic_question_shared_all_day(self):
@@ -353,7 +358,7 @@ class TestDailyInterpTopic:
             return a, b
         a, b = asyncio.run(go())
         # 泛问（无具体主题词）统一归为当日牌运，共享同一段解读（防刷版本）
-        assert a == b == "解读:（今日牌运）"
+        assert _text(a) == _text(b) == "解读:（今日牌运）"
         assert len(calls) == 1
 
     def test_concurrent_topics_both_persist(self):
@@ -534,7 +539,7 @@ class TestDailyInterpCap:
         self._ask(df, range(1, self.CAP + 1))
         hit = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK],
                                            self.TOPIC.format(1)))
-        assert hit == f"解读:{self.TOPIC.format(1)}"      # 命中：复用旧桶
+        assert _text(hit) == f"解读:{self.TOPIC.format(1)}"      # 命中：复用旧桶
         assert len(calls) == self.CAP                     # 命中不花 AI 调用
         self._ask(df, [self.CAP + 1])
         slots = kv.record()["interps"]
@@ -557,7 +562,7 @@ class TestDailyInterpCap:
 
         hit = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK],
                                            self.TOPIC.format(1)))
-        assert hit == "旧解读1"
+        assert _text(hit) == "旧解读1"
         assert calls == []                              # 命中不花 AI 调用
         assert kv.puts == 0                             # 命中不写 KV
         assert len(kv.record()["interps"]) == extra     # 旧字典原样留着
@@ -708,8 +713,10 @@ class TestDailyPoisonedCacheValue:
             cached = kv["sf_daily_u1"]
             assert isinstance(cached, dict), f"毒值 {poison!r} 未被覆盖成合法结构"
             assert cached.get("date") == today
-            from data.plugins.astrbot_plugin_star_feather.ai.parse import Interpretation
-            assert Interpretation.from_record(cached["interps"][norm_topic(topic)]) == out
+            from data.plugins.astrbot_plugin_star_feather.ai.parse import (
+                interpretation_from_record,
+            )
+            assert interpretation_from_record(cached["interps"][norm_topic(topic)]).text == out
             assert len(calls) == 1
 
     def test_falsy_non_dict_cache_value_also_survives(self):

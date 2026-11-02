@@ -7,8 +7,8 @@
 from astrbot.api import logger
 from astrbot.api.message_components import Image, Node, Nodes, Plain
 
-from ..ai.parse import Interpretation
 from ..ai.prompts import SECTION_MARK_RE
+from ..core.models import Interpretation
 from ..core.texts import FORWARD_IMAGE_LABEL
 
 # 已验证能收合并转发（Nodes）的平台：框架源码里显式处理 Nodes 的只有这两个
@@ -137,7 +137,8 @@ class Deliverer:
         if isinstance(interp, Interpretation) and interp.structured:
             segs = list(interp.sections) + ([interp.summary] if interp.summary else [])
         else:
-            segs = split_sections(interp, self.segment_size)
+            text = interp.text if isinstance(interp, Interpretation) else interp
+            segs = split_sections(text, self.segment_size)
         parts = [sub for seg in segs for sub in split_text(seg, self.segment_size)]
         if not parts:
             return

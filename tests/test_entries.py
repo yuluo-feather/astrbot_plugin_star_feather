@@ -544,6 +544,7 @@ class TestPresenterFallback:
             Presenter,
         )
         from data.plugins.astrbot_plugin_star_feather.core.models import (
+            Interpretation,
             Reading,
             ReadingRequest,
         )
@@ -564,7 +565,7 @@ class TestPresenterFallback:
         evt = types.SimpleNamespace(get_self_id=lambda: "0",
                                     chain_result=lambda chain: chain)
         reading = Reading(ReadingRequest("spread", "羽签", "问题", "问题", False),
-                          "u1", "羽签", ("你的当下",), (PICK,), "sig", "AI", None)
+                          "u1", "羽签", ("你的当下",), (PICK,), "sig", Interpretation(text="AI"), None)
         messenger = Messenger()
         asyncio.run(Presenter(Deliverer(300, "", False)).present(
             reading, messenger, evt))

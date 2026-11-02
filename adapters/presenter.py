@@ -19,7 +19,7 @@ class Presenter:
         if reading.spirit:
             parts.append(reading.spirit)
         if reading.interpretation:
-            parts.append(str(reading.interpretation))
+            parts.append(reading.interpretation.text)
         else:
             parts.append(render_text(reading.formation, list(reading.positions),
                                      list(reading.picks)))

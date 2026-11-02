@@ -113,13 +113,13 @@ class TestStructureCheckModes:
     def test_loose_lets_mismatched_candidate_through(self):
         prov = FakeProvider("p0", result=LEGACY_TWO_OF_THREE)
         it = _interp([prov], structure_check=STRUCTURE_CHECK_LOOSE)
-        assert _ask(it, ["过去", "现在", "未来"]) == LEGACY_TWO_OF_THREE
+        assert _ask(it, ["过去", "现在", "未来"]).text == LEGACY_TWO_OF_THREE
 
     def test_strict_rejects_then_uses_next_candidate(self):
         bad = FakeProvider("bad", result=LEGACY_TWO_OF_THREE)
         good = FakeProvider("good", result=OK3)
         it = _interp([bad, good], structure_check=STRUCTURE_CHECK_STRICT)
-        assert _ask(it, ["过去", "现在", "未来"]) == OK3
+        assert _ask(it, ["过去", "现在", "未来"]).text == OK3
         assert (bad.calls, good.calls) == (1, 1)
 
     def test_strict_all_rejected_returns_none(self):

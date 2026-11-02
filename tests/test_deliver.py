@@ -263,7 +263,9 @@ class TestInterpretationReuse:
         from data.plugins.astrbot_plugin_star_feather.adapters import (
             deliver as deliver_mod,
         )
-        from data.plugins.astrbot_plugin_star_feather.ai.parse import Interpretation
+        from data.plugins.astrbot_plugin_star_feather.ai.parse import (
+            parse_interpretation,
+        )
 
         def no_split(*a, **kw):
             raise AssertionError("结构化解读不该再走 split_sections")
@@ -273,7 +275,7 @@ class TestInterpretationReuse:
         evt.result = None
         evt.get_self_id = lambda: "0"
         evt.chain_result = lambda chain: chain
-        interp = Interpretation("【第1张·过去】一段。\n【总结】结论。")
+        interp = parse_interpretation("【第1张·过去】一段。\n【总结】结论。")
 
         async def run():
             return [x async for x in Deliverer(300, "", False).deliver(

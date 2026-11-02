@@ -9,6 +9,7 @@ import asyncio
 import time
 
 from ..core.log import log as logger
+from ..core.models import Interpretation
 from ..core.settings import (
     AI_BUDGET_MIN_ATTEMPT,
     DEFAULT_AI_BUDGET,
@@ -26,7 +27,6 @@ from .hardening import (
     strip_injection_fragments,
 )
 from .parse import (
-    Interpretation,
     parse_interpretation,
     validate_interpret_structure,
     validate_interpret_structure_strict,
