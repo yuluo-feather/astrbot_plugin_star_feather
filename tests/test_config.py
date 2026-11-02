@@ -4,7 +4,7 @@ import ast
 import json
 import os
 
-from data.plugins.astrbot_plugin_star_feather.config import (
+from data.plugins.astrbot_plugin_star_feather.core.config import (
     _cfg_bool,
     _cfg_get,
     _cfg_int,
@@ -86,6 +86,18 @@ class TestCfgBool:
 
 _PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCHEMA_PATH = os.path.join(_PLUGIN_ROOT, "_conf_schema.json")
+_SKIP_DIRS = {"tests", "scripts", "tools", "__pycache__", ".git", ".ruff_cache",
+              ".pytest_cache", ".mypy_cache"}
+
+
+def _iter_sources(root):
+    """插件源码（跳过测试/开发脚本与缓存目录），返回 (相对路径, 绝对路径)。"""
+    for cur, dirs, files in os.walk(root):
+        dirs[:] = sorted(d for d in dirs if d not in _SKIP_DIRS)
+        for name in sorted(files):
+            if name.endswith(".py"):
+                path = os.path.join(cur, name)
+                yield os.path.relpath(path, root).replace(os.sep, "/"), path
 
 # 框架认得的控件类型白名单（AstrBot 配置组件）：integer / str / boolean 这类
 # JSON Schema 风格写法不在其中，出现即插件加载失败
@@ -97,7 +109,7 @@ REQUIRED_GROUP_KEYS = ("type", "description", "hint", "items")
 # 取键原语：settings.py 等按 (group, key) 字面量读配置
 _CFG_READERS = ("_cfg_get", "_cfg_int", "_cfg_bool")
 # 唯一允许动态取键的文件：原语层本身（group / key 是它的入参，不是具体配置项）
-_PRIMITIVE_LAYER = "config.py"
+_PRIMITIVE_LAYER = "core/config.py"
 # 旧扁平配置键：schema 已迁到分组（output.send_mode），读取侧保留扁平回退兼容，
 # 不属于 schema 字段，对账时豁免（见 settings.resolve_send_mode）
 LEGACY_FLAT_KEYS = {("output", "forward_result"), ("output", "show_image")}
@@ -248,10 +260,7 @@ class TestConfSchemaMechanical:
         否则 A7 会静默漏掉它的取键，对账变成假绿。
         """
         refs, dynamic = set(), []
-        for name in sorted(os.listdir(_PLUGIN_ROOT)):
-            if not name.endswith(".py"):
-                continue
-            fpath = os.path.join(_PLUGIN_ROOT, name)
+        for name, fpath in _iter_sources(_PLUGIN_ROOT):
             with open(fpath, encoding="utf-8") as f:
                 tree = ast.parse(f.read(), filename=fpath)
             for node in ast.walk(tree):
@@ -289,7 +298,7 @@ def test_defaults_single_source_across_settings_schema_and_readme():
 
     生成/回写入口：`python -m scripts.gen_config --write`；本测试与 `--check` 同源。
     """
-    from data.plugins.astrbot_plugin_star_feather.settings import parse
+    from data.plugins.astrbot_plugin_star_feather.core.settings import parse
 
     from scripts.config_docs import check
 

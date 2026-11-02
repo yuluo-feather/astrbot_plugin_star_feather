@@ -13,18 +13,18 @@ import asyncio
 import hashlib
 import random
 
-from .ai.parse import Interpretation, parse_interpretation
-from .ai.prompts import READING_PROMPT_V, SPIRIT_PROMPT_V
-from .clock import Clock
-from .core.draw import render_detail
-from .core.log import log
-from .dailylines import pick_signature
-from .intent import norm_topic
-from .kv_utils import kv_delete, kv_get, kv_put
-from .services.daily_store import DailyRecord
-from .services.singleflight import SingleFlight
-from .settings import DEFAULT_AI_PERSONA
-from .tarot_data import TAROT_CARDS
+from ..adapters.clock import Clock
+from ..adapters.kv_utils import kv_delete, kv_get, kv_put
+from ..ai.parse import Interpretation, parse_interpretation
+from ..ai.prompts import READING_PROMPT_V, SPIRIT_PROMPT_V
+from ..core.dailylines import pick_signature
+from ..core.draw import render_detail
+from ..core.intent import norm_topic
+from ..core.log import log
+from ..core.settings import DEFAULT_AI_PERSONA
+from ..core.tarot_data import TAROT_CARDS
+from .daily_store import DailyRecord
+from .singleflight import SingleFlight
 
 # 同键生成去重：模块级而非实例属性，热重载前后并存的实例也能共享同一笔生成。
 _SPIRIT_FLIGHT = SingleFlight()

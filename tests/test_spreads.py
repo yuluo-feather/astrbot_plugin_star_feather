@@ -1,6 +1,6 @@
 """意图判定单测：选阵 / 阵名剥离 / 祈使词剥离（intent 纯函数）。
 ——牌灵挑阵的规矩，全在这了。"""
-from data.plugins.astrbot_plugin_star_feather.intent import (
+from data.plugins.astrbot_plugin_star_feather.core.intent import (
     build_request,
     clean_question,
     select_formation,
@@ -122,7 +122,7 @@ class TestRelationWordsDerived:
     """
 
     def test_relation_words_covers_keyword_map_emotion_group(self):
-        from data.plugins.astrbot_plugin_star_feather.intent import (
+        from data.plugins.astrbot_plugin_star_feather.core.intent import (
             KEYWORD_MAP,
             RELATION_WORDS,
         )
@@ -130,7 +130,9 @@ class TestRelationWordsDerived:
         assert not missing, f"KEYWORD_MAP 情感组有词没进 RELATION_WORDS：{missing}"
 
     def test_emotion_plus_timeline_upgrades_to_relation_spread(self):
-        from data.plugins.astrbot_plugin_star_feather.intent import select_formation
+        from data.plugins.astrbot_plugin_star_feather.core.intent import (
+            select_formation,
+        )
         # 唯一能暴露漏词的形状：时间线词 2 个 > 情感词 1 个，且不含「他/她/我们」
         assert select_formation("情感过去未来") == "恋羽十字"
         assert select_formation("情感未来时间线") == "恋羽十字"
@@ -139,7 +141,7 @@ class TestRelationWordsDerived:
 
     def test_specific_words_follow_keyword_map(self):
         """两张表一处定义：选阵词表新增的词，每日牌运判定自动跟上。"""
-        from data.plugins.astrbot_plugin_star_feather.intent import (
+        from data.plugins.astrbot_plugin_star_feather.core.intent import (
             KEYWORD_MAP,
             SPECIFIC_WORDS,
         )
@@ -152,7 +154,7 @@ class TestBuildRequest:
     """ReadingRequest 的构造口径：三个入口共用这一个判定入口。"""
 
     def test_help_short_circuits(self):
-        from data.plugins.astrbot_plugin_star_feather.intent import (
+        from data.plugins.astrbot_plugin_star_feather.core.intent import (
             KIND_HELP,
             build_request,
         )
@@ -160,7 +162,7 @@ class TestBuildRequest:
         assert build_request("single", "怎么用").kind == KIND_HELP
 
     def test_daily_kind_respects_switch(self):
-        from data.plugins.astrbot_plugin_star_feather.intent import build_request
+        from data.plugins.astrbot_plugin_star_feather.core.intent import build_request
         req = build_request("auto", "今日运势")
         assert req.kind == "daily" and req.fixed_for_day and req.spread == "羽签"
         # 开关关闭：普通问法不再路由到固定牌运
@@ -169,13 +171,13 @@ class TestBuildRequest:
         assert build_request("daily", "今日运势", daily_enabled=False).fixed_for_day is False
 
     def test_single_kind_is_never_fixed(self):
-        from data.plugins.astrbot_plugin_star_feather.intent import build_request
+        from data.plugins.astrbot_plugin_star_feather.core.intent import build_request
         req = build_request("single", " 帮我算一卦 ")
         assert req.kind == "single" and req.spread == "羽签" and req.fixed_for_day is False
         assert req.question == ""
 
     def test_tool_hint_only_when_rules_have_no_signal(self):
-        from data.plugins.astrbot_plugin_star_feather.intent import build_request
+        from data.plugins.astrbot_plugin_star_feather.core.intent import build_request
         # 规则没信号：采纳模型给的枚举值
         assert build_request("auto", "今天天气不错", source="tool",
                              formation_hint="羽镜").spread == "羽镜"
@@ -187,12 +189,12 @@ class TestBuildRequest:
                              formation_hint="乱写的").spread == "羽时三刻"
 
     def test_command_never_accepts_a_hint(self):
-        from data.plugins.astrbot_plugin_star_feather.intent import build_request
+        from data.plugins.astrbot_plugin_star_feather.core.intent import build_request
         assert build_request("auto", "今天天气不错", source="command",
                              formation_hint="羽镜").spread == "羽时三刻"
 
     def test_topic_bucket_matches_daily_cache(self):
-        from data.plugins.astrbot_plugin_star_feather.intent import build_request
+        from data.plugins.astrbot_plugin_star_feather.core.intent import build_request
         assert build_request("daily", "今天运势").topic_key == "（今日牌运）"
         assert build_request("daily", "今天财运怎么样").topic_key == "今天财运怎么样"
 

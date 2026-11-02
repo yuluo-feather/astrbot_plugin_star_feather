@@ -11,9 +11,8 @@ import time
 
 from PIL import Image, ImageDraw
 
-from ..fonts import _load_font
-from ..tarot_data import meaning_text
-from ..texts import (
+from ..core.tarot_data import meaning_text
+from ..core.texts import (
     CARD_TAG_REVERSED,
     CARD_TAG_UPRIGHT,
     DAILY_SIGNATURE,
@@ -22,6 +21,7 @@ from ..texts import (
     FORMATION_TITLE,
 )
 from .assets import _asset_path, _asset_path_by_id
+from .fonts import _load_font
 from .layout import (
     BAR_TEXT,
     BAR_TITLE,

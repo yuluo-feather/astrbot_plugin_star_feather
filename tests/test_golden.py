@@ -4,23 +4,23 @@
 行为时，先改这里并写进 changelog，别让重构顺手改掉结果。
 """
 import pytest
+from data.plugins.astrbot_plugin_star_feather.adapters.deliver import split_sections
 from data.plugins.astrbot_plugin_star_feather.ai.prompts import (
     build_reading_prompt,
     build_spirit_line_prompt,
     resolve_persona,
 )
-from data.plugins.astrbot_plugin_star_feather.deliver import split_sections
-from data.plugins.astrbot_plugin_star_feather.intent import (
+from data.plugins.astrbot_plugin_star_feather.core.intent import (
     clean_question,
     is_daily_request,
     norm_topic,
     select_formation,
 )
+from data.plugins.astrbot_plugin_star_feather.core.tarot_data import TAROT_CARDS
 from data.plugins.astrbot_plugin_star_feather.render import (
     _render_daily_card_img,
     render_cards,
 )
-from data.plugins.astrbot_plugin_star_feather.tarot_data import TAROT_CARDS
 from PIL import Image
 
 SELECT_GOLDEN = {
@@ -215,7 +215,7 @@ def test_sections_golden():
 
 @pytest.mark.parametrize("formation, expected_size", RENDER_GOLDEN.items())
 def test_render_size_golden(formation, expected_size, tmp_path):
-    from data.plugins.astrbot_plugin_star_feather.spreads import FORMATIONS
+    from data.plugins.astrbot_plugin_star_feather.core.spreads import FORMATIONS
 
     positions = FORMATIONS[formation]
     picks = [

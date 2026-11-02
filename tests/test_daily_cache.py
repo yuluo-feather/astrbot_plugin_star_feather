@@ -8,19 +8,19 @@ import json
 import types
 
 import pytest
-from data.plugins.astrbot_plugin_star_feather.daily import (
-    _daily_pick,
+from data.plugins.astrbot_plugin_star_feather.core.tarot_data import (
+    TAROT_CARDS,
 )
 from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
-from data.plugins.astrbot_plugin_star_feather.tarot_data import (
-    TAROT_CARDS,
+from data.plugins.astrbot_plugin_star_feather.services.daily import (
+    _daily_pick,
 )
 from stubs import PICK
 
 
 def _rec(**over):
     """schema 2 记录的最小夹具：字段名跟 services/daily_store.DailyRecord 一致。"""
-    from data.plugins.astrbot_plugin_star_feather.daily import _PROMPT_V
+    from data.plugins.astrbot_plugin_star_feather.services.daily import _PROMPT_V
     base = {"schema": 2, "date": "", "card_id": PICK["card"]["id"],
             "upright": True, "sign": f"{PICK['card']['id']}:1",
             "prompt_v": _PROMPT_V, "persona": "", "interps": {},
@@ -53,7 +53,7 @@ class TestDailyCacheMerge:
     @staticmethod
     def _plugin(kv_store):
         p = StarFeatherPlugin.__new__(StarFeatherPlugin)
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
 
         class _Ctx:
             async def get_kv_data(self, key, default=None):
@@ -114,7 +114,7 @@ class TestDailyCachedCardAnchor:
 
     @staticmethod
     def _fortune(kv_store):
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
 
         class _Ctx:
             async def get_kv_data(self, key, default=None):
@@ -175,7 +175,7 @@ class TestDailyInterpTopic:
 
     @staticmethod
     def _daily(kv):
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         calls = []
 
         class _Ctx:
@@ -199,7 +199,7 @@ class TestDailyInterpTopic:
         「今天运势」共用解读，或被踢出每日牌运、每问重抽。拆表后两者兼得——
         牌仍是当天同一张（is_daily_request 为真），解读各归各（topic 不同）。
         """
-        from data.plugins.astrbot_plugin_star_feather.intent import (
+        from data.plugins.astrbot_plugin_star_feather.core.intent import (
             _GENERIC_TOPIC,
             is_daily_request,
             norm_topic,
@@ -219,7 +219,7 @@ class TestDailyInterpTopic:
         反向也一样：第一个提问会把这段定制解读存成通用解读给后面的人用。
         纯泛问之间仍要共享同一桶（防反复问刷版本）。
         """
-        from data.plugins.astrbot_plugin_star_feather.intent import (
+        from data.plugins.astrbot_plugin_star_feather.core.intent import (
             _GENERIC_TOPIC,
             norm_topic,
         )
@@ -258,7 +258,7 @@ class TestDailyInterpTopic:
 
         生成在锁外跑，没有 in-flight 登记时两条协程会各自问一次、返回两段不同的话。
         """
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         kv, calls = {}, []
 
         class _Ctx:
@@ -287,7 +287,7 @@ class TestDailyInterpTopic:
 
     def test_prompt_version_change_invalidates_same_day_interp(self):
         """提示词/人设换版：牌组没变，当天也要重新生成，不能继续吐旧口吻。"""
-        from data.plugins.astrbot_plugin_star_feather.intent import norm_topic
+        from data.plugins.astrbot_plugin_star_feather.core.intent import norm_topic
 
         topic = norm_topic("今天感情运势")
         sig = "|".join(f"{p['card']['id']}:{1 if p['upright'] else 0}" for p in [PICK])
@@ -303,8 +303,8 @@ class TestDailyInterpTopic:
 
     def test_persona_switch_invalidates_same_day_interp(self):
         """面板切人设：牌组与 prompt 版本都没变，当天也要重新生成。"""
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
-        from data.plugins.astrbot_plugin_star_feather.intent import norm_topic
+        from data.plugins.astrbot_plugin_star_feather.core.intent import norm_topic
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
 
         topic = norm_topic("今天感情运势")
         sig = "|".join(f"{p['card']['id']}:{1 if p['upright'] else 0}" for p in [PICK])
@@ -362,8 +362,8 @@ class TestDailyInterpTopic:
         加锁 + 写回前重读之前，两条协程各自读旧值再写回，后写的会把先写的整个覆盖
         （实测 KV 里只剩一个分桶，另一个主题白花一次 AI 调用）。
         """
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
-        from data.plugins.astrbot_plugin_star_feather.intent import norm_topic
+        from data.plugins.astrbot_plugin_star_feather.core.intent import norm_topic
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         kv = {}
 
         class _SlowCtx:
@@ -401,7 +401,7 @@ class TestDailyInterpTopic:
         stale = {"最近事业运": "昨天的解读"}
         kv = {"sf_daily_u1": {"date": "19700101", "card": None, "upright": True,
                               "interps": dict(stale)}}
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         calls = []
 
         class _FlakyCtx:
@@ -479,7 +479,7 @@ class TestDailyInterpCap:
 
     @classmethod
     def _daily(cls, kv):
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         calls = []
 
         async def fake_ai(event, formation, positions, picks, clean,
@@ -499,7 +499,9 @@ class TestDailyInterpCap:
 
     def test_the_cap_is_the_documented_number(self):
         """口径对账：实现里的上限就是本文件写死的那个数。"""
-        from data.plugins.astrbot_plugin_star_feather.daily import DAILY_INTERP_MAX
+        from data.plugins.astrbot_plugin_star_feather.services.daily import (
+            DAILY_INTERP_MAX,
+        )
         assert DAILY_INTERP_MAX == self.CAP
 
     def test_fills_up_to_the_cap_without_evicting_anything(self):
@@ -634,7 +636,7 @@ class TestDailyKvFallback:
 
     @staticmethod
     def _daily(kv):
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         return DailyFortune(kv)
 
     def test_context_like_no_kv_interface(self):
@@ -675,7 +677,7 @@ class TestDailyPoisonedCacheValue:
 
     @staticmethod
     def _daily(kv):
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         calls = []
 
         class _Ctx:
@@ -695,7 +697,7 @@ class TestDailyPoisonedCacheValue:
         """truthy 非 dict：既不抛异常，也要把坏值覆盖成合法结构（真正自愈）。"""
         import time as _time
 
-        from data.plugins.astrbot_plugin_star_feather.intent import norm_topic
+        from data.plugins.astrbot_plugin_star_feather.core.intent import norm_topic
         today = _time.strftime("%Y%m%d")
         topic = "今天感情运势"
         for poison in (["a"], "abc", 123):
@@ -734,7 +736,7 @@ class TestDailyNullInterp:
 
     @staticmethod
     def _daily(kv, ret):
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         calls = []
 
         class _Ctx:
@@ -753,7 +755,7 @@ class TestDailyNullInterp:
     def test_none_interp_not_written_into_slots(self):
         import time as _time
 
-        from data.plugins.astrbot_plugin_star_feather.intent import norm_topic
+        from data.plugins.astrbot_plugin_star_feather.core.intent import norm_topic
         today = _time.strftime("%Y%m%d")
         topic = norm_topic("今天感情运势")
         for ret in (None, ""):
@@ -773,7 +775,7 @@ class TestDailyNullInterp:
         """AI 失败只影响本主题：别的主题已缓存内容不得被清掉或改写。"""
         import time as _time
 
-        from data.plugins.astrbot_plugin_star_feather.intent import norm_topic
+        from data.plugins.astrbot_plugin_star_feather.core.intent import norm_topic
         today = _time.strftime("%Y%m%d")
         other = norm_topic("最近事业运")
         sig = "|".join(f"{p['card']['id']}:{1 if p['upright'] else 0}" for p in [PICK])
@@ -864,7 +866,7 @@ class TestSchema2Reset:
 
     @staticmethod
     def _daily(kv, line="新牌灵句", interp="新解读"):
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
 
         class _Ctx:
             async def get_kv_data(self, key, default=None):
@@ -914,7 +916,7 @@ class TestSpiritDoesNotRewriteDailyCard:
 
     @staticmethod
     def _fortune(kv):
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
 
         class _Ctx:
             async def get_kv_data(self, key, default=None):

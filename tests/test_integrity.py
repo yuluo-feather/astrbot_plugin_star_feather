@@ -5,13 +5,13 @@ import importlib.util
 import os
 
 import pytest
-from data.plugins.astrbot_plugin_star_feather import fonts
-from data.plugins.astrbot_plugin_star_feather.dailylines import SIGIL_LINES
-from data.plugins.astrbot_plugin_star_feather.settings import (
+from data.plugins.astrbot_plugin_star_feather.core.dailylines import SIGIL_LINES
+from data.plugins.astrbot_plugin_star_feather.core.settings import (
     PERSONA_VALUES,
     parse,
 )
-from data.plugins.astrbot_plugin_star_feather.tarot_data import TAROT_CARDS
+from data.plugins.astrbot_plugin_star_feather.core.tarot_data import TAROT_CARDS
+from data.plugins.astrbot_plugin_star_feather.render import fonts
 from PIL import ImageFont
 
 

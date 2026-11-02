@@ -216,7 +216,7 @@ class TestEntriesAreWired:
 
     def test_command_entry_notes_binding(self):
         from data.plugins.astrbot_plugin_star_feather.app import handlers
-        from data.plugins.astrbot_plugin_star_feather.settings import parse
+        from data.plugins.astrbot_plugin_star_feather.core.settings import parse
 
         p = _plugin()
         seen = []
@@ -238,7 +238,7 @@ class TestEntriesAreWired:
 
     def test_tool_entry_notes_binding(self):
         from data.plugins.astrbot_plugin_star_feather.app import handlers
-        from data.plugins.astrbot_plugin_star_feather.settings import parse
+        from data.plugins.astrbot_plugin_star_feather.core.settings import parse
 
         p = _plugin()
         seen = []

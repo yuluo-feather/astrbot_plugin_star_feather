@@ -10,8 +10,8 @@ import os
 
 from astrbot.api import logger
 
+from ..core.dailylines import pick_signature
 from ..core.models import Pick
-from ..dailylines import pick_signature
 from ..render import (
     _render_daily_card_img,
     _schedule_image_cleanup,

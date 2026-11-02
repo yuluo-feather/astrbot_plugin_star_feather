@@ -18,7 +18,7 @@ from data.plugins.astrbot_plugin_star_feather.ai.parse import (
     validate_interpret_structure,
     validate_interpret_structure_strict,
 )
-from data.plugins.astrbot_plugin_star_feather.settings import (
+from data.plugins.astrbot_plugin_star_feather.core.settings import (
     DEFAULT_STRUCTURE_CHECK,
     STRUCTURE_CHECK_LOOSE,
     STRUCTURE_CHECK_SHADOW,

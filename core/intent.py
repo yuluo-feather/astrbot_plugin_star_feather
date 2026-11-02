@@ -17,11 +17,12 @@
 """
 import re
 
-from .core.models import (
+from .models import (
     KIND_DAILY,
     KIND_HELP,
     KIND_SINGLE,
     KIND_SPREAD,
+    ReadingKind,
     ReadingRequest,
 )
 from .spreads import FORMATIONS
@@ -349,7 +350,7 @@ def clean_question(text: str) -> str:
 
 
 # ---- 结构化请求 ----
-def _make(kind: str, spread: str, fixed_for_day: bool, text: str) -> ReadingRequest:
+def _make(kind: ReadingKind, spread: str, fixed_for_day: bool, text: str) -> ReadingRequest:
     """把已选定的 kind / 阵名 / 固定位与清洗结果打成一个 ReadingRequest。"""
     question = clean_question(text)
     return ReadingRequest(kind=kind, spread=spread, question=question,

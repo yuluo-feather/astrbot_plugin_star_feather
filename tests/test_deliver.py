@@ -4,12 +4,12 @@ import asyncio
 import types
 
 from astrbot.api.message_components import Nodes
-from data.plugins.astrbot_plugin_star_feather.deliver import (
+from data.plugins.astrbot_plugin_star_feather.adapters.deliver import (
     Deliverer,
     split_sections,
     split_text,
 )
-from data.plugins.astrbot_plugin_star_feather.tarot_data import meaning_text
+from data.plugins.astrbot_plugin_star_feather.core.tarot_data import meaning_text
 from stubs import PICK
 
 
@@ -260,7 +260,9 @@ class TestInterpretationReuse:
     """AI 返回时已经解析过结构：发送层不再用正则重新切一遍。"""
 
     def test_structured_interpretation_skips_resplitting(self, monkeypatch):
-        from data.plugins.astrbot_plugin_star_feather import deliver as deliver_mod
+        from data.plugins.astrbot_plugin_star_feather.adapters import (
+            deliver as deliver_mod,
+        )
         from data.plugins.astrbot_plugin_star_feather.ai.parse import Interpretation
 
         def no_split(*a, **kw):

@@ -9,7 +9,10 @@ import datetime
 from zoneinfo import ZoneInfo
 
 import pytest
-from data.plugins.astrbot_plugin_star_feather.clock import Clock, resolve_timezone
+from data.plugins.astrbot_plugin_star_feather.adapters.clock import (
+    Clock,
+    resolve_timezone,
+)
 from data.plugins.astrbot_plugin_star_feather.render import store as render_store
 
 
@@ -100,14 +103,14 @@ class TestClockWiring:
         monkeypatch.setattr(render_store, "IMAGE_DIR_ROOT", str(tmp_path / "star_feather"))
 
     def test_core_clock_uses_framework_timezone(self):
-        from data.plugins.astrbot_plugin_star_feather.clock import Clock
+        from data.plugins.astrbot_plugin_star_feather.adapters.clock import Clock
 
         t = Clock.from_context(_Ctx({"timezone": "Asia/Shanghai"}))
         assert t.tz is not None and t.tz.key == "Asia/Shanghai"
 
     def test_daily_shares_core_clock(self):
-        from data.plugins.astrbot_plugin_star_feather.clock import Clock
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.adapters.clock import Clock
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         from stubs import FakeContext
 
         t = Clock.from_context(_Ctx({"timezone": "UTC"}))
@@ -116,7 +119,7 @@ class TestClockWiring:
 
     def test_stub_daily_still_gets_a_clock(self):
         """桩对象（单测/诊断）没传 clock：自建一份跟本地时区，不让日期键失联。"""
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         from stubs import FakeContext
 
         d = DailyFortune(FakeContext(None))

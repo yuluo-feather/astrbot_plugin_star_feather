@@ -23,8 +23,8 @@ import types
 import warnings
 
 import pytest
-from data.plugins.astrbot_plugin_star_feather import daily as daily_mod
-from data.plugins.astrbot_plugin_star_feather.dailylines import pick_signature
+from data.plugins.astrbot_plugin_star_feather.core.dailylines import pick_signature
+from data.plugins.astrbot_plugin_star_feather.services import daily as daily_mod
 from stubs import PICK, FakeContext
 
 TODAY = time.strftime("%Y%m%d")
@@ -303,7 +303,7 @@ def test_spirit_never_returns_empty(mode):
 
 # ================= ④ LimitGate：存储挂了宁可不限流 =================
 def _gate(kv, cmd_rate_limit=0, daily_count_limit=5):
-    from data.plugins.astrbot_plugin_star_feather.gating import LimitGate
+    from data.plugins.astrbot_plugin_star_feather.services.gating import LimitGate
     return LimitGate(kv, cmd_rate_limit, daily_count_limit)
 
 
@@ -351,7 +351,7 @@ def test_gate_cooldown_write_failure_passes():
 @pytest.mark.parametrize("outcome", ["raise", None, "", "   ", 123])
 def test_poster_render_failure_returns_none(monkeypatch, outcome):
     """海报渲染任何失败形态一律返回 None，调用方回退普通牌面图。"""
-    from data.plugins.astrbot_plugin_star_feather.clock import Clock
+    from data.plugins.astrbot_plugin_star_feather.adapters.clock import Clock
     from data.plugins.astrbot_plugin_star_feather.services import render as render_mod
     from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
 
@@ -368,7 +368,7 @@ def test_poster_render_failure_returns_none(monkeypatch, outcome):
 
 def test_poster_render_success_is_scheduled_for_cleanup(monkeypatch):
     """对照组：成功路径要真的登记清理；延迟由 card_render 的统一保险丝给。"""
-    from data.plugins.astrbot_plugin_star_feather.clock import Clock
+    from data.plugins.astrbot_plugin_star_feather.adapters.clock import Clock
     from data.plugins.astrbot_plugin_star_feather.services import render as render_mod
     from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
 
@@ -403,9 +403,9 @@ def _entry_evt():
 
 
 def _entry_plugin(*, settings, daily, interpreter, renderer):
+    from data.plugins.astrbot_plugin_star_feather.adapters.clock import Clock
+    from data.plugins.astrbot_plugin_star_feather.adapters.deliver import Deliverer
     from data.plugins.astrbot_plugin_star_feather.adapters.presenter import Presenter
-    from data.plugins.astrbot_plugin_star_feather.clock import Clock
-    from data.plugins.astrbot_plugin_star_feather.deliver import Deliverer
     from data.plugins.astrbot_plugin_star_feather.services.reading import ReadingService
 
     clock = Clock()
@@ -429,7 +429,7 @@ def _run_entry(p, evt, question="羽签 问感情"):
 
 
 def _plain_settings(**over):
-    from data.plugins.astrbot_plugin_star_feather.settings import parse
+    from data.plugins.astrbot_plugin_star_feather.core.settings import parse
     cfg = {"ai": {"enable_ai": False, "parallel_stages": True},
            "output": {"send_mode": "plain", "daily_fixed": False,
                       "daily_card": False, "shuffle_lines": False}}
@@ -452,9 +452,9 @@ class TestImageGoneBeforeSend:
     @staticmethod
     def _plugin(render, on_after_render=None):
         """真入口 + 真渲染器 + 真分发，只把「渲染实现」和 AI 换成可控桩。"""
+        from data.plugins.astrbot_plugin_star_feather.adapters.clock import Clock
         from data.plugins.astrbot_plugin_star_feather.ai.chain import AiInterpreter
-        from data.plugins.astrbot_plugin_star_feather.clock import Clock
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
 
         calls = []
@@ -715,9 +715,9 @@ def _live_modules():
     插件内模块之间是包内相对导入，一条链上只有一个 services.render、一个 card_render，
     按包路径直接 import 即得。末尾留一条同源自检：补丁打空会变成永远绿的假证据。
     """
-    from data.plugins.astrbot_plugin_star_feather import daily
     from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
     from data.plugins.astrbot_plugin_star_feather.render import store as render_store
+    from data.plugins.astrbot_plugin_star_feather.services import daily
     from data.plugins.astrbot_plugin_star_feather.services import (
         render as render_service,
     )
@@ -763,9 +763,9 @@ class TestCleanupFuseNeverCarriesTheReading:
 
     def _reading_with_real_fuse(self, render_service, tmp_path):
         """真入口 + 真渲染器 + 真登记清理，只把渲染实现与 AI 换桩。"""
+        from data.plugins.astrbot_plugin_star_feather.adapters.clock import Clock
         from data.plugins.astrbot_plugin_star_feather.ai.chain import AiInterpreter
-        from data.plugins.astrbot_plugin_star_feather.clock import Clock
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
 
         path = str(tmp_path / "fuse_reading.png")
@@ -796,7 +796,7 @@ class TestCleanupFuseNeverCarriesTheReading:
 
     def test_poster_survives_when_fuse_cannot_register(self, monkeypatch, tmp_path):
         """同一注入、同一条保险丝，走海报卡：登记失败不该把海报降级成普通牌面图。"""
-        from data.plugins.astrbot_plugin_star_feather.clock import Clock
+        from data.plugins.astrbot_plugin_star_feather.adapters.clock import Clock
         from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
         _Plugin, render_service, _cr, _daily = _live_modules()
         path = str(tmp_path / "fuse_poster.png")

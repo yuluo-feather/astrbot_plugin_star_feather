@@ -5,7 +5,7 @@
 import asyncio
 import types
 
-from data.plugins.astrbot_plugin_star_feather.tarot_data import TAROT_CARDS
+from data.plugins.astrbot_plugin_star_feather.core.tarot_data import TAROT_CARDS
 
 
 class FakeProvider:

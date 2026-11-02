@@ -131,7 +131,7 @@ def _reading_prompt_fingerprint() -> str:
 READING_PROMPT_V = _reading_prompt_fingerprint()
 
 # 用户可见文案统一在 texts.py；这里只做转发，提示词模块仍可从同一处导入。
-from ..texts import (  # noqa: E402,F401
+from ..core.texts import (  # noqa: E402,F401
     FAIL_NOTE_TOOL,
     HELP_TEXT,
     RESULT_EPILOGUE,

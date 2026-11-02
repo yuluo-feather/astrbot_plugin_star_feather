@@ -3,7 +3,7 @@
 import os
 
 import pytest
-from data.plugins.astrbot_plugin_star_feather import fonts
+from data.plugins.astrbot_plugin_star_feather.render import fonts
 from PIL import ImageFont
 
 

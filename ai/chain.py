@@ -10,12 +10,7 @@ import time
 from collections import Counter
 
 from ..core.log import log as logger
-from ..hardening import (
-    clip_question,
-    normalize_injection_input,
-    strip_injection_fragments,
-)
-from ..settings import (
+from ..core.settings import (
     AI_BUDGET_MIN_ATTEMPT,
     DEFAULT_AI_BUDGET,
     DEFAULT_AI_PERSONA,
@@ -26,6 +21,11 @@ from ..settings import (
     STRUCTURE_CHECK_SHADOW,
     STRUCTURE_CHECK_STRICT,
     _budget_seconds_float,
+)
+from .hardening import (
+    clip_question,
+    normalize_injection_input,
+    strip_injection_fragments,
 )
 from .parse import (
     Interpretation,

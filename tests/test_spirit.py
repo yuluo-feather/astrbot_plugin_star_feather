@@ -11,8 +11,8 @@ import pytest
 from data.plugins.astrbot_plugin_star_feather.ai.prompts import (
     build_spirit_line_prompt,
 )
-from data.plugins.astrbot_plugin_star_feather.dailylines import pick_signature
-from data.plugins.astrbot_plugin_star_feather.tarot_data import (
+from data.plugins.astrbot_plugin_star_feather.core.dailylines import pick_signature
+from data.plugins.astrbot_plugin_star_feather.core.tarot_data import (
     TAROT_CARDS,
 )
 from stubs import CARD, EVENT, PICK, FakeContext, FakeProvider
@@ -25,7 +25,7 @@ class TestSpiritCache:
 
     @staticmethod
     def _daily(kv, line="AI 说的那句"):
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         calls = []
 
         class _Ctx:
@@ -50,7 +50,7 @@ class TestSpiritCache:
         assert l1 == "AI 说的那句" and len(calls) == 1
         l2 = asyncio.run(df.spirit_cached(EVENT, "u1", [PICK], "今日运势", None))
         assert l2 == "AI 说的那句" and len(calls) == 1  # 缓存复用：不再调 AI
-        from data.plugins.astrbot_plugin_star_feather.daily import _PROMPT_V
+        from data.plugins.astrbot_plugin_star_feather.services.daily import _PROMPT_V
         cache = kv["sf_daily_u1"]
         assert cache["date"] == strftime("%Y%m%d") and cache["spirit_line"] == "AI 说的那句"
         assert cache["spirit_sign"] == f"{PICK['card']['cn']}:1"  # 牌组指纹（卡名:正逆）
@@ -58,7 +58,7 @@ class TestSpiritCache:
 
     def test_concurrent_misses_share_one_generated_line(self):
         """同一（用户, 牌组）并发 miss：只调一次 AI，等待者拿到同一句。"""
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         kv, calls = {}, []
 
         class _Ctx:
@@ -91,7 +91,7 @@ class TestSpiritCache:
         登记表若退化成实例属性，热重载期间新旧实例各问一次 AI，会给出两句
         不同的话并互相覆盖缓存。
         """
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         kv, calls = {}, []
 
         class _Ctx:
@@ -121,7 +121,7 @@ class TestSpiritCache:
     def test_cancelled_waiter_does_not_cancel_the_shared_future(self):
         """等待者被取消不能把共享 Future 一起取消：否则所有者 set_result 抛
         InvalidStateError，整条占卜一起失败。"""
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         kv, calls = {}, []
 
         class _Ctx:
@@ -154,7 +154,7 @@ class TestSpiritCache:
 
     def test_new_day_does_not_join_yesterdays_inflight(self):
         """跨午夜的生成属于昨天：新一天的请求必须重新生成，不能拿昨天的文案。"""
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         kv, calls = {}, []
 
         class _Clock:
@@ -208,7 +208,7 @@ class TestSpiritCache:
         v/date/sign/line，不读旧值），读故障不影响写入正确性。机械地「统一」成门住，会让
         故障恢复前的重复查询重新生成，AI 措辞可能不同，破坏「当日同牌组同一句」的承诺。
         """
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         kv = {}
         calls = []
 

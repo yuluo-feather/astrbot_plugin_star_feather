@@ -21,11 +21,11 @@ import types
 from data.plugins.astrbot_plugin_star_feather.ai import chain as interpret_mod
 from data.plugins.astrbot_plugin_star_feather.ai.chain import AiBudget, AiInterpreter
 from data.plugins.astrbot_plugin_star_feather.core.draw import render_text
-from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
-from data.plugins.astrbot_plugin_star_feather.settings import (
+from data.plugins.astrbot_plugin_star_feather.core.settings import (
     DEFAULT_AI_BUDGET,
     DEFAULT_SPIRIT_STAGE_BUDGET,
 )
+from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
 from stubs import CARD, EVENT, OK_INTERP, PICK, FakeContext, FakeProvider
 
 
@@ -453,16 +453,18 @@ class TestEndToEndDeliveryUnderSpentBudget:
         返回 (插件, 事件, 图片路径, 新开预算清单)。new_budget 计数钩子挂在
         AiInterpreter 上：无论谁新开一笔预算都被记下。
         """
+        from data.plugins.astrbot_plugin_star_feather.adapters.clock import (
+            Clock as RealClock,
+        )
+        from data.plugins.astrbot_plugin_star_feather.adapters.deliver import Deliverer
         from data.plugins.astrbot_plugin_star_feather.adapters.presenter import (
             Presenter,
         )
-        from data.plugins.astrbot_plugin_star_feather.clock import Clock as RealClock
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
-        from data.plugins.astrbot_plugin_star_feather.deliver import Deliverer
+        from data.plugins.astrbot_plugin_star_feather.core.settings import parse
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         from data.plugins.astrbot_plugin_star_feather.services.reading import (
             ReadingService,
         )
-        from data.plugins.astrbot_plugin_star_feather.settings import parse
 
         ctx = FakeContext(using=None, others=list(providers))
         it = AiInterpreter(ctx, ai_timeout=30, ai_budget=1.2,
@@ -655,17 +657,19 @@ class TestUnlimitedBudgetKeepsTheImagePipeline:
     """
 
     def test_zero_budget_rerenders_a_vanished_image(self, tmp_path, monkeypatch):
+        from data.plugins.astrbot_plugin_star_feather.adapters.clock import (
+            Clock as RealClock,
+        )
+        from data.plugins.astrbot_plugin_star_feather.adapters.deliver import Deliverer
         from data.plugins.astrbot_plugin_star_feather.adapters.presenter import (
             Presenter,
         )
-        from data.plugins.astrbot_plugin_star_feather.clock import Clock as RealClock
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
-        from data.plugins.astrbot_plugin_star_feather.deliver import Deliverer
+        from data.plugins.astrbot_plugin_star_feather.core.settings import parse
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         from data.plugins.astrbot_plugin_star_feather.services.reading import (
             ReadingService,
         )
         from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
-        from data.plugins.astrbot_plugin_star_feather.settings import parse
 
         ctx = FakeContext(using=None, others=[FakeProvider("p0", result=OK_INTERP)])
         it = AiInterpreter(ctx, ai_timeout=30, ai_budget=0)   # 总预算关掉

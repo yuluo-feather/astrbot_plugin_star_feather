@@ -23,7 +23,7 @@ def _mk(suit, num, cn, en, up, down):
 class TestRenderSmoke:
     @pytest.fixture(autouse=True)
     def _reset_font_cache(self):
-        from data.plugins.astrbot_plugin_star_feather import fonts
+        from data.plugins.astrbot_plugin_star_feather.render import fonts
         fonts._FONT_CACHE.clear()
         yield
 
@@ -132,7 +132,7 @@ class TestRenderSmoke:
 
     def test_split_signature_lines_by_punctuation(self):
         # 签文分行：优先在标点后断（标点留行尾），单句超宽才逐字回落；不丢字不截断
-        from data.plugins.astrbot_plugin_star_feather import fonts
+        from data.plugins.astrbot_plugin_star_feather.render import fonts
         from PIL import Image, ImageDraw
         d = ImageDraw.Draw(Image.new("RGB", (10, 10)))
         # 取字不带 text：必中内置子集，字宽因此与平台无关。
@@ -578,7 +578,7 @@ class TestDrawCardFontReuse:
 
     def test_same_size_loaded_once_per_card(self, monkeypatch):
         from data.plugins.astrbot_plugin_star_feather import render as card_render
-        from data.plugins.astrbot_plugin_star_feather.tarot_data import TAROT_CARDS
+        from data.plugins.astrbot_plugin_star_feather.core.tarot_data import TAROT_CARDS
         from PIL import Image
 
         calls = []
@@ -632,7 +632,7 @@ class TestBackgroundCacheSizing:
 
     def test_same_key_hits_second_time(self):
         from data.plugins.astrbot_plugin_star_feather import render as card_render
-        from data.plugins.astrbot_plugin_star_feather.tarot_data import TAROT_CARDS
+        from data.plugins.astrbot_plugin_star_feather.core.tarot_data import TAROT_CARDS
         card_render._background_cached.cache_clear()
         c = TAROT_CARDS[0]
         args = (c["id"], 1148, 986)

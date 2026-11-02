@@ -1,12 +1,12 @@
 """Prompt 防护单测：越狱句式剥除 / 问题截断 / 输出结构校验（纯函数）。
 ——想往牌灵嘴里塞怪东西？先过这一关。"""
-from data.plugins.astrbot_plugin_star_feather.ai.parse import (
-    validate_interpret_structure,
-)
-from data.plugins.astrbot_plugin_star_feather.hardening import (
+from data.plugins.astrbot_plugin_star_feather.ai.hardening import (
     clip_question,
     normalize_injection_input,
     strip_injection_fragments,
+)
+from data.plugins.astrbot_plugin_star_feather.ai.parse import (
+    validate_interpret_structure,
 )
 
 OK_INTERP = "【第1张·你的当下】新的开始，走出舒适区。【总结】大胆行动。"

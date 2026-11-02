@@ -11,7 +11,7 @@
 import time
 
 import pytest
-from data.plugins.astrbot_plugin_star_feather.intent import (
+from data.plugins.astrbot_plugin_star_feather.core.intent import (
     is_daily_request,
     is_help_request,
 )

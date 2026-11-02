@@ -5,12 +5,12 @@ import asyncio
 import os
 import time
 
-from data.plugins.astrbot_plugin_star_feather.dailylines import (
+from data.plugins.astrbot_plugin_star_feather.core.dailylines import (
     _FALLBACK_SIGNATURE,
     SIGIL_LINES,
     pick_signature,
 )
-from data.plugins.astrbot_plugin_star_feather.tarot_data import TAROT_CARDS
+from data.plugins.astrbot_plugin_star_feather.core.tarot_data import TAROT_CARDS
 
 CARD = TAROT_CARDS[0]  # 愚者
 
@@ -46,7 +46,7 @@ class TestDailyCardOrchestration:
 
     @staticmethod
     def _renderer():
-        from data.plugins.astrbot_plugin_star_feather.clock import Clock
+        from data.plugins.astrbot_plugin_star_feather.adapters.clock import Clock
         from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
         return Renderer(image_dir="", send_mode="plain"), Clock()
 
@@ -100,7 +100,7 @@ class TestDailyCardRenderSlot:
     """
 
     def test_render_holds_the_shared_render_lock(self, monkeypatch, tmp_path):
-        from data.plugins.astrbot_plugin_star_feather.clock import Clock
+        from data.plugins.astrbot_plugin_star_feather.adapters.clock import Clock
         from data.plugins.astrbot_plugin_star_feather.services import (
             render as render_mod,
         )

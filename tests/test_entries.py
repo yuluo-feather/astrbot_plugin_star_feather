@@ -7,20 +7,20 @@ import asyncio
 import types
 
 import pytest
+from data.plugins.astrbot_plugin_star_feather.adapters.clock import Clock
 from data.plugins.astrbot_plugin_star_feather.ai.prompts import RESULT_EPILOGUE
 from data.plugins.astrbot_plugin_star_feather.app import handlers
-from data.plugins.astrbot_plugin_star_feather.clock import Clock
-from data.plugins.astrbot_plugin_star_feather.daily import _daily_pick
-from data.plugins.astrbot_plugin_star_feather.intent import (
+from data.plugins.astrbot_plugin_star_feather.core.intent import (
     build_request,
     is_daily_request,
 )
+from data.plugins.astrbot_plugin_star_feather.core.settings import parse
+from data.plugins.astrbot_plugin_star_feather.core.tarot_data import TAROT_CARDS
+from data.plugins.astrbot_plugin_star_feather.services.daily import _daily_pick
 from data.plugins.astrbot_plugin_star_feather.services.reading import (
     ReadingContext,
     ReadingService,
 )
-from data.plugins.astrbot_plugin_star_feather.settings import parse
-from data.plugins.astrbot_plugin_star_feather.tarot_data import TAROT_CARDS
 from stubs import PICK
 
 
@@ -494,10 +494,10 @@ class TestCommandEntry:
 
     def test_result_sent_before_epilogue(self):
         """结果先落地，收尾句后发：顺序由 await 保证，不靠窗口。"""
+        from data.plugins.astrbot_plugin_star_feather.adapters.deliver import Deliverer
         from data.plugins.astrbot_plugin_star_feather.adapters.presenter import (
             Presenter,
         )
-        from data.plugins.astrbot_plugin_star_feather.deliver import Deliverer
         settings = _settings()
         presenter = Presenter(Deliverer(settings.output.segment_size,
                                         settings.output.disclaimer, False))
@@ -539,6 +539,7 @@ class TestPresenterFallback:
     """结果发送失败时降级纯文字，不能只剩一句收尾。"""
 
     def test_failed_result_falls_back_to_text(self):
+        from data.plugins.astrbot_plugin_star_feather.adapters.deliver import Deliverer
         from data.plugins.astrbot_plugin_star_feather.adapters.presenter import (
             Presenter,
         )
@@ -546,7 +547,6 @@ class TestPresenterFallback:
             Reading,
             ReadingRequest,
         )
-        from data.plugins.astrbot_plugin_star_feather.deliver import Deliverer
 
         class Messenger:
             def __init__(self):

@@ -3,7 +3,7 @@
 import asyncio
 import types
 
-from data.plugins.astrbot_plugin_star_feather.gating import LimitGate
+from data.plugins.astrbot_plugin_star_feather.services.gating import LimitGate
 
 
 class FakeKV:

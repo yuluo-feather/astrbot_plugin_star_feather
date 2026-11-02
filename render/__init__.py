@@ -5,7 +5,6 @@
 """
 import tempfile  # noqa: F401  （测试与诊断按旧口径替换 render.tempfile）
 
-from ..fonts import _load_font  # noqa: F401
 from .assets import (  # noqa: F401
     _ASSET_ROOT,
     _asset_path,
@@ -29,6 +28,7 @@ from .draw import (  # noqa: F401
     _wrap_text,
     render_cards,
 )
+from .fonts import _load_font  # noqa: F401
 from .layout import (  # noqa: F401
     BAR_TEXT,
     BAR_TITLE,

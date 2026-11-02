@@ -26,10 +26,10 @@ from data.plugins.astrbot_plugin_star_feather.core.draw import (
     pick_info,
     render_text,
 )
-from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
-from data.plugins.astrbot_plugin_star_feather.tarot_data import (
+from data.plugins.astrbot_plugin_star_feather.core.tarot_data import (
     meaning_text,
 )
+from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
 from stubs import EVENT, OK_INTERP, PICK, FakeContext, FakeProvider
 
 UMO = getattr(EVENT, "unified_msg_origin", None)
@@ -546,7 +546,7 @@ class TestRenderTextNoSuitDuplicate:
     """本地牌义兜底文案不得重复标注花色。"""
 
     def test_minor_arcana_names_all_carry_their_suit(self):
-        from data.plugins.astrbot_plugin_star_feather.tarot_data import (
+        from data.plugins.astrbot_plugin_star_feather.core.tarot_data import (
             SUIT_CN,
             TAROT_CARDS,
         )
@@ -555,7 +555,7 @@ class TestRenderTextNoSuitDuplicate:
         assert not missing, f"有牌名不含花色，需恢复花色标注：{missing}"
 
     def test_render_text_does_not_repeat_suit(self):
-        from data.plugins.astrbot_plugin_star_feather.tarot_data import (
+        from data.plugins.astrbot_plugin_star_feather.core.tarot_data import (
             SUIT_CN,
             TAROT_CARDS,
         )
@@ -567,7 +567,7 @@ class TestRenderTextNoSuitDuplicate:
 
     def test_multi_card_spread_renders_every_card(self):
         """每张牌都要出一行：三张阵只剩最后一张是真实发生过的回归。"""
-        from data.plugins.astrbot_plugin_star_feather.tarot_data import TAROT_CARDS
+        from data.plugins.astrbot_plugin_star_feather.core.tarot_data import TAROT_CARDS
         positions = ["过去", "现在", "未来"]
         picks = [{"card": TAROT_CARDS[i], "upright": i % 2 == 0} for i in (0, 8, 21)]
         txt = render_text("羽时三刻", positions, picks)

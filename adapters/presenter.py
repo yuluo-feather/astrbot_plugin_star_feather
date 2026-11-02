@@ -5,7 +5,7 @@
 """
 from ..core.draw import render_text
 from ..core.models import Reading
-from ..deliver import Deliverer
+from .deliver import Deliverer
 
 
 class Presenter:

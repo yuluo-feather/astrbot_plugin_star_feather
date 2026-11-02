@@ -7,9 +7,9 @@
 from astrbot.api import logger
 from astrbot.api.message_components import Image, Node, Nodes, Plain
 
-from .ai.parse import Interpretation
-from .ai.prompts import SECTION_MARK_RE
-from .texts import FORWARD_IMAGE_LABEL
+from ..ai.parse import Interpretation
+from ..ai.prompts import SECTION_MARK_RE
+from ..core.texts import FORWARD_IMAGE_LABEL
 
 # 已验证能收合并转发（Nodes）的平台：框架源码里显式处理 Nodes 的只有这两个
 # （aiocqhttp_message_event / satori_event，2026-10-18 核对）。WebChat 的 _send

@@ -2,12 +2,12 @@
 from dataclasses import dataclass
 from typing import Literal, TypedDict
 
-KIND_SPREAD = "spread"
-KIND_DAILY = "daily"
-KIND_SINGLE = "single"
-KIND_HELP = "help"
-
 ReadingKind = Literal["spread", "daily", "single", "help"]
+
+KIND_SPREAD: ReadingKind = "spread"
+KIND_DAILY: ReadingKind = "daily"
+KIND_SINGLE: ReadingKind = "single"
+KIND_HELP: ReadingKind = "help"
 
 
 @dataclass(frozen=True)

@@ -7,12 +7,12 @@
 import random
 
 from ..adapters.astrbot_io import messenger_for
+from ..core.identity import resolve_sender_uid
+from ..core.intent import build_request
 from ..core.log import log
 from ..core.models import KIND_HELP
-from ..identity import resolve_sender_uid
-from ..intent import build_request
+from ..core.texts import FAIL_NOTE_TOOL, HELP_TEXT, TOOL_EPILOGUE
 from ..services.reading import ReadingContext
-from ..texts import FAIL_NOTE_TOOL, HELP_TEXT, TOOL_EPILOGUE
 from .diagnostics import note_entry_binding
 
 EMPTY_FALLBACK = "（未提具体问题，请作一般运势解读）"
