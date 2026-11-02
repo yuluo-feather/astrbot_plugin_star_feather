@@ -186,6 +186,21 @@ class TestFontIntegrity:
                 fonts._FONT_CMAP[path] = saved
 
 
+class TestAssetManifest:
+    """素材清单与牌库一一对应：缺条目或条目指向不存在的文件都算素材缺失。"""
+
+    def test_manifest_covers_every_card_and_file_exists(self):
+        from data.plugins.astrbot_plugin_star_feather.render.assets import (
+            _ASSET_ROOT,
+            asset_manifest,
+        )
+        manifest = asset_manifest()
+        assert set(manifest) == {c["id"] for c in TAROT_CARDS}
+        missing = [rel for rel in manifest.values()
+                   if not os.path.isfile(os.path.join(_ASSET_ROOT, rel))]
+        assert not missing, f"manifest 指向了不存在的素材：{missing[:5]}"
+
+
 class TestSchemaIntegrity:
     """配置完整性：枚举导出与默认值，与 settings 语义层逐项对齐。"""
 

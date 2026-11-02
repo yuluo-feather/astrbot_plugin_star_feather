@@ -84,9 +84,9 @@ assert left == [], "前缀清理漏了：" + repr(left)
 
 main2 = importlib.import_module(pkg + ".main")
 core2 = importlib.import_module(pkg + ".services.render")
-card2 = importlib.import_module(pkg + ".card_render")
+card2 = importlib.import_module(pkg + ".render.store")
 assert main2 is not main1 and core2 is not core1, "重新导入拿到的是旧模块（僵尸没清掉）"
-# 同源自检：services.render 的模块级名字引用的必须是新 card_render 里的那个函数
+# 同源自检：services.render 的模块级名字引用的必须是新 render.store 里的那个函数
 assert core2._schedule_image_cleanup.__globals__ is card2.__dict__, "两模块不是同一代"
 print("OK:" + str(len(tracked)))
 '''

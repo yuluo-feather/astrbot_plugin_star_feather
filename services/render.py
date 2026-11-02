@@ -1,6 +1,6 @@
 """渲染服务：实例图片目录、渲染并发闸、海报卡与发送前核验。
 
-渲染实现仍在 card_render.py（第 5 步再拆布局/素材/存储）；本层只做编排：
+渲染实现拆在 render/（layout / assets / draw / store）；本层只做编排：
 text_only 不渲染、渲染丢线程池、并发上限、失败一律降级为 None。
 
 照片清理仍注册在图片产生点（渲染成功后），不在发送出口。
@@ -10,13 +10,13 @@ import os
 
 from astrbot.api import logger
 
-from ..card_render import (
+from ..core.models import Pick
+from ..dailylines import pick_signature
+from ..render import (
     _render_daily_card_img,
     _schedule_image_cleanup,
     render_cards,
 )
-from ..core.models import Pick
-from ..dailylines import pick_signature
 
 
 class Renderer:

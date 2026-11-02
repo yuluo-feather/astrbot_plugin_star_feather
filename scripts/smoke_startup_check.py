@@ -26,6 +26,7 @@ wheel 的 CLI 是 `astrbot init` / `astrbot run`。另一条实测：wheel 自�
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -141,6 +142,26 @@ def main() -> int:
         plugin_dest.parent.mkdir(parents=True, exist_ok=True)
         copied = _copy_plugin(plugin_dest)
         print(f"已装进临时根：{plugin_dest}（{copied} 个文件）")
+
+        manifest_path = plugin_dest / "assets" / "manifest.json"
+        if not manifest_path.is_file():
+            print("冒烟失败：包内缺少 assets/manifest.json，牌面渲染会全部降级为文字",
+                  file=sys.stderr)
+            return 1
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            print(f"冒烟失败：assets/manifest.json 读不出来：{exc}", file=sys.stderr)
+            return 1
+        if not isinstance(manifest, dict) or len(manifest) != 78:
+            print(f"冒烟失败：素材清单条目数不是 78（实际 {len(manifest) if isinstance(manifest, dict) else '非字典'}）",
+                  file=sys.stderr)
+            return 1
+        missing = [rel for rel in manifest.values()
+                   if not isinstance(rel, str) or not (plugin_dest / "assets" / rel).is_file()]
+        if missing:
+            print(f"冒烟失败：素材清单指向了不存在的文件：{missing[:5]}", file=sys.stderr)
+            return 1
 
         with log_path.open("wb") as log_file:
             proc = subprocess.Popen(

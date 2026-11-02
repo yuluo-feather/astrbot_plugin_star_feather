@@ -6,13 +6,15 @@ import time
 import types
 
 import pytest
-from data.plugins.astrbot_plugin_star_feather import card_render
+from data.plugins.astrbot_plugin_star_feather import render as card_render
 from data.plugins.astrbot_plugin_star_feather.core.draw import draw
+from data.plugins.astrbot_plugin_star_feather.render import draw as render_draw
+from data.plugins.astrbot_plugin_star_feather.render import store as render_store
 
 
 def _mk(suit, num, cn, en, up, down):
     """测试用的牌字典：up/down 简化为单关键词（渲染只走 brief，够用）。"""
-    return {"suit": suit, "num": num, "cn": cn, "en": en,
+    return {"id": f"{suit}_{int(num):02d}", "suit": suit, "num": num, "cn": cn, "en": en,
             "up": {"keywords": [up], "what": "", "how": ""},
             "down": {"keywords": [down], "what": "", "turn": ""}}
 
@@ -76,9 +78,9 @@ class TestRenderSmoke:
             from PIL import Image
             return Image.new("RGB", (w, h), (40, 40, 60))
 
-        monkeypatch.setattr(card_render, "_build_card_background", fake_bg)
+        monkeypatch.setattr(render_draw, "_build_card_background", fake_bg)
         # 背景选牌走模块私有 RNG（不消耗全局随机状态），打桩点随之落在它身上
-        monkeypatch.setattr(card_render, "_RNG",
+        monkeypatch.setattr(render_draw, "_RNG",
                             types.SimpleNamespace(choice=lambda seq: seq[1]))
         positions = ["过去", "现在", "未来"]
         picks = [
@@ -227,7 +229,7 @@ class TestStaleCleanup:
         """
         root = tmp_path / "star_feather"
         root.mkdir()
-        monkeypatch.setattr(card_render, "IMAGE_DIR_ROOT", str(root))
+        monkeypatch.setattr(render_store, "IMAGE_DIR_ROOT", str(root))
         return root
 
     @staticmethod
@@ -361,7 +363,7 @@ class TestStaleCleanup:
 
     def test_missing_root_is_noop(self, tmp_path, monkeypatch):
         """根目录不存在（装机首启）：静默返回，不抛也不建。"""
-        monkeypatch.setattr(card_render, "IMAGE_DIR_ROOT", str(tmp_path / "nope"))
+        monkeypatch.setattr(render_store, "IMAGE_DIR_ROOT", str(tmp_path / "nope"))
         card_render.cleanup_stale_images()
 
 
@@ -373,7 +375,7 @@ class TestInstanceImageDir:
 
     def test_two_instances_never_share_a_name(self, tmp_path, monkeypatch):
         root = tmp_path / "star_feather"
-        monkeypatch.setattr(card_render, "IMAGE_DIR_ROOT", str(root))
+        monkeypatch.setattr(render_store, "IMAGE_DIR_ROOT", str(root))
         a = card_render.new_instance_image_dir()
         b = card_render.new_instance_image_dir()
         assert a != b, "同进程两代实例拿到同一个目录＝新实例会踩旧实例的图"
@@ -393,7 +395,7 @@ class TestInstanceImageDir:
         """装配口径：每个渲染器一份实例目录——别落到共享父目录去。"""
         from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
 
-        monkeypatch.setattr(card_render, "IMAGE_DIR_ROOT", str(tmp_path / "star_feather"))
+        monkeypatch.setattr(render_store, "IMAGE_DIR_ROOT", str(tmp_path / "star_feather"))
         a = Renderer(card_render.new_instance_image_dir(), "plain")
         b = Renderer(card_render.new_instance_image_dir(), "plain")
         assert a.image_dir != b.image_dir, "两代实例拿到同一个目录＝①没生效"
@@ -407,8 +409,8 @@ class TestInstanceImageDir:
         broken = tmp_path / "blocked"
         sys_tmp = tmp_path / "sys_tmp"
         sys_tmp.mkdir()
-        monkeypatch.setattr(card_render, "IMAGE_DIR_ROOT", str(broken))
-        monkeypatch.setattr(card_render.tempfile, "gettempdir", lambda: str(sys_tmp))
+        monkeypatch.setattr(render_store, "IMAGE_DIR_ROOT", str(broken))
+        monkeypatch.setattr(render_store.tempfile, "gettempdir", lambda: str(sys_tmp))
         real_makedirs = os.makedirs
 
         def fail_root(path, *a, **kw):
@@ -425,18 +427,18 @@ class TestInstanceImageDir:
 
     def test_all_fallbacks_failing_degrades_to_no_image(self, tmp_path, monkeypatch):
         """连唯一临时目录都建不出来：返回空串＝降级为无图，绝不悄悄改回共享目录。"""
-        monkeypatch.setattr(card_render, "IMAGE_DIR_ROOT", str(tmp_path / "blocked"))
+        monkeypatch.setattr(render_store, "IMAGE_DIR_ROOT", str(tmp_path / "blocked"))
 
         def boom(*a, **kw):
             raise OSError("磁盘不可用")
         monkeypatch.setattr(os, "makedirs", boom)
-        monkeypatch.setattr(card_render.tempfile, "mkdtemp", boom)
+        monkeypatch.setattr(render_store.tempfile, "mkdtemp", boom)
         assert card_render.new_instance_image_dir() == ""
 
     def test_renderer_keeps_empty_image_dir_instead_of_shared_root(self, tmp_path, monkeypatch):
         """空路径是「本次降级为无图」的信号：不许用 `or` 换成共享根目录（①的边界）。"""
         from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
-        monkeypatch.setattr(card_render, "IMAGE_DIR_ROOT", str(tmp_path / "star_feather"))
+        monkeypatch.setattr(render_store, "IMAGE_DIR_ROOT", str(tmp_path / "star_feather"))
         assert Renderer("", "plain").image_dir == ""
 
 
@@ -456,7 +458,7 @@ class TestReloadIsolationEndToEnd:
     def _pair(tmp_path, monkeypatch):
         """同进程两代实例（image_dir 由 new_instance_image_dir 开出）。"""
         from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
-        monkeypatch.setattr(card_render, "IMAGE_DIR_ROOT", str(tmp_path / "star_feather"))
+        monkeypatch.setattr(render_store, "IMAGE_DIR_ROOT", str(tmp_path / "star_feather"))
         return (Renderer(card_render.new_instance_image_dir(), "plain"),
                 Renderer(card_render.new_instance_image_dir(), "plain"))
 
@@ -544,7 +546,7 @@ class TestDailyCardLayoutInvariants:
     """
 
     def test_card_height_is_derived_not_literal(self):
-        from data.plugins.astrbot_plugin_star_feather.card_render import (
+        from data.plugins.astrbot_plugin_star_feather.render import (
             CARD_H,
             INFO_H,
             INNER_H,
@@ -553,7 +555,7 @@ class TestDailyCardLayoutInvariants:
         assert CARD_H == PAD_X * 2 + INNER_H + INFO_H
 
     def test_quote_block_sits_between_card_and_watermark(self):
-        from data.plugins.astrbot_plugin_star_feather.card_render import (
+        from data.plugins.astrbot_plugin_star_feather.render import (
             CARD_H,
             DAILY_CARD_H,
             DAILY_CARD_QUOTE_Y,
@@ -575,7 +577,7 @@ class TestDrawCardFontReuse:
     """
 
     def test_same_size_loaded_once_per_card(self, monkeypatch):
-        from data.plugins.astrbot_plugin_star_feather import card_render
+        from data.plugins.astrbot_plugin_star_feather import render as card_render
         from data.plugins.astrbot_plugin_star_feather.tarot_data import TAROT_CARDS
         from PIL import Image
 
@@ -588,11 +590,29 @@ class TestDrawCardFontReuse:
 
         canvas = Image.new("RGB", (card_render.CARD_OUT_W + 40, card_render.CARD_H + 40),
                            (250, 250, 250))
-        monkeypatch.setattr(card_render, "_load_font", spy)
+        monkeypatch.setattr(render_draw, "_load_font", spy)
         card_render._draw_card(canvas, 20, 20, TAROT_CARDS[0], True)
         n22 = calls.count((22, False))
         assert n22 == 1, f"牌义字号被取了 {n22} 次（应 1 次）：{calls}"
         assert len(calls) == len(set(calls)), f"同一次绘制里有重复字号：{calls}"
+
+
+class TestLayoutGeometry:
+    """纯几何不依赖 Pillow：画布尺寸与网格坐标可以直接断言。"""
+
+    def test_golden_canvas_sizes(self):
+        from data.plugins.astrbot_plugin_star_feather.render.layout import card_grid
+        assert (card_grid(1).width, card_grid(1).height) == (412, 986)
+        assert (card_grid(3).width, card_grid(3).height) == (1148, 986)
+        assert (card_grid(4).width, card_grid(4).height) == (780, 1832)
+
+    def test_grid_origins_are_inside_the_canvas(self):
+        from data.plugins.astrbot_plugin_star_feather.render.layout import card_grid
+        grid = card_grid(4)
+        origins = [grid.origin(i) for i in range(4)]
+        assert len(set(origins)) == 4
+        assert all(x >= 0 and y >= 0 for x, y in origins)
+        assert all(x + 340 <= grid.width for x, _ in origins)
 
 
 class TestBackgroundCacheSizing:
@@ -606,16 +626,16 @@ class TestBackgroundCacheSizing:
     """
 
     def test_maxsize_covers_largest_spread(self):
-        from data.plugins.astrbot_plugin_star_feather import card_render
+        from data.plugins.astrbot_plugin_star_feather import render as card_render
         assert card_render._background_cached.cache_info().maxsize >= 4, (
             "maxsize 小于最大牌阵的候选底牌数：填满缓存所需的渲染次数会超过牌阵规模")
 
     def test_same_key_hits_second_time(self):
-        from data.plugins.astrbot_plugin_star_feather import card_render
+        from data.plugins.astrbot_plugin_star_feather import render as card_render
         from data.plugins.astrbot_plugin_star_feather.tarot_data import TAROT_CARDS
         card_render._background_cached.cache_clear()
         c = TAROT_CARDS[0]
-        args = (c["suit"], c["num"], c["cn"], 1148, 986)
+        args = (c["id"], 1148, 986)
         card_render._background_cached(*args)
         i1 = card_render._background_cached.cache_info()
         card_render._background_cached(*args)

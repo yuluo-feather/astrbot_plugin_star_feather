@@ -45,7 +45,7 @@ class LimitGate:
         # PluginKVStoreMixin 只有 put_kv_data / get_kv_data / delete_kv_data 三个方法，
         # 没有事务、也没有 compare-and-swap 一类的原子「读—判—写」⇒ 没有更细的锁可换）。
         # 实际影响有限：热重载那几秒里两侧各跑一次计数，最坏是配额少算一两次——
-        # 比它严重的共享资源是图片目录，那已在 card_render 按实例隔离。
+        # 比它严重的共享资源是图片目录，那已在 render.store 按实例隔离。
         # 若将来要多进程部署，这里是必须改的入口，别指望现有实现顺手兜住。
         self._kv_lock = asyncio.Lock()
 
