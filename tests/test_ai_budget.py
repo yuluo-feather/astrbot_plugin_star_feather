@@ -19,7 +19,8 @@ import time
 import types
 
 from data.plugins.astrbot_plugin_star_feather.ai import chain as interpret_mod
-from data.plugins.astrbot_plugin_star_feather.ai.chain import AiBudget, AiInterpreter
+from data.plugins.astrbot_plugin_star_feather.ai.budget import AiBudget
+from data.plugins.astrbot_plugin_star_feather.ai.chain import AiInterpreter
 from data.plugins.astrbot_plugin_star_feather.core.draw import render_text
 from data.plugins.astrbot_plugin_star_feather.core.settings import (
     DEFAULT_AI_BUDGET,

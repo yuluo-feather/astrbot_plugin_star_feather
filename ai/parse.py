@@ -90,7 +90,7 @@ def validate_interpret_structure(text: str, n_positions: int) -> bool:
     return len(marked) >= n_positions
 
 
-# ---- 严格结构口径（ai.structure_check = strict / shadow）----
+# ---- 严格结构口径（ai.structure_check = strict）----
 # 与 SECTION_MARK_RE 同源，但这里要取编号与位置名本身，所以单开两条正则；
 # 容忍范围必须与 SECTION_MARK_RE 一致，否则「切得出来、校验说没有」。
 _INDEX_MARK_RE = re.compile(r"【第(\d+)张([^】]*)】")

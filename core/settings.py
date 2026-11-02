@@ -26,14 +26,12 @@ DEFAULT_DISCLAIMER = "✨ 占卜仅供娱乐参考，选择权永远在你手里
 DEFAULT_AI_COOLDOWN = 60        # AI 解读失败后的冷却（秒），按 Provider 粒度：挂掉的模型只冷却自己，其余照常服务
 DEFAULT_AI_PERSONA = "random"   # 牌灵人设（ai.persona）：off=中立 / tsundere 傲娇 / gentle 温柔 / mystic 神秘 / random 每次随机
 PERSONA_VALUES = ("off", "tsundere", "gentle", "mystic", "random")  # 与 _conf_schema.json 的 options 一一对应
-# 解读结构校验强度（ai.structure_check）：loose=只按宽松口径（标记段数≥牌数），
-# shadow=照旧放行但把严格口径的判定记一行（先量再收紧，默认），strict=按严格口径拒候选。
-# 严格口径的三条判据见 ai/parse.py（迁移后）；当前仍在 hardening.validate_interpret_structure_strict。
+# 解读结构校验强度（ai.structure_check）：loose=只按宽松口径（标记段数≥牌数，默认），
+# strict=按严格口径拒候选。严格口径的三条判据见 ai/parse.py。
 STRUCTURE_CHECK_LOOSE = "loose"
-STRUCTURE_CHECK_SHADOW = "shadow"
 STRUCTURE_CHECK_STRICT = "strict"
-DEFAULT_STRUCTURE_CHECK = STRUCTURE_CHECK_SHADOW
-STRUCTURE_CHECK_VALUES = (STRUCTURE_CHECK_LOOSE, STRUCTURE_CHECK_SHADOW,
+DEFAULT_STRUCTURE_CHECK = STRUCTURE_CHECK_LOOSE
+STRUCTURE_CHECK_VALUES = (STRUCTURE_CHECK_LOOSE,
                           STRUCTURE_CHECK_STRICT)  # 与 _conf_schema.json 的 options 一一对应
 DEFAULT_DAILY_CARD = True       # 今日牌运卡（output.daily_card）：/今日牌运 输出竖版卡片图，关闭则回到普通牌面图
 DEFAULT_TOOL_COOLDOWN = 60      # 自然语言占卜节流（秒），同会话冷却期内不重复触发
@@ -211,7 +209,7 @@ def parse(config) -> Settings:
     persona = str(_cfg_get(config, "ai", "persona", DEFAULT_AI_PERSONA) or "").strip().lower()
     if persona not in PERSONA_VALUES:
         persona = DEFAULT_AI_PERSONA
-    # 解读结构校验强度（ai.structure_check）：非法值回退默认（shadow=先量不拦）。
+    # 解读结构校验强度（ai.structure_check）：非法值回退默认（loose=宽松）。
     structure_check = str(
         _cfg_get(config, "ai", "structure_check", DEFAULT_STRUCTURE_CHECK) or "").strip().lower()
     if structure_check not in STRUCTURE_CHECK_VALUES:
