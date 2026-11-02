@@ -9,6 +9,7 @@ from astrbot.api.message_components import Image, Node, Nodes, Plain
 
 from .ai.parse import Interpretation
 from .ai.prompts import SECTION_MARK_RE
+from .texts import FORWARD_IMAGE_LABEL
 
 # 已验证能收合并转发（Nodes）的平台：框架源码里显式处理 Nodes 的只有这两个
 # （aiocqhttp_message_event / satori_event，2026-10-18 核对）。WebChat 的 _send
@@ -152,7 +153,7 @@ class Deliverer:
             # preface = 牌灵的话（正常路径）/洗牌提示降级并入；节点序：牌面 → preface → 解读段
             nodes = []
             if img:
-                nodes.append(Node(content=[Image(file=img), Plain("\n✨ 星羽塔罗 · 牌面")], name="星羽塔罗", uin=uin))
+                nodes.append(Node(content=[Image(file=img), Plain(FORWARD_IMAGE_LABEL)], name="星羽塔罗", uin=uin))
             if preface:
                 nodes.append(Node(content=[Plain(preface)], name="星羽塔罗", uin=uin))
             nodes.extend(Node(content=[Plain(seg)], name="星羽塔罗", uin=uin) for seg in parts)

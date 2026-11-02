@@ -715,16 +715,17 @@ def _live_modules():
     插件内模块之间是包内相对导入，一条链上只有一个 services.render、一个 card_render，
     按包路径直接 import 即得。末尾留一条同源自检：补丁打空会变成永远绿的假证据。
     """
-    from data.plugins.astrbot_plugin_star_feather import card_render, daily
+    from data.plugins.astrbot_plugin_star_feather import daily
     from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
+    from data.plugins.astrbot_plugin_star_feather.render import store as render_store
     from data.plugins.astrbot_plugin_star_feather.services import (
         render as render_service,
     )
 
     fuse = render_service._schedule_image_cleanup
-    assert fuse.__globals__ is card_render.__dict__, \
-        "补丁会打空：services.render 与 card_render 不是同一份模块"
-    return StarFeatherPlugin, render_service, card_render, daily
+    assert fuse.__globals__ is render_store.__dict__, \
+        "补丁会打空：services.render 与 render.store 不是同一份模块"
+    return StarFeatherPlugin, render_service, render_store, daily
 
 
 class _ShuttingDownLoop:
@@ -813,13 +814,13 @@ class TestCleanupFuseNeverCarriesTheReading:
     def test_fuse_swallows_and_leaves_no_dangling_coroutine(self, monkeypatch):
         """保险丝自己的契约：登记失败既不抛，也不留「never awaited」的告警噪声
         （create_task 抛之前那个协程已经建出来了，得 close 掉）。"""
-        _Plugin, _tc, card_render, _daily = _live_modules()
-        _loop_shutting_down(monkeypatch, card_render)
+        _Plugin, _tc, render_store, _daily = _live_modules()
+        _loop_shutting_down(monkeypatch, render_store)
 
         async def call_it():
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
-                card_render._schedule_image_cleanup("C:/not/exist/tarot_fuse.png")
+                render_store._schedule_image_cleanup("C:/not/exist/tarot_fuse.png")
                 gc.collect()
             return [str(w.message) for w in caught]
 

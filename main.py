@@ -22,7 +22,7 @@ from .app.diagnostics import (
     note_entry_binding,
 )
 from .app.diagnostics import cfg_fingerprint as _cfg_fingerprint
-from .card_render import cleanup_stale_images
+from .render import cleanup_stale_images
 
 VERSION = "0.8.3"
 

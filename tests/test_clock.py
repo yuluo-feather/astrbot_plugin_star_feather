@@ -9,8 +9,8 @@ import datetime
 from zoneinfo import ZoneInfo
 
 import pytest
-from data.plugins.astrbot_plugin_star_feather import card_render
 from data.plugins.astrbot_plugin_star_feather.clock import Clock, resolve_timezone
+from data.plugins.astrbot_plugin_star_feather.render import store as render_store
 
 
 class _Ctx:
@@ -97,7 +97,7 @@ class TestClockWiring:
     @pytest.fixture(autouse=True)
     def _isolated_image_root(self, tmp_path, monkeypatch):
         # 造真实例会开实例目录：指到 tmp，别往真实临时目录里丢东西
-        monkeypatch.setattr(card_render, "IMAGE_DIR_ROOT", str(tmp_path / "star_feather"))
+        monkeypatch.setattr(render_store, "IMAGE_DIR_ROOT", str(tmp_path / "star_feather"))
 
     def test_core_clock_uses_framework_timezone(self):
         from data.plugins.astrbot_plugin_star_feather.clock import Clock

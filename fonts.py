@@ -1,7 +1,7 @@
 """字体子系统：候选链、字形覆盖校验与加载缓存。
 
-独立于渲染布局（card_render）：字体怎么找、缺字怎么回退、缓存什么规则，
-都是「字体」这一个关注点；card_render 只消费 _load_font 的结果。
+独立于渲染布局（render）：字体怎么找、缺字怎么回退、缓存什么规则，
+都是「字体」这一个关注点；render 只消费 _load_font 的结果。
 
 优先级：内置主字体（Noto Sans SC 子集，品牌化命名 StarFeather-*）>
 系统字体 > 默认（可能缺中文字形；编码不了的默认字体直接报错，不往下传，
@@ -198,7 +198,7 @@ def _load_font(size: int, bold: bool = False, text: str | None = None):
             "没有能渲染这段文本的字体：内置子集缺字，系统候选链也没命中"
             "（常见于没装中文字体的 Linux 容器），而 Pillow 的默认字体编码不了中文"
             "（11.0.0 之前 load_default() 是只认 latin-1 的位图字体）——"
-            "这一步交不出牌面图，请按 card_render 的口径回退纯文本牌面"
+            "这一步交不出牌面图，请按 render 的口径回退纯文本牌面"
         )
     if text is None:
         _FONT_CACHE[key] = font

@@ -4,11 +4,11 @@ from dataclasses import dataclass
 from ..adapters.astrbot_io import PluginKV
 from ..adapters.presenter import Presenter
 from ..ai.chain import AiInterpreter
-from ..card_render import new_instance_image_dir
 from ..clock import Clock
 from ..daily import DailyFortune
 from ..deliver import Deliverer
 from ..gating import LimitGate
+from ..render import new_instance_image_dir
 from ..services.reading import ReadingService
 from ..services.render import Renderer
 from ..settings import Settings, parse

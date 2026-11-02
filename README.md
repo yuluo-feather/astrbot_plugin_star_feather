@@ -236,14 +236,14 @@
 
 ## 🤍 技术实现
 
-- **代码结构（分层，依赖单向）**：入口层 `main.py`（≤150 行，只注册命令/工具）→ `app/`（`container.py` 唯一装配、`handlers.py` 三入口、`diagnostics.py` 配置新鲜度）；编排层 `services/`（`reading.py` 占卜流水线、`render.py` 渲染与图片生命周期、`daily_store.py` 单键记录、`singleflight.py` 同键去重）；纯逻辑层 `core/`（`models.py` / `draw.py` / `ports.py`，不 import astrbot）与 `intent.py` / `spreads.py` / `hardening.py` / `limiter.py` / `dailylines.py` / `tarot_data.py` / `ai/prompts.py` / `ai/persona.py` / `ai/parse.py` / `fonts.py` / `config.py` / `settings.py` / `clock.py`；适配层 `adapters/`（`astrbot_io.py` KV 与消息、`presenter.py` 有序发送）；其余为 `daily.py` 今日缓存、`gating.py` 限流闸门、`deliver.py` 分段、`ai/chain.py` AI 候选链、`card_render.py` 渲染实现、`kv_utils.py` KV 原语、`identity.py` 用户标识——每个模块一句话说清职责，纯逻辑均可独立单测
+- **代码结构（分层，依赖单向）**：入口层 `main.py`（≤150 行，只注册命令/工具）→ `app/`（`container.py` 唯一装配、`handlers.py` 三入口、`diagnostics.py` 配置新鲜度）；编排层 `services/`（`reading.py` 占卜流水线、`render.py` 渲染与图片生命周期、`daily_store.py` 单键记录、`singleflight.py` 同键去重）；纯逻辑层 `core/`（`models.py` / `draw.py` / `ports.py`，不 import astrbot）与 `intent.py` / `spreads.py` / `hardening.py` / `limiter.py` / `dailylines.py` / `tarot_data.py` / `ai/prompts.py` / `ai/persona.py` / `ai/parse.py` / `texts.py` / `fonts.py` / `config.py` / `settings.py` / `clock.py`；适配层 `adapters/`（`astrbot_io.py` KV 与消息、`presenter.py` 有序发送）；其余为 `daily.py` 今日缓存、`gating.py` 限流闸门、`deliver.py` 分段、`ai/chain.py` AI 候选链、`render/` 渲染实现（layout / assets / draw / store）、`kv_utils.py` KV 原语、`identity.py` 用户标识——每个模块一句话说清职责，纯逻辑均可独立单测
 - **模块分层（依赖单向，无回边）**：
   - 入口层：`main.py`（只注册命令/工具）→ `app/`（装配、三入口、诊断）
-  - 编排层：`services/reading.py` / `services/render.py`；其余粘合层：`daily` / `gating` / `deliver` / `interpret` / `card_render`（KV、限流、发送、渲染、AI 解读的读写与降级裁定）
+  - 编排层：`services/reading.py` / `services/render.py`；其余粘合层：`daily` / `gating` / `deliver` / `ai.chain` / `render`（KV、限流、发送、渲染、AI 解读的读写与降级裁定）
   - 纯逻辑层：`core/`（`models` / `draw` / `ports`，不 import astrbot）与 `limiter` / `spreads` / `intent` / `identity` / `hardening` / `kv_utils` / `dailylines` / `tarot_data` / `prompts` / `fonts` / `config` / `settings` / `clock`（判据是「能否独立单测」）
 - **设计原则（本羽给自己定下的三条）**：① 任何存储/渲染/模型失败都不阻塞主流程（kv_utils 吞异常、渲染回退文字版、AI 回退本地牌义，逐级降级）；② 确定性优先——今日固定牌/解读/签文同人同日同牌相同，惊喜感由 AI 人设化口吻承担；③ 解读格式协议（【第N张·位置】标记）单源在 prompts，deliver 切段与 hardening 校验共用同一正则
 - 牌库完整内置于 `tarot_data.py`，牌面图片素材位于 `assets/`（幻星集 78 张牌；牌背 `Extra/背景.png` 在素材包里保留，当前渲染以本签牌面做底、不读这张；素材以 WebP 格式内置，代码加载时自动兼容 .png / .webp）
-- `card_render.py` 负责拼图渲染：背景从本签抽出的牌里随机挑一张的牌面做底——cover 放大 + 深藏青遮罩（与今日牌运卡同一套风味），所有牌统一白边卡牌样式（素材底色差异不影响观感），逆位时只把内部牌面图旋转 180°（白卡框与信息区保持正向）——本羽最得意的就是这块：牌要出得好看，才配得上占卜
+- `render/draw.py` 负责拼图渲染：背景从本签抽出的牌里随机挑一张的牌面做底——cover 放大 + 深藏青遮罩（与今日牌运卡同一套风味），所有牌统一白边卡牌样式（素材底色差异不影响观感），逆位时只把内部牌面图旋转 180°（白卡框与信息区保持正向）——本羽最得意的就是这块：牌要出得好看，才配得上占卜
 - 标题与牌位采用深藏青胶囊标签，信息条标注正逆位（金/红）+ 牌名 + 牌义关键词
 - 字体优先加载内置 Noto Sans SC 子集（`fonts/`，SIL OFL 1.1 开源许可；品牌化命名 `StarFeather-*.otf`，覆盖全部牌面固定文案；粗体使用独立 `StarFeather-Bold` 子集），其次回退系统常见字体（Windows / macOS / Linux），跨平台渲染效果一致
 - 渲染前对文本做字形覆盖校验：内置子集缺字时自动回退到能覆盖该文本的系统字体——校验自带静态字形清单兜底，`fonttools` 缺失也不影响回退（仍列入 requirements，首选动态校验）。当前牌库文案全覆盖子集，此机制是为未来新增生僻字牌义兜底
