@@ -22,7 +22,7 @@ from .app.diagnostics import (
     note_entry_binding,
 )
 from .app.diagnostics import cfg_fingerprint as _cfg_fingerprint
-from .render import cleanup_stale_images
+from .render import asset_manifest, cleanup_stale_images
 
 VERSION = "0.8.3"
 
@@ -47,6 +47,16 @@ class StarFeatherPlugin(Star):
 |____/ \__\__,_|_|    |_|  \___|\__,_|\__|_| |_|\___|_|
 星羽塔罗 v{VERSION} · 78张牌已就位，牌灵在等你来问。
 """)
+        # 素材清单是牌面渲染的入口：清单为空说明打包缺文件。导入不会报错，
+        # 只有第一次渲染才 FileNotFoundError，而渲染兜底会把它吞成纯文字——
+        # 启动时先喊一声，别让用户以为「牌面图功能没了」。
+        try:
+            if not asset_manifest():
+                logger.error(
+                    "资产清单为空：assets/manifest.json 缺失或损坏，"
+                    "牌面渲染将全部降级为文字；请检查插件包完整性并重装。")
+        except Exception as e:
+            logger.error(f"资产清单检查失败（牌面渲染可能降级为文字）: {e}")
         image_dir = image_dir_of(self)
         if image_dir:
             try:
