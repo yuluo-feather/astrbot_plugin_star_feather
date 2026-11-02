@@ -12,6 +12,7 @@
 import asyncio
 import hashlib
 import random
+import threading
 
 from ..adapters.clock import Clock
 from ..adapters.kv_utils import kv_delete, kv_get, kv_put
@@ -30,6 +31,22 @@ from .singleflight import SingleFlight
 # 同键生成去重：模块级而非实例属性，热重载前后并存的实例也能共享同一笔生成。
 _SPIRIT_FLIGHT = SingleFlight()
 _INTERP_FLIGHT = SingleFlight()
+
+# 进程级写锁：同一进程内所有 DailyFortune 共用（热重载时新旧实例并存）。
+# 各自持锁时，两个主题的「读—合并—写」会互相覆盖；锁按事件循环隔离，
+# 避免测试里 asyncio.run 新建循环时撞上绑定旧循环的锁。
+_KV_LOCKS: dict[int, tuple[object, asyncio.Lock]] = {}
+_KV_LOCKS_GUARD = threading.Lock()
+
+
+def _shared_kv_lock() -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    with _KV_LOCKS_GUARD:
+        rec = _KV_LOCKS.get(id(loop))
+        if rec is None or rec[0] is not loop:
+            rec = (loop, asyncio.Lock())
+            _KV_LOCKS[id(loop)] = rec
+        return rec[1]
 
 # 提示词版本合成一个指纹：读数或牌灵提示词任一改版，当天缓存都失效。
 _PROMPT_V = f"{READING_PROMPT_V}/{SPIRIT_PROMPT_V}"
@@ -104,9 +121,6 @@ class DailyFortune:
         self.interpreter = interpreter
         # 旧版 sf_spirit_* 键只删一次：合并成单键后它们不会再被读，但会永久占着
         self._legacy_cleaned: set[str] = set()
-        # 缓存读-判-写串行化（gating 同款防线）：并发占卜时两条协程各自读旧值再写回，
-        # 后写的会把先写的分桶整个覆盖掉。
-        self._kv_lock = asyncio.Lock()
 
     def _key(self, uid: str) -> str:
         return f"sf_daily_{uid}"
@@ -128,7 +142,7 @@ class DailyFortune:
             return None
         await self._cleanup_legacy_spirit(uid)
         key, today = self._key(uid), self.clock.today()
-        async with self._kv_lock:
+        async with _shared_kv_lock():
             raw, ok = await kv_get(self.kv_store, key, None, "每日牌运缓存")
             record = DailyRecord.from_raw(raw)
             if ok and record.date == today:
@@ -163,7 +177,7 @@ class DailyFortune:
         sig = _reading_sign(picks)
         reg_key = (key, sig, topic, today, _PROMPT_V, self.persona)
         hit = None
-        async with self._kv_lock:
+        async with _shared_kv_lock():
             raw, ok = await kv_get(self.kv_store, key, None, "每日牌运解读缓存")
             record = DailyRecord.from_raw(raw)
             if ok and record.same_context(today, sig, _PROMPT_V, self.persona):
@@ -183,8 +197,11 @@ class DailyFortune:
         if not ok or interp is None:
             return interp
 
-        async with self._kv_lock:
-            fresh_raw, _ = await kv_get(self.kv_store, key, None, "每日牌运解读缓存")
+        async with _shared_kv_lock():
+            fresh_raw, fresh_ok = await kv_get(self.kv_store, key, None, "每日牌运解读缓存")
+            if not fresh_ok:
+                # 读故障：旧记录未知，写回会拿空壳覆盖牌面与已有分桶
+                return interp
             fresh = DailyRecord.from_raw(fresh_raw)
             # 生成跨过了午夜：KV 里已经是新一天的记录，别用昨天启动的写回盖掉
             if fresh.date > today:
@@ -217,7 +234,7 @@ class DailyFortune:
         key, sig = self._key(uid), _spirit_sign(picks)
         reg_key = (key, sig, today, _PROMPT_V)
 
-        async with self._kv_lock:
+        async with _shared_kv_lock():
             raw, ok = await kv_get(self.kv_store, key, None, "牌灵的话缓存")
             record = DailyRecord.from_raw(raw)
             if (ok and record.date == today and record.prompt_v == _PROMPT_V
@@ -238,8 +255,11 @@ class DailyFortune:
             # 读故障：只把这一句交给本次调用，不冒险写回（可能覆盖已有分桶）
             return line
 
-        async with self._kv_lock:
-            fresh_raw, _ = await kv_get(self.kv_store, key, None, "牌灵的话缓存")
+        async with _shared_kv_lock():
+            fresh_raw, fresh_ok = await kv_get(self.kv_store, key, None, "牌灵的话缓存")
+            if not fresh_ok:
+                # 读故障：写回会抹掉同一条记录里的牌面与解读分桶
+                return line
             fresh = DailyRecord.from_raw(fresh_raw)
             if fresh.date > today:
                 # 生成跨过了午夜：KV 已是新一天的记录，别用昨天启动的写回盖掉

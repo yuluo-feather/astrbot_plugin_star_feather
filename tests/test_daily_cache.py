@@ -954,3 +954,111 @@ class TestSpiritDoesNotRewriteDailyCard:
         second = asyncio.run(df.pick_cached("u1"))
         assert second[2][0]["card"]["id"] == daily_card_id
         assert kv["sf_daily_u1"]["card_id"] == daily_card_id
+
+
+# ---------- 二次读取失败：不许用空壳覆盖已有记录 ----------
+class TestSecondReadFailureKeepsRecord:
+    """初次读到旧记录、生成成功、写回前二次读失败：本次照常返回，但不写回。
+
+    单键记录里牌面、解读分桶与牌灵的话共用一个 raw；二次读故障时 from_raw(None)
+    会得到空记录，写回去就是把整条记录清空。
+    """
+
+    @staticmethod
+    def _flaky(record, fail_on=2):
+        class _Ctx:
+            def __init__(self):
+                self.reads = 0
+                self.puts = 0
+                self.data = record
+
+            async def get_kv_data(self, key, default=None):
+                self.reads += 1
+                if self.reads == fail_on:
+                    raise RuntimeError("kv 二次读故障")
+                return self.data
+
+            async def put_kv_data(self, key, value):
+                self.puts += 1
+                self.data = value
+
+        return _Ctx()
+
+    @staticmethod
+    def _today_rec(**over):
+        import time as _time
+        today = _time.strftime("%Y%m%d")
+        return today, _rec(date=today, **over)
+
+    def test_interp_write_back_is_skipped(self):
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
+        _today, old = self._today_rec(
+            interps={"旧主题": {"text": "旧解读", "sections": [],
+                                "summary": "", "structured": False}})
+        kv = self._flaky(old)
+
+        async def fake_ai(event, formation, positions, picks, clean,
+                          persona_eff=None, budget=None):
+            return "新解读"
+
+        df = DailyFortune(kv, persona="", interpreter=_Interp(fake_ai))
+        out = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"],
+                                           [PICK], "新主题"))
+        assert _text(out) == "新解读"   # 本次照常交结果
+        assert kv.puts == 0             # 但没有写回
+        assert kv.data is old           # 原记录（牌 + 旧分桶）原样保留
+
+
+# ---------- 跨实例并发：不同主题的合并写不能互相覆盖 ----------
+class TestCrossInstanceTopicMerge:
+    """两个 DailyFortune 实例共享同一 KV、同时生成不同主题：两个分桶都要在。
+
+    热重载期间新旧实例并存；如果写锁只是实例属性，两边各自读旧记录再写回，
+    后写的那一份会把先写的主题桶整个覆盖掉。
+    """
+
+    def test_both_topics_survive(self):
+        import time as _time
+
+        from data.plugins.astrbot_plugin_star_feather.core.intent import norm_topic
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
+        today = _time.strftime("%Y%m%d")
+        kv = {"sf_daily_u1": _rec(date=today)}
+
+        class _Ctx:
+            async def get_kv_data(self, key, default=None):
+                return kv.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                kv[key] = value
+
+        async def slow_ai(event, formation, positions, picks, clean,
+                          persona_eff=None, budget=None):
+            await asyncio.sleep(0.02)      # 让两个实例都先读到旧记录
+            return f"解读:{clean}"
+
+        a = DailyFortune(_Ctx(), persona="", interpreter=_Interp(slow_ai))
+        b = DailyFortune(_Ctx(), persona="", interpreter=_Interp(slow_ai))
+
+        async def go():
+            return await asyncio.gather(
+                a.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], "事业运"),
+                b.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK], "感情运"))
+
+        asyncio.run(go())
+        rec = kv["sf_daily_u1"]
+        assert set(rec["interps"]) >= {norm_topic("事业运"), norm_topic("感情运")}
+        assert rec["card_id"] == PICK["card"]["id"]
+
+
+# ---------- 记录解析：布尔字段不做静默转换 ----------
+class TestDailyRecordParsing:
+    def test_non_bool_upright_is_an_invalid_record(self):
+        from data.plugins.astrbot_plugin_star_feather.services.daily_store import (
+            DailyRecord,
+        )
+        for bad in ("false", "true", 0, 1, None):
+            rec = DailyRecord.from_raw(_rec(upright=bad))
+            assert rec.card_id == "" and rec.interps == {}, repr(bad)
+        ok = DailyRecord.from_raw(_rec(upright=False))
+        assert ok.upright is False and ok.card_id == PICK["card"]["id"]

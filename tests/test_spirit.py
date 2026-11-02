@@ -200,13 +200,11 @@ class TestSpiritCache:
         assert (l1, l2) == ("昨天那句", "今天那句")
         assert calls == ["20261017", "20261018"]
 
-    def test_spirit_writes_back_even_on_read_failure(self):
-        """读故障仍写回——方向与 pick/interp 的 if ok 门相反，是有意的。
+    def test_first_read_failure_does_not_write_back(self):
+        """初次读故障：本次只返回生成结果，不写回；读恢复后重新生成并写回。
 
-        判据＝写回是否依赖旧数据：pick_cached / interp_cached 读旧 dict 再合并写回，读故障
-        时旧数据缺失、写回会把有效内容覆盖成空壳，所以必须门住；本函数是纯覆盖写（只写
-        v/date/sign/line，不读旧值），读故障不影响写入正确性。机械地「统一」成门住，会让
-        故障恢复前的重复查询重新生成，AI 措辞可能不同，破坏「当日同牌组同一句」的承诺。
+        单键记录里牌面、解读分桶与牌灵的话共用一个 raw：不知道旧记录时写回，
+        会把牌面与分桶一起清空。
         """
         from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         kv = {}
@@ -283,6 +281,49 @@ class TestSpiritCache:
                 {"card": TAROT_CARDS[2], "upright": True}]  # 第二张正逆翻转
         l3 = asyncio.run(df.spirit_cached(EVENT, "u1", flip, "感情", None))
         assert l3 == "整签句" and len(calls) == 2  # 牌组变：重新生成
+
+    def test_second_read_failure_does_not_clobber_record(self):
+        """初次读到旧记录、生成成功、写回前二次读失败：不许写回。"""
+        import time as _time
+
+        from data.plugins.astrbot_plugin_star_feather.services.daily import (
+            _PROMPT_V,
+            DailyFortune,
+        )
+        today = _time.strftime("%Y%m%d")
+        old = {"schema": 2, "date": today, "card_id": PICK["card"]["id"],
+               "upright": True, "sign": f"{PICK['card']['id']}:1",
+               "prompt_v": _PROMPT_V, "persona": "",
+               "interps": {"旧主题": {"text": "旧解读"}},
+               "spirit_line": "旧句", "spirit_sign": "别的牌:0"}
+
+        class _Flaky:
+            def __init__(self):
+                self.reads = 0
+                self.puts = 0
+                self.data = old
+
+            async def get_kv_data(self, key, default=None):
+                self.reads += 1
+                if self.reads == 2:
+                    raise RuntimeError("kv 二次读故障")
+                return self.data
+
+            async def put_kv_data(self, key, value):
+                self.puts += 1
+                self.data = value
+
+        kv = _Flaky()
+
+        async def fake_spirit(event, cards, topic, persona_eff, budget=None):
+            return "新牌灵句"
+
+        df = DailyFortune(kv, persona="",
+                          interpreter=types.SimpleNamespace(spirit_line=fake_spirit))
+        line = asyncio.run(df.spirit_cached(EVENT, "u1", [PICK], "今日运势", None))
+        assert line == "新牌灵句"    # 本次照常交结果
+        assert kv.puts == 0          # 但不写回
+        assert kv.data is old        # 牌面与旧分桶原样保留
 
     def test_no_uid_returns_static_without_ai(self):
         from time import strftime

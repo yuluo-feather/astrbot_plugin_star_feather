@@ -30,11 +30,16 @@ class DailyRecord:
     def from_raw(cls, raw) -> "DailyRecord":
         if not isinstance(raw, dict) or raw.get("schema") != SCHEMA:
             return cls()
+        upright = raw.get("upright")
+        if not isinstance(upright, bool):
+            # 历史数据或人工改坏的值（"false" / 0 / 缺失）按无效记录处理：
+            # bool("false") 是 True，静默转换会把逆位变成正位
+            return cls()
         interps = raw.get("interps")
         return cls(
             date=_str(raw.get("date")),
             card_id=_str(raw.get("card_id")),
-            upright=bool(raw.get("upright")),
+            upright=upright,
             sign=_str(raw.get("sign")),
             prompt_v=_str(raw.get("prompt_v")),
             persona=_str(raw.get("persona")),
