@@ -393,7 +393,9 @@ def build_request(kind: str = "auto", text: str = "", *,
     if daily_enabled and is_daily_request(text):
         return _make(KIND_DAILY, "羽签", True, text)
     formation, confident = _decide_formation(text)
-    hint = (formation_hint or "").strip()
-    if source == "tool" and not confident and hint in FORMATIONS:
+    hint_raw = (formation_hint or "").strip()
+    # 模型可能填经典名（圣三角 / 恋人十字）：先过别名表，再校验必须落在枚举里
+    hint = FORMATION_ALIASES.get(hint_raw, hint_raw if hint_raw in FORMATIONS else "")
+    if source == "tool" and not confident and hint:
         formation = hint
     return _make(KIND_SPREAD, formation, False, text)
