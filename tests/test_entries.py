@@ -533,3 +533,49 @@ class TestSingleCommand:
     def _run_cmd(self, p, text):
         asyncio.run(handlers.command_entry(p, _event(), text, version="0.0.0",
                                           err_tpl="断了", intent_kind="single"))
+
+
+class TestPresenterFallback:
+    """结果发送失败时降级纯文字，不能只剩一句收尾。"""
+
+    def test_failed_result_falls_back_to_text(self):
+        from data.plugins.astrbot_plugin_star_feather.adapters.presenter import (
+            Presenter,
+        )
+        from data.plugins.astrbot_plugin_star_feather.core.models import (
+            Reading,
+            ReadingRequest,
+        )
+        from data.plugins.astrbot_plugin_star_feather.deliver import Deliverer
+
+        class Messenger:
+            def __init__(self):
+                self.texts = []
+                self.results = []
+
+            async def send_result(self, result):
+                self.results.append(result)
+                return False
+
+            async def send_text(self, text):
+                self.texts.append(text)
+                return True
+
+        evt = types.SimpleNamespace(get_self_id=lambda: "0",
+                                    chain_result=lambda chain: chain)
+        reading = Reading(ReadingRequest("spread", "羽签", "问题", "问题", False),
+                          "u1", "羽签", ("你的当下",), (PICK,), "sig", "AI", None)
+        messenger = Messenger()
+        asyncio.run(Presenter(Deliverer(300, "", False)).present(
+            reading, messenger, evt))
+        assert messenger.results
+        assert any("AI" in text for text in messenger.texts)
+
+
+class TestExceptionDetail:
+    def test_exception_group_is_expanded(self):
+        from data.plugins.astrbot_plugin_star_feather.app import handlers
+
+        group = ExceptionGroup("unhandled errors in a TaskGroup", [ValueError("boom")])
+        detail = handlers._exc_detail(group)
+        assert "ValueError: boom" in detail
