@@ -2,6 +2,8 @@
 # 显式声明规则集：ruff 0.16 在配置文件存在时会自动启用大默认集（含 S/BLE/RUF 等），
 # 与本项目刻意冲突——KV 读写/渲染失败的 try-except-pass 静默降级是设计（宁放行不拦坏），
 # 故只保留核心检查 E4/E7/E9/F + import 排序 I。
+target-version = "py312"
+
 [lint]
 select = ["E4", "E7", "E9", "F", "I"]
 # 无 ignore：E402 的旧豁免随第 ⑥ 轮一起退役（那时代码里要先 sys.path 插目录再在模块顶部 import，
