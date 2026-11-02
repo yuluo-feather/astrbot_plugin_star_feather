@@ -1,8 +1,7 @@
-"""Prompt 防护：输入侧归一化 / 越狱句式剥除 / 超长截断，输出侧结构校验。
+"""Prompt 防护：输入侧归一化 / 越狱句式剥除 / 超长截断。
 
-interpret.py 只负责「找模型 → 发请求 → 拿文本」；
-文本安全（输入侧：归一化先行 → 截断 → 句式剥除）与结构契约（输出侧）都在这一层，
-与解读器解耦、独立单测。
+输出侧的结构校验与解读解析在 ai/parse.py；本模块只管送进模型之前的那一段。
+顺序固定：归一化先行 → 截断 → 句式剥除（踩过坑，别改）。
 
 说人话：想往牌灵嘴里塞怪东西？先过这一关。
 """
@@ -10,7 +9,6 @@ import re
 
 from astrbot.api import logger
 
-from .prompts import SECTION_MARK_RE
 from .settings import DEFAULT_QUESTION_MAX_LEN
 
 # AI 解读的问题长度上限：防超长输入（费 token + 扩大 Prompt 注入面），
@@ -139,70 +137,3 @@ def strip_injection_fragments(text: str) -> str:
     # 清理剥除后残留的粘连标点，避免把“，你……”这样的开头送进模型
     text = re.sub(r"^[，。、,.;；\s]+", "", text.strip())
     return text
-
-
-def validate_interpret_structure(text: str, n_positions: int) -> bool:
-    """输出结构校验：AI 解读须按【第N张·位置】标记分段，且段数不少于牌数。
-
-    模型被带偏时最典型的输出是失去这套结构（整篇转述、角色扮演文本），
-    此时弃用该文本回退本地牌义——带偏内容绝不进用户聊天。
-    【总结】段缺失不判失格（只影响完整性，不影响安全）。
-    注意：判据是「标记段总数 ≥ 牌数」，【总结】段也计入段数——模型少写
-    一张牌但补了总结时仍会通过，阈值偏宽松，只拦「完全失去结构」的最坏情况。
-    """
-    text = (text or "").strip()
-    if not text:
-        return False
-    # 标记段正则与 deliver.split_sections 共用（prompts.SECTION_MARK_RE）：
-    # 切分逻辑与发送逻辑永远一致，改格式只动 prompts 一处。
-    marked = [s for s in SECTION_MARK_RE.split(text)[1:] if s.strip()]
-    return len(marked) >= n_positions
-
-
-# ---- 严格结构口径（ai.structure_check = strict / shadow）----
-# 与 SECTION_MARK_RE 同源：这里要取编号与位置名本身，所以单开两条正则，
-# 但容忍范围必须与 prompts.SECTION_MARK_RE 一致（【第N张…】/【总结】），
-# 否则会出现「切得出来、校验说没有」的错位——test_hardening 有对账用例守着。
-_INDEX_MARK_RE = re.compile(r"【第(\d+)张([^】]*)】")
-_SUMMARY_MARK_RE = re.compile(r"【总结】")
-_POSITION_SEP = "·"
-
-
-def validate_interpret_structure_strict(text: str, n_positions: int) -> tuple[bool, tuple[str, ...]]:
-    """严格结构校验：返回 (是否合规, 不合格原因元组)。
-
-    比宽松口径多的三条判据（位置名文本本身不锁死）：
-    1) 编号必须恰好是 1..n_positions，每个出现一次——缺号、重号、越界编号都拒；
-    2) 【总结】标记出现 0 次或 1 次（宽松口径不查这条，宽松口径甚至把总结也算作一段）；
-    3) 每个标记的位置名不得为空（只查空不查词：位置名是牌阵自己的词，改阵就改词，
-       锁死成某一组固定文本＝换个牌阵就把合法解读全判死）。
-
-    为什么另开一条而不改宽松口径：宽严差别直接映射到用户体验——严格口径拒掉一个
-    候选＝那次占卜整段 AI 解读降级成本地牌义，所以先用影子模式量真实候选的拒绝率
-    （interpret.AiInterpreter._accept_structure），再决定是否收紧。
-    关系：严格通过 ⇒ 宽松通过（严格要求 n 个合法编号，段数天然 ≥ n），反之不然。
-    """
-    text = (text or "").strip()
-    if not text:
-        return False, ("输出为空",)
-    marks = _INDEX_MARK_RE.findall(text)
-    if not marks:
-        return False, ("无【第N张·位置】标记",)
-    nums = [int(n) for n, _ in marks]
-    reasons: list[str] = []
-    wanted = list(range(1, n_positions + 1))
-    missing = [i for i in wanted if i not in nums]
-    if missing:
-        reasons.append("缺号:" + ",".join(str(i) for i in missing))
-    out_of_range = sorted({i for i in nums if i not in wanted})
-    if out_of_range:
-        reasons.append("越界编号:" + ",".join(str(i) for i in out_of_range))
-    dup = sorted({i for i in nums if nums.count(i) > 1})
-    if dup:
-        reasons.append("重复编号:" + ",".join(str(i) for i in dup))
-    blank = sorted({i for i, raw in marks if not raw.lstrip(_POSITION_SEP).strip()})
-    if blank:
-        reasons.append("位置名为空:" + ",".join(str(i) for i in blank))
-    if len(_SUMMARY_MARK_RE.findall(text)) > 1:
-        reasons.append("总结标记重复")
-    return (not reasons), tuple(reasons)

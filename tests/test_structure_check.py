@@ -2,7 +2,7 @@
 
 为什么单开一个域：这个配置值直接映射到用户体验——严格口径拒掉一个候选＝那次占卜
 整段 AI 解读降级成本地牌义。宽严之差就是体验之差，所以要被锁住的是三样东西：
-1) 判据本身（hardening.validate_interpret_structure_strict 的三条，位置名不锁死）；
+1) 判据本身（ai.parse.validate_interpret_structure_strict 的三条，位置名不锁死）；
 2) 三档在候选链上的实际行为（loose 放行 / shadow 放行但计量 / strict 拒了往下试）；
 3) 影子计数给得出「候选拒绝率」与「收紧后降级率」的两个分母——只有分子算不出结论。
 
@@ -13,11 +13,11 @@ import asyncio
 import logging
 
 import pytest
-from data.plugins.astrbot_plugin_star_feather.hardening import (
+from data.plugins.astrbot_plugin_star_feather.ai.chain import AiInterpreter
+from data.plugins.astrbot_plugin_star_feather.ai.parse import (
     validate_interpret_structure,
     validate_interpret_structure_strict,
 )
-from data.plugins.astrbot_plugin_star_feather.interpret import AiInterpreter
 from data.plugins.astrbot_plugin_star_feather.settings import (
     DEFAULT_STRUCTURE_CHECK,
     STRUCTURE_CHECK_LOOSE,
@@ -34,7 +34,8 @@ LEGACY_TWO_OF_THREE = "【第1张·过去】一段过去。【第2张·现在】
 
 
 def _interp(providers, structure_check=STRUCTURE_CHECK_SHADOW):
-    return AiInterpreter(FakeContext(others=providers), structure_check=structure_check)
+    return AiInterpreter(FakeContext(others=providers), structure_check=structure_check,
+                             all_providers_fallback=True)
 
 
 def _ask(it, positions):
@@ -263,7 +264,7 @@ class TestShadowTally:
 
     def test_zero_denominator_reports_na_never_zero_percent(self):
         """分母为零写 N/A，不许写 0%：0/0 是「还没观测量」，不是「没被拒」。"""
-        from data.plugins.astrbot_plugin_star_feather.interpret import _rate_text
+        from data.plugins.astrbot_plugin_star_feather.ai.chain import _rate_text
         assert _rate_text(2, 50) == "2/50 (4.00%)"
         assert _rate_text(0, 3) == "0/3 (0.00%)"
         assert _rate_text(0, 0) == "0/0 (N/A)"

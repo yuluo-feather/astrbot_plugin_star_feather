@@ -7,7 +7,8 @@
 from astrbot.api import logger
 from astrbot.api.message_components import Image, Node, Nodes, Plain
 
-from .prompts import SECTION_MARK_RE
+from .ai.parse import Interpretation
+from .ai.prompts import SECTION_MARK_RE
 
 # 已验证能收合并转发（Nodes）的平台：框架源码里显式处理 Nodes 的只有这两个
 # （aiocqhttp_message_event / satori_event，2026-10-18 核对）。WebChat 的 _send
@@ -130,9 +131,13 @@ class Deliverer:
             if chain:
                 yield event.chain_result(chain)
             return
-        # 结构化切分 + 按 segment_size 二次截断（模型可能无视 80~140 字限制），防单段超长
-        parts = [sub for seg in split_sections(interp, self.segment_size)
-                 for sub in split_text(seg, self.segment_size)]
+        # 结构化切分只做一次：AI 返回时已解析成 Interpretation，这里不再重新切；
+        # 只有旧版字符串才回退 split_sections。随后仍按 segment_size 防止单段超长。
+        if isinstance(interp, Interpretation) and interp.structured:
+            segs = list(interp.sections) + ([interp.summary] if interp.summary else [])
+        else:
+            segs = split_sections(interp, self.segment_size)
+        parts = [sub for seg in segs for sub in split_text(seg, self.segment_size)]
         if not parts:
             return
         # 免责声明：空字符串不显示；正常解读末尾统一追加一段

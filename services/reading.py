@@ -12,6 +12,7 @@ import asyncio
 import random
 from dataclasses import dataclass
 
+from ..ai.prompts import RESULT_EPILOGUE, SHUFFLE_LINES, resolve_persona
 from ..core.draw import draw, render_detail
 from ..core.log import log
 from ..core.models import (
@@ -22,7 +23,6 @@ from ..core.models import (
 )
 from ..core.ports import Messenger, Rng
 from ..intent import norm_topic
-from ..prompts import RESULT_EPILOGUE, SHUFFLE_LINES, resolve_persona
 from ..settings import Settings
 
 

@@ -254,3 +254,29 @@ class TestDeliverAIlessFallback:
         assert evt.result[1].text == "今天安心"
         assert evt.result[2].text.startswith("📖")
         assert not any("🔮 牌阵" in getattr(c, "text", "") for c in evt.result)
+
+
+class TestInterpretationReuse:
+    """AI 返回时已经解析过结构：发送层不再用正则重新切一遍。"""
+
+    def test_structured_interpretation_skips_resplitting(self, monkeypatch):
+        from data.plugins.astrbot_plugin_star_feather import deliver as deliver_mod
+        from data.plugins.astrbot_plugin_star_feather.ai.parse import Interpretation
+
+        def no_split(*a, **kw):
+            raise AssertionError("结构化解读不该再走 split_sections")
+
+        monkeypatch.setattr(deliver_mod, "split_sections", no_split)
+        evt = types.SimpleNamespace()
+        evt.result = None
+        evt.get_self_id = lambda: "0"
+        evt.chain_result = lambda chain: chain
+        interp = Interpretation("【第1张·过去】一段。\n【总结】结论。")
+
+        async def run():
+            return [x async for x in Deliverer(300, "", False).deliver(
+                evt, interp, None, "羽时三刻", ["过去"], [PICK], lambda *a: "兜底")]
+
+        parts = asyncio.run(run())
+        text = "".join(getattr(c, "text", "") for c in parts[0])
+        assert "一段。" in text and "结论。" in text

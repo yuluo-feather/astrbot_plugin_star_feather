@@ -129,7 +129,7 @@ class _FakeInterp:
 
 def _fortune(kv, **kw):
     kw.pop("render_lock", None)
-    return daily_mod.DailyFortune(kv, interpreter=_FakeInterp(**kw))
+    return daily_mod.DailyFortune(kv, persona="", interpreter=_FakeInterp(**kw))
 
 
 def _expected_pick():
@@ -168,7 +168,7 @@ def test_pick_write_back_is_always_a_healthy_record(mode):
     rec = kv.store.get(DAILY_KEY) or kv.puts[-1][1]
     assert isinstance(rec, dict)
     assert rec["date"] == TODAY
-    assert rec["card"]["id"] == _expected_pick()[2][0]["card"]["id"]
+    assert rec["card_id"] == _expected_pick()[2][0]["card"]["id"]
 
 
 @pytest.mark.parametrize("mode", ["poison_list", "poison_str", "poison_int",
@@ -177,13 +177,18 @@ def test_pick_write_back_drops_stale_interp_buckets(mode):
     """跨天 / 坏牌 id：旧解读分桶一律作废（否则同主题当天复用昨天的解读）。"""
     kv = MODES[mode]()
     _run(_fortune(kv).pick_cached(UID))
-    assert "interps" not in kv.store[DAILY_KEY]
+    assert kv.store[DAILY_KEY]["interps"] == {}
 
 
 def test_pick_keeps_today_interp_buckets_when_record_is_fine():
     """同日正常记录：抽牌重生成不许丢弃已写好的解读分桶（合并写，不是覆盖写）。"""
-    kv = KvSpy({DAILY_KEY: {"date": TODAY, "card": PICK["card"], "upright": True,
-                            "interps": {"（今日牌运）": "今天的解读"}}})
+    card, upright = daily_mod._daily_pick(UID, TODAY)
+    kv = KvSpy({DAILY_KEY: {
+        "schema": 2, "date": TODAY, "card_id": card["id"], "upright": upright,
+        "sign": f"{card['id']}:{1 if upright else 0}",
+        "prompt_v": daily_mod._PROMPT_V, "persona": "",
+        "interps": {"（今日牌运）": "今天的解读"},
+        "spirit_line": "", "spirit_sign": ""}})
     _run(_fortune(kv).pick_cached(UID))
     assert kv.store[DAILY_KEY]["interps"] == {"（今日牌运）": "今天的解读"}
 
@@ -231,17 +236,12 @@ def test_interp_failure_writes_no_falsy_bucket(interp, exc):
 
 
 # ================= ③ daily.spirit_cached：读故障仍写回 =================
-def test_spirit_writes_back_even_on_read_failure():
-    """红线：牌灵的话是纯覆盖写，读故障必须照写。
-
-    门住的话，故障恢复前的重复查询会重新生成，AI 每次措辞不同——
-    「当日同牌组同一句」这条契约当场碎掉。
-    """
+def test_spirit_read_failure_does_not_blind_write():
+    """单条记录里还有牌与解读：读故障时不盲写，避免把有效内容覆盖成空壳。"""
     kv = ReadDown()
     got = _run(_fortune(kv).spirit_cached(None, UID, [PICK], "今日运势", None))
     assert got == "AI牌灵的话"
-    assert len(kv.puts) == 1
-    assert kv.puts[0][1]["line"] == "AI牌灵的话"
+    assert kv.puts == []
 
 
 def test_spirit_write_failure_does_not_break_reading():
@@ -250,14 +250,17 @@ def test_spirit_write_failure_does_not_break_reading():
     assert got == "AI牌灵的话"
 
 
-def test_spirit_read_down_but_it_would_still_hit():
-    """读故障恢复后，先前那次写回要能命中（否则「同牌组同一句」还是白写）。"""
+def test_spirit_read_recovery_regenerates_then_hits():
+    """读故障那次没写回；恢复后重新生成并写回，第三次命中同一句。"""
     kv = ReadDown()
     _run(_fortune(kv).spirit_cached(None, UID, [PICK], "今日运势", None))
     kv2 = KvSpy(kv.store)
     got = _run(_fortune(kv2, spirit="AI牌灵的另一句").spirit_cached(None, UID, [PICK],
                                                                     "今日运势", None))
-    assert got == "AI牌灵的话"  # 命中旧句，不再问 AI
+    assert got == "AI牌灵的另一句"
+    got2 = _run(_fortune(kv2, spirit="不会用到").spirit_cached(None, UID, [PICK],
+                                                              "今日运势", None))
+    assert got2 == "AI牌灵的另一句"
 
 
 @pytest.mark.parametrize("spirit,exc", [(None, None), ("", None),
@@ -449,9 +452,9 @@ class TestImageGoneBeforeSend:
     @staticmethod
     def _plugin(render, on_after_render=None):
         """真入口 + 真渲染器 + 真分发，只把「渲染实现」和 AI 换成可控桩。"""
+        from data.plugins.astrbot_plugin_star_feather.ai.chain import AiInterpreter
         from data.plugins.astrbot_plugin_star_feather.clock import Clock
         from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
-        from data.plugins.astrbot_plugin_star_feather.interpret import AiInterpreter
         from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
 
         calls = []
@@ -653,7 +656,7 @@ class TestRenderAfterBothAI:
 
         class Interp:
             def new_budget(self):
-                from data.plugins.astrbot_plugin_star_feather.interpret import AiBudget
+                from data.plugins.astrbot_plugin_star_feather.ai.chain import AiBudget
                 return AiBudget(120)
 
             async def interpret(self, umo, formation, positions, picks, user_input,
@@ -759,9 +762,9 @@ class TestCleanupFuseNeverCarriesTheReading:
 
     def _reading_with_real_fuse(self, render_service, tmp_path):
         """真入口 + 真渲染器 + 真登记清理，只把渲染实现与 AI 换桩。"""
+        from data.plugins.astrbot_plugin_star_feather.ai.chain import AiInterpreter
         from data.plugins.astrbot_plugin_star_feather.clock import Clock
         from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
-        from data.plugins.astrbot_plugin_star_feather.interpret import AiInterpreter
         from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
 
         path = str(tmp_path / "fuse_reading.png")

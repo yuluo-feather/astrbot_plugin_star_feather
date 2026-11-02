@@ -7,6 +7,7 @@ import asyncio
 import types
 
 import pytest
+from data.plugins.astrbot_plugin_star_feather.ai.prompts import RESULT_EPILOGUE
 from data.plugins.astrbot_plugin_star_feather.app import handlers
 from data.plugins.astrbot_plugin_star_feather.clock import Clock
 from data.plugins.astrbot_plugin_star_feather.daily import _daily_pick
@@ -14,7 +15,6 @@ from data.plugins.astrbot_plugin_star_feather.intent import (
     build_request,
     is_daily_request,
 )
-from data.plugins.astrbot_plugin_star_feather.prompts import RESULT_EPILOGUE
 from data.plugins.astrbot_plugin_star_feather.services.reading import (
     ReadingContext,
     ReadingService,
@@ -70,7 +70,7 @@ class FakeInterpreter:
         self.capture = capture
 
     def new_budget(self):
-        from data.plugins.astrbot_plugin_star_feather.interpret import AiBudget
+        from data.plugins.astrbot_plugin_star_feather.ai.chain import AiBudget
         return AiBudget(120)
 
     async def interpret(self, umo, formation, positions, picks, user_input, detail,

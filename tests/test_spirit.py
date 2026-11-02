@@ -8,11 +8,10 @@ import logging
 import types
 
 import pytest
-from data.plugins.astrbot_plugin_star_feather.dailylines import pick_signature
-from data.plugins.astrbot_plugin_star_feather.prompts import (
-    SPIRIT_PROMPT_V,
+from data.plugins.astrbot_plugin_star_feather.ai.prompts import (
     build_spirit_line_prompt,
 )
+from data.plugins.astrbot_plugin_star_feather.dailylines import pick_signature
 from data.plugins.astrbot_plugin_star_feather.tarot_data import (
     TAROT_CARDS,
 )
@@ -51,10 +50,11 @@ class TestSpiritCache:
         assert l1 == "AI 说的那句" and len(calls) == 1
         l2 = asyncio.run(df.spirit_cached(EVENT, "u1", [PICK], "今日运势", None))
         assert l2 == "AI 说的那句" and len(calls) == 1  # 缓存复用：不再调 AI
-        cache = next(v for k, v in kv.items() if k.startswith("sf_spirit_"))
-        assert cache["date"] == strftime("%Y%m%d") and cache["line"] == "AI 说的那句"
-        assert cache["sign"] == f"{PICK['card']['cn']}:1"  # 牌组指纹（卡名:正逆）
-        assert cache["v"] == SPIRIT_PROMPT_V  # prompt 版本号：文案迭代旧缓存自动失效
+        from data.plugins.astrbot_plugin_star_feather.daily import _PROMPT_V
+        cache = kv["sf_daily_u1"]
+        assert cache["date"] == strftime("%Y%m%d") and cache["spirit_line"] == "AI 说的那句"
+        assert cache["spirit_sign"] == f"{PICK['card']['cn']}:1"  # 牌组指纹（卡名:正逆）
+        assert cache["prompt_v"] == _PROMPT_V  # 提示词版本号：文案迭代旧缓存自动失效
 
     def test_concurrent_misses_share_one_generated_line(self):
         """同一（用户, 牌组）并发 miss：只调一次 AI，等待者拿到同一句。"""
@@ -233,10 +233,11 @@ class TestSpiritCache:
         df = DailyFortune(_FlakyCtx(), interpreter=tarot.interpreter)
         l1 = asyncio.run(df.spirit_cached(EVENT, "u1", [PICK], "今日运势", None))
         assert l1 == "故障期间生成的那句" and len(calls) == 1
-        cache = next(v for k, v in kv.items() if k.startswith("sf_spirit_"))
-        assert cache["line"] == "故障期间生成的那句"   # 读故障也写回：覆盖写不依赖旧值
+        assert kv == {}                    # 读故障不盲写：单条记录可能已有牌与解读
         l2 = asyncio.run(df.spirit_cached(EVENT, "u1", [PICK], "今日运势", None))
-        assert l2 == l1 and len(calls) == 1           # 恢复后命中缓存：同签同句成立
+        assert l2 == l1 and len(calls) == 2  # 读恢复，但上次没写：这次重新生成并写回
+        l3 = asyncio.run(df.spirit_cached(EVENT, "u1", [PICK], "今日运势", None))
+        assert l3 == l1 and len(calls) == 2  # 之后命中缓存：同签同句成立
 
     def test_ai_fail_falls_back_static_without_cache(self):
         from time import strftime
@@ -245,7 +246,7 @@ class TestSpiritCache:
         l1 = asyncio.run(df.spirit_cached(EVENT, "u1", [PICK], "今日运势", None))
         sig = pick_signature(PICK["card"], True, "u1", strftime("%Y%m%d"))
         assert l1 == sig
-        assert not any(k.startswith("sf_spirit_") for k in kv)  # 不写缓存
+        assert kv == {}  # AI 失败不写缓存
         l2 = asyncio.run(df.spirit_cached(EVENT, "u1", [PICK], "今日运势", None))
         assert l2 == sig and len(calls) == 2  # 每次失败都再试 AI
 
@@ -293,7 +294,7 @@ class TestSpiritCache:
 # ---------- 牌灵的话：interpret.spirit_line 生成 ----------
 class TestSpiritLine:
     def _interp(self, provider, enable=True):
-        from data.plugins.astrbot_plugin_star_feather.interpret import AiInterpreter
+        from data.plugins.astrbot_plugin_star_feather.ai.chain import AiInterpreter
         return AiInterpreter(FakeContext(provider, [provider]), enable, 5, 60, "", 200)
 
     def test_success_returns_cleaned_line(self):
@@ -339,11 +340,12 @@ class TestSpiritLine:
         spirit_line 原本零条——「牌灵的话为何老回退池内签文」在日志里查不出原因。
         「只有换行使首行剥完为空」走同一条不合规分支，共用这一行日志。
         """
-        from data.plugins.astrbot_plugin_star_feather.interpret import AiInterpreter
+        from data.plugins.astrbot_plugin_star_feather.ai.chain import AiInterpreter
         long_text = "这句话故意写得很长，长到超过四十个字，专门用来触发那条不合规分支" * 2
         p1 = FakeProvider("p1", result=long_text)
         p2 = FakeProvider("p2", result="短句就位。")
-        i = AiInterpreter(FakeContext(p1, [p1, p2]), True, 5, 60, "", 200)
+        i = AiInterpreter(FakeContext(p1, [p1, p2]), True, 5, 60, "", 200,
+                                  all_providers_fallback=True)
         with caplog.at_level(logging.INFO):
             out = asyncio.run(i.spirit_line(EVENT, [(CARD, True)], "感情", None))
         assert out == "短句就位。"  # 绕开这一候选，下一候选照用
@@ -387,7 +389,7 @@ class TestSpiritPrompt:
         旧实现是手工常量配「改文案记得 +1」的注释——靠人记着的隐性契约，迟早
         漏改，漏了就是旧句复活。
         """
-        from data.plugins.astrbot_plugin_star_feather import prompts
+        from data.plugins.astrbot_plugin_star_feather.ai import prompts
         assert prompts.SPIRIT_PROMPT_V == prompts._spirit_prompt_fingerprint()
         base = prompts.SPIRIT_PROMPT_V
         monkeypatch.setattr(prompts, "_SPIRIT_TEMPLATE", prompts._SPIRIT_TEMPLATE + "改一笔")

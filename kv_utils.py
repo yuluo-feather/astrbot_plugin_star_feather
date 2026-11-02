@@ -41,3 +41,15 @@ async def kv_put(kv, key: str, value, what: str = "KV") -> bool:
     except Exception as e:
         logger.warning(f"{what}写入失败: {e}")
         return False
+
+
+async def kv_delete(kv, key: str, what: str = "KV") -> bool:
+    """删 KV；任何异常不抛，返回是否删除成功。"""
+    if not hasattr(kv, "delete_kv_data"):
+        return False  # 测试/诊断桩没有删除接口：不算故障，不写告警
+    try:
+        await kv.delete_kv_data(key)
+        return True
+    except Exception as e:
+        logger.warning(f"{what}删除失败: {e}")
+        return False
