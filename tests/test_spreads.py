@@ -1,6 +1,7 @@
 """意图判定单测：选阵 / 阵名剥离 / 祈使词剥离（intent 纯函数）。
 ——牌灵挑阵的规矩，全在这了。"""
 from data.plugins.astrbot_plugin_star_feather.intent import (
+    build_request,
     clean_question,
     select_formation,
     strip_alias,
@@ -194,3 +195,17 @@ class TestBuildRequest:
         from data.plugins.astrbot_plugin_star_feather.intent import build_request
         assert build_request("daily", "今天运势").topic == "（今日牌运）"
         assert build_request("daily", "今天财运怎么样").topic == "今天财运怎么样"
+
+
+class TestToolFormationHintAliases:
+    def test_classic_alias_is_accepted_from_tool(self):
+        req = build_request("auto", "今天天气不错", source="tool",
+                            formation_hint="圣三角")
+        spread = getattr(req, "spread", None) or getattr(req, "formation")
+        assert spread == "羽镜"
+
+    def test_unknown_hint_is_ignored(self):
+        req = build_request("auto", "今天天气不错", source="tool",
+                            formation_hint="不存在的阵")
+        spread = getattr(req, "spread", None) or getattr(req, "formation")
+        assert spread == "羽时三刻"
