@@ -11,7 +11,6 @@
 import asyncio
 import os
 import random
-import re
 
 # 导入模型：插件内一律包内相对导入，目录里不留 sys.path.insert / sys.modules.pop。
 # 顶层平铺名会让同一个文件出现两套模块身份（补丁打空、按包前缀重载清不到），pop 循环
@@ -23,9 +22,10 @@ from astrbot.api.message_components import Plain
 from astrbot.api.star import Context, Star, register
 
 from .card_render import cleanup_stale_images
-from .daily import DailyFortune, _is_daily_request
+from .daily import DailyFortune
 from .gating import LimitGate
 from .identity import resolve_sender_uid
+from .intent import KIND_DAILY, KIND_HELP, ReadingRequest, build_request, norm_topic
 from .prompts import (
     FAIL_NOTE_TOOL,
     HELP_TEXT,
@@ -34,7 +34,6 @@ from .prompts import (
     TOOL_EPILOGUE,
     resolve_persona,
 )
-from .spreads import clean_tool_question, select_formation
 from .tarot_core import StarTarot
 
 VERSION = "0.8.3"
@@ -53,48 +52,9 @@ _ACTIVE_INSTANCE_ATTR = "_sf_active_plugin_instance"
 # llm_tool_enabled 判自然语言入口开没开。不塞全量配置：读数要能一眼比对。
 _CFG_FIELD_NAMES = ("shuffle_lines", "enable_ai", "ai_timeout", "llm_tool_enabled")
 
-# 收尾句独立直发前的等待窗口（秒）：合并转发卡要在协议端上传图片、拼多消息，落地
-# 慢于紧随其后的纯文本，不等就会倒序（2026-10-13 实测命令入口 5/5 倒序）。
-# 只有转发模式需要；plain / text_only 与 AI 回退路径同走普通链消息，睡了白让用户等。
-# 现场调参：仍倒序就把这个值调大（卡片滞后的真实量级尚未测）。
-_EPILOGUE_DELAY_SECONDS = 2.0
-
-# 收尾句后台任务的强引用集合：asyncio 只对任务持弱引用，没人引用时可能被 GC 掉，
-# 收尾句就静默丢了。任务结束（含取消/异常）由 done callback 自摘。
-_EPILOGUE_TASKS: set = set()
-
-
-async def _send_epilogue_after_window(event, text: str, delay: float) -> None:
-    """等窗口再直发收尾句。异常只告警：收尾句是赠品，不许反噬已经交付的结果。"""
-    if delay > 0:
-        await asyncio.sleep(delay)
-    try:
-        await event.send(MessageChain([Plain(text)]))
-    except Exception as e:
-        logger.warning(f"收尾句独立发送失败: {e}")
-
-
-def _schedule_epilogue(event, text: str, delay: float) -> bool:
-    """把「等窗口 + 直发」放进后台任务，命令处理协程不再为此挂起。
-
-    窗口只买「合并转发卡落地慢」这一件事：结果已提交给平台，收尾句晚几秒到即可。
-    冻结 event 引用交给任务持有：AstrBot 的 send 只依赖事件对象与平台通道，不要求
-    handler 还活着。只在确实走合并转发的平台上调用（见 deliver.supports_forward）——
-    将来把请求级队列平台加进白名单时，这里还要单独判「handler 结束后能不能发」。
-
-    契约：永不抛——调度失败只告警并返回 False，由调用方退回同步直发；协程先 close，
-    免得日志里多一条 never awaited。
-    """
-    coro = _send_epilogue_after_window(event, text, delay)
-    try:
-        task = asyncio.create_task(coro)
-    except Exception as e:
-        coro.close()
-        logger.warning(f"收尾句后台任务登记失败，改用同步直发: {e}")
-        return False
-    _EPILOGUE_TASKS.add(task)
-    task.add_done_callback(_EPILOGUE_TASKS.discard)
-    return True
+# 收尾句的次序不靠窗口：命令入口收到 yield 的结果后先 `await event.send(...)`，
+# 再恢复 _run_reading 去直发收尾句——结果发送完成之后才轮得到它，次序是确定的。
+# 旧实现用固定 2 秒后台等待赌「合并转发卡先落地」，慢网络下照样会倒序（2026-11-02 复核）。
 
 
 def _cfg_fingerprint(plugin) -> str:
@@ -107,47 +67,6 @@ def _cfg_fingerprint(plugin) -> str:
     fields = " ".join(f"{n}={getattr(tarot, n, '?')!r}" for n in _CFG_FIELD_NAMES)
     return f"inst={id(plugin):#x} tarot={id(tarot):#x} {fields}"
 
-# 帮助请求判定：整句剥掉祈使词后只剩「帮助 / help / 说明」才算（"帮助" in text 的
-# 子串判定会把「帮助我做出决定」误当帮助页）。另有一条宽松分支：整段只有一句话、
-# 且带「怎么用 / 怎么玩 / 用法」也算——这类问法引导词太多，按意图词判定更稳。
-# 正则里冗余的「说说 / 讲讲」分支已删：前缀重叠会让回溯指数增长（py/redos 真阳性）；
-# 不用原子组是因为它会掐掉前缀的贪婪回退，把「说明」判成非帮助——那是改行为，不是修缺陷。
-# 防回归：语料与计时红线在 tests/test_judgement_corpus.py。
-_HELP_REQUEST_RE = re.compile(
-    r"^(?:请|帮我|给我|麻烦|来|看看|看下|查一下|查查|使用|查看|瞅瞅|"
-    r"说|讲|告诉|教|说下|讲下|说一下|讲一下)*\s*"
-    r"(?:帮助|help|帮助说明|使用说明|说明)(?:\s*(?:一下|下))?\s*[？?！!。.]*$",
-    re.IGNORECASE,
-)
-_HELP_USAGE_RE = re.compile(
-    r"^[^？?！!。]*(?:怎么用|怎么玩|怎么使用|怎么操作|用法)[？?！!。]*$"
-)
-
-
-def _is_single_line(text: str) -> bool:
-    """宽松分支的前置：整段只能有一行。
-
-    多行输入通常是粘贴过来的问题（「我最近失眠 + 换行 + 怎么用」），判成帮助页会把
-    问题整个吞掉；漏判只是走正常占卜、用户再打一句「怎么用」就进帮助了。两个方向的
-    错误严重度不对称，所以这里偏保守。用 splitlines() 认十种换行，比枚举 \\n 可靠。
-    """
-    return len(text.splitlines()) == 1
-
-
-
-def _is_help_request(text: str) -> bool:
-    """帮助判定唯一入口：两个分支任一命中即算，命令入口与语料测试共用。
-
-    别在别处复刻这段判定：复刻的那份会在调用方收紧（例如多行闸门）时失联——
-    测试继续绿，生产行为却已经变了。
-
-    两处 fullmatch 各有职责，不是同一件事的两遍：_HELP_USAGE_RE 的前置字符类允许
-    换行、尾部又没有 \\s*，只有整段匹配才拦得住尾换行；这份等价靠上面的 strip() 撑着，
-    拿掉 strip 它就会在带尾换行的输入上退化成 match。别以「看着重复」为由动它们。
-    """
-    t = (text or "").strip()
-    return bool(_HELP_REQUEST_RE.fullmatch(t)
-                or (_is_single_line(t) and _HELP_USAGE_RE.fullmatch(t)))
 
 # 牌阵定义见 spreads.py（FORMATIONS）
 
@@ -239,14 +158,14 @@ class StarFeatherPlugin(Star):
         return random.choice(SHUFFLE_LINES)
 
     async def _command_entry(self, event: AstrMessageEvent, text: str, *,
-                             err_tpl: str, helpable: bool = False,
-                             force_daily: bool = False, fixed_formation: str = "",
+                             err_tpl: str, intent_kind: str = "auto",
                              fail_note: str = "",
                              empty_fallback: str = "（未提具体问题，请作一般运势解读）"):
-        """命令入口公共流程（/占卜 与 /单抽 共用）：帮助 → 限流 → 抽牌 → 发送。
+        """命令入口公共流程（/占卜、/单抽、/今日牌运 共用）：意图判定 → 限流 → 抽牌 → 发送。
 
         err_tpl 是完整的用户侧友好文案（不含异常细节——异常只进日志，
-        服务器路径/内部结构不给用户看），其余差异由参数控制。
+        服务器路径/内部结构不给用户看）。intent_kind 只给「强制单抽 / 强制今日牌运」
+        这类命令用；/占卜 走 auto，由 intent.build_request 判定意图。
         前缀/触发门槛由框架先行把关（CommandFilter 命中才进得来），
         这里不再有前缀检查与提示分支——别再把「必须带 /」的旧逻辑加回来。
         """
@@ -257,27 +176,29 @@ class StarFeatherPlugin(Star):
         self._note_entry_binding("command")
         event.should_call_llm(True)
         try:
-            text_norm = (text or "").strip()
-            if helpable and _is_help_request(text_norm):
+            request = build_request(intent_kind, text, daily_enabled=self.daily_fixed)
+            if request.kind == KIND_HELP:
                 yield event.plain_result(self._help())
                 return
             block = await self.gate.check(event, for_command=True)
             if block:
                 yield event.plain_result(block)
                 return
-            # 统一抽牌 + 统一流程：运势类走今日固定，具体问题自由随机
-            is_daily, daily_uid, formation, positions, picks = await self._pick_reading(
-                event, text, force_daily=force_daily, fixed_formation=fixed_formation)
+            daily_uid, formation, positions, picks = await self._pick_reading(event, request)
             async for r in self._run_reading(
-                    event, formation, positions, picks, text,
-                    is_daily=is_daily, daily_uid=daily_uid,
+                    event, formation, positions, picks, request.question,
+                    is_daily=request.kind == KIND_DAILY and request.fixed,
+                    daily_uid=daily_uid, topic=request.topic,
                     fail_note=fail_note, empty_fallback=empty_fallback,
                     # 命令入口恒发收尾句（工具入口不发，由 Agent Loop 的 LLM 回复承担）。
                     # 这里刻意写死 True 而不是暴露成 _command_entry 的参数：没有「命令
                     # 入口不发收尾」的场景，暴露只会变成死参数或默认 False 的静默回归。
                     # 红线：tests/test_core.py::TestCommandEntryEpilogueEndToEnd
                     epilogue=True):
-                yield r
+                # 先等结果真正发出去，再恢复 _run_reading 去发收尾句：yield 出去的结果要等
+                # 整个 handler 结束后的响应阶段才发送，若不在这里 await，收尾句会抢在
+                # 合并转发卡前面落地（2026-10-13 实测命令入口 5/5 倒序；2026-11-02 改直发）。
+                await event.send(r)
         except Exception as e:
             logger.error(f"命令占卜失败: {e}", exc_info=True)
             # 异常细节只进日志：err_tpl 是纯友好文案，不把路径/内部结构发给用户
@@ -288,17 +209,24 @@ class StarFeatherPlugin(Star):
         async for r in self._command_entry(
                 event, text,
                 err_tpl="哼，这场占卜断了。牌灵今天状态不好，换个时候再来问。",
-                helpable=True,
                 fail_note="📖 解读：\n（AI 今天闹脾气不肯开口，牌面先给你，自己琢磨~）"):
             yield r
 
-    @filter.command("单抽", desc="抽取一张塔罗牌并解读（默认当天固定）")
+    @filter.command("单抽", desc="快速抽一张牌（每次现抽，不按天固定）")
     async def single(self, event: AstrMessageEvent, text: str = ""):
         async for r in self._command_entry(
                 event, text,
                 err_tpl="单抽断线了。牌灵今天不太配合，晚点再试。",
-                helpable=True,
-                force_daily=True, fixed_formation="羽签",
+                intent_kind="single"):
+            yield r
+
+    @filter.command("今日牌运", alias={"运势", "每日一签"},
+                    desc="今天的固定牌运（同一天同一人始终同一张牌）")
+    async def daily(self, event: AstrMessageEvent, text: str = ""):
+        async for r in self._command_entry(
+                event, text,
+                err_tpl="今日牌运断线了。牌灵今天不太配合，晚点再试。",
+                intent_kind="daily",
                 empty_fallback="（今日牌运）"):
             yield r
 
@@ -317,7 +245,7 @@ class StarFeatherPlugin(Star):
             logger.warning(f"星羽工具直发失败: {e}")
 
     @filter.llm_tool(name="star_feather_divine")
-    async def divine_tool(self, event: AstrMessageEvent):
+    async def divine_tool(self, event: AstrMessageEvent, formation: str = ""):
         """星羽塔罗占卜：78 张塔罗牌抽牌，输出牌面图与解读。
 
         仅当用户**明确要求**塔罗占卜/抽牌/看运势时调用，例如「帮我算一卦」「抽张牌看看」
@@ -328,6 +256,11 @@ class StarFeatherPlugin(Star):
         发送约定：内容一律 event.send 直发，结尾 yield 一个字符串给 Agent Loop 生成收尾回复。
         不能 yield MessageEventResult 或 None —— 否则 runner 判定无返回值并 DONE，respond
         空消息跳过，收口钩子不触发、群聊防并发门闩死锁（见 _tool_send）。
+
+        Args:
+            formation(string): 牌阵名，只能是这四个之一：羽签（单张问询）、羽时三刻（时间之流）、
+                羽镜（圣三角）、恋羽十字（恋人十字）。用户明确提到牌阵、或问题重心清楚时填写；
+                拿不准就留空，插件会按问题规则自动选择。
         """
         self._note_entry_binding("tool")
         # 打开开关：运行期判断（装饰器静态注册无法卸载，见 __init__ 注释）
@@ -339,9 +272,11 @@ class StarFeatherPlugin(Star):
             return
         # message_str 属性异常/缺失时按空文本处理（保 Agent Loop 不中断）
         text = (getattr(event, "message_str", "") or "").strip()
-        # 帮助请求不占卜：模型偶尔会把「占卜怎么用」也调到这里，
-        # 命中帮助页就直发并结束，别真抽一副牌
-        if _is_help_request(text):
+        # 意图判定收在 intent 里：帮助页不占卜（模型偶尔会把「占卜怎么用」也调到这里）；
+        # 无信号时采纳模型顺手填的 formation（枚举外忽略），规则已识别阵型时不采纳。
+        request = build_request("auto", text, daily_enabled=self.daily_fixed,
+                                source="tool", formation_hint=formation)
+        if request.kind == KIND_HELP:
             await self._tool_send(event, self._help())
             yield "帮助页已发送。请自然回应一句，不必再调用工具。"
             return
@@ -370,10 +305,12 @@ class StarFeatherPlugin(Star):
         note = random.choice(TOOL_EPILOGUE)
         try:
             # 统一抽牌 + 统一流程（与 /占卜 同一套逻辑，行为一致）
-            is_daily, daily_uid, formation, positions, picks = await self._pick_reading(event, text)
-            async for r in self._run_reading(event, formation, positions, picks, text,
-                                             is_daily=is_daily, daily_uid=daily_uid,
-                                             fail_note=FAIL_NOTE_TOOL):
+            daily_uid, formation, positions, picks = await self._pick_reading(event, request)
+            async for r in self._run_reading(
+                    event, formation, positions, picks, request.question,
+                    is_daily=request.kind == KIND_DAILY and request.fixed,
+                    daily_uid=daily_uid, topic=request.topic,
+                    fail_note=FAIL_NOTE_TOOL):
                 # 直发原结果对象而非拆包重装：它是 MessageChain 的子类（另带 use_t2i_ /
                 # result_content_type），拆出 chain 再套一层会把这些字段静默丢回默认值；
                 # 日后 _run_reading 换产出形态也不会有「探不到 chain 就悄悄不发」的哑路径。
@@ -386,29 +323,24 @@ class StarFeatherPlugin(Star):
 
     # ---------- 统一抽牌与流程（三入口共用） ----------
 
-    async def _pick_reading(self, event: AstrMessageEvent, text: str,
-                            force_daily: bool = False,
-                            fixed_formation: str = "") -> tuple:
-        """统一抽牌入口：决定「抽什么牌、怎么抽」，三入口共用。
+    async def _pick_reading(self, event: AstrMessageEvent,
+                            request: ReadingRequest) -> tuple:
+        """统一抽牌入口：按意图决定「抽什么牌、怎么抽」，三入口共用。
 
-        - 运势类请求（运势/运气/牌运等词，或 /单抽 的 force_daily）且 daily_fixed 开启
-          → 今日固定牌运（同一天同一人同一张牌）；
-        - 具体问题、开关关闭或固定不可用 → 自由随机；随机时 fixed_formation 可锁定阵型
-          （/单抽 固定羽签），否则按问题选阵。
+        request 由 intent.build_request 产出：kind=daily 且 fixed 时走今日固定牌运
+        （同一天同一人同一张牌）；其余按 request.formation 自由抽。
+        固定牌运拿不到（无用户标识 / KV 不可用）时回退自由随机，不拦占卜主流程。
 
-        返回 (is_daily, daily_uid, formation, positions, picks)；is_daily=True 时解读走
-        当日缓存，False 走 AI 现场解读。
+        返回 (daily_uid, formation, positions, picks)。
         """
         daily_uid = resolve_sender_uid(event)
-        is_daily = self.daily_fixed and (force_daily or _is_daily_request(text))
-        if is_daily:
+        if request.kind == KIND_DAILY and request.fixed:
             picked = await self.daily.pick_cached(daily_uid)
             if picked:
-                return True, daily_uid, *picked
+                return daily_uid, *picked
             logger.warning("每日牌运不可用（无用户标识），回退自由随机")
-        formation = fixed_formation or select_formation(text)  # 选阵看原话，口语不干扰关键词
-        positions, picks = self.tarot._draw(formation)
-        return False, daily_uid, formation, positions, picks
+        positions, picks = self.tarot._draw(request.formation)
+        return daily_uid, request.formation, positions, picks
 
     async def _ensure_image(self, img: str | None, formation: str,
                             positions: list[str], picks: list[dict]) -> str | None:
@@ -448,11 +380,13 @@ class StarFeatherPlugin(Star):
                            picks: list[dict], question: str, is_daily: bool = False,
                            daily_uid: str = "", fail_note: str = "",
                            empty_fallback: str = "（未提具体问题，请作一般运势解读）",
-                           epilogue: bool = False):
-        """统一占卜流程：洗牌提示 → 两段 AI（牌灵的话 + 解读，并发）→ 渲染牌面 → 分段发送。
+                           epilogue: bool = False, topic: str = ""):
+        """统一占卜流程：洗牌提示 → 两段 AI（牌灵的话 + 解读，默认并发）→ 渲染牌面 → 分段发送。
 
         两段 AI 共用同一笔总预算（AiBudget）；解读来源：今日固定且已知用户时走当天
         解读缓存，否则 AI 现场解读（失败由 _deliver 回退牌义）。
+        question 是 intent 已清洗好的问题主体；topic 是解读缓存的主题分桶键
+        （今日牌运用），未传时按 question 现算。
         洗牌提示、发送模式等开关只在本函数生效，入口无需感知；单张牌阵不发洗牌提示。
         """
         # 洗牌提示不走 yield，用 event.send 独立发出：命令入口每个 yield 都会各发一次，
@@ -465,17 +399,24 @@ class StarFeatherPlugin(Star):
             except Exception as e:
                 logger.warning(f"洗牌提示独立发送失败，降级并入最终结果: {e}")
                 preface = hint
-        clean = clean_tool_question(question)  # 送 AI 的问题：剥祈使词+阵名（spreads）
+        clean = (question or "").strip()  # intent 已清洗过；这里只兜空白的首尾
+        topic = topic or norm_topic(clean)
         sig_text = ""
         # 一次占卜只掷一次骰子：牌灵的话与解读正文必须是同一人格（random 各自解析会
         # 出现「牌灵傲娇、正文温柔」两副腔调），这里解析一次，全路径共用。
-        persona_eff = resolve_persona(self.tarot.ai_persona)
+        # 再按（用户, 日期）固定：同一天换个主题再问也还是同一人格——牌灵的话按牌组缓存、
+        # 解读按主题分桶缓存，不固定种子时同一天几段正文会各掷各的骰子（2026-11-02）。
+        clock = getattr(self.tarot, "clock", None)
+        persona_seed = (f"{daily_uid}|{clock.today()}"
+                        if daily_uid and clock is not None else None)
+        persona_eff = resolve_persona(self.tarot.ai_persona, seed=persona_seed)
         # 一次占卜一笔 AI 总预算（ai.ai_budget_seconds）：候选重试与供应商回退都不重置
         # 截止点；它只管 AI 阶段，渲染在预算窗口之外。
         budget = self.tarot.new_budget()
-        # 两段 AI 没有数据依赖、共用同一个**绝对**截止点：并发后耗时 ≈ max(两段)，
-        # 串行等于白等一个 LLM 往返。失败语义不变，任一段抛异常仍旧冒泡到入口兜底。
-        spirit_call = (self.daily.spirit_cached(event, daily_uid, picks, clean, persona_eff,
+        # 两段 AI 没有数据依赖、共用同一个**绝对**截止点：默认并发，耗时 ≈ max(两段)，
+        # 串行等于白等一个 LLM 往返；ai.parallel_stages=false 时才改成顺序执行。
+        # 失败语义不变，任一段抛异常仍旧冒泡到入口兜底。
+        spirit_call = (self.daily.spirit_cached(event, daily_uid, picks, topic, persona_eff,
                                                 budget)
                        if picks else None)
         if is_daily and daily_uid:
@@ -487,8 +428,22 @@ class StarFeatherPlugin(Star):
                 persona_eff=persona_eff, budget=budget)
         if spirit_call is None:
             sig_text, interp = "", await interp_call
+        elif self.tarot.ai_parallel_stages:
+            # TaskGroup 而不是 gather：任一段抛异常时兄弟任务会被取消，不会在后台继续
+            # 烧 AI 预算（gather 只把异常抛给调用方，另一段照跑不误）。
+            async with asyncio.TaskGroup() as tg:
+                spirit_task = tg.create_task(spirit_call)
+                interp_task = tg.create_task(interp_call)
+            sig_text, interp = spirit_task.result(), interp_task.result()
         else:
-            sig_text, interp = await asyncio.gather(spirit_call, interp_call)
+            # ai.parallel_stages=false：顺序执行，同一 Provider 上不会同时压两个请求
+            # （单槽本地模型 / 限流严格的环境）。预算与截止点仍是同一笔。
+            try:
+                sig_text = await spirit_call
+            except BaseException:
+                interp_call.close()  # 未 await 的协程要关掉，别在日志里留 never awaited
+                raise
+            interp = await interp_call
         if sig_text:
             # 牌灵的话随 preface 进结果：AI 全失败回退牌义时，牌灵的话一句不丢
             preface = f"{preface}\n{sig_text}" if preface else sig_text
@@ -513,21 +468,13 @@ class StarFeatherPlugin(Star):
                                            fail_note=fail_note, preface=preface):
             yield r
         # 收尾句独立直发，不并入合并转发（工具入口 epilogue=False，收尾交给 Agent Loop）；
-        # send 失败仅告警。转发卡落地慢于紧随其后的纯文本，所以先等一个窗口——窗口放在
-        # 后台任务里等，handler 立刻收尾，用户不为一句收尾多等两秒。
+        # send 失败仅告警。次序由调用方保证：命令入口对每个 yield 的结果 await event.send
+        # 完成后才恢复本生成器，所以这一句必然排在结果之后——不再靠固定窗口赌卡片落地时间。
         if epilogue_text:
-            # 只有合并转发需要等：plain / text_only 与 AI 回退路径都是普通链消息，
-            # 提交次序即落地次序。用 forward_for 而不是裸配置：平台收不下 Nodes 时
-            # （WebChat）实际走普通链消息，不该再等；后台任务在那边也不适用
-            # （handler 结束后请求队列会被移除）。
-            forwarded = bool(interp) and self.tarot.deliverer.forward_for(event)
-            scheduled = (forwarded and _EPILOGUE_DELAY_SECONDS > 0
-                         and _schedule_epilogue(event, epilogue_text, _EPILOGUE_DELAY_SECONDS))
-            if not scheduled:
-                try:
-                    await event.send(MessageChain([Plain(epilogue_text)]))
-                except Exception as e:
-                    logger.warning(f"收尾句独立发送失败: {e}")
+            try:
+                await event.send(MessageChain([Plain(epilogue_text)]))
+            except Exception as e:
+                logger.warning(f"收尾句独立发送失败: {e}")
 
 
     # ---------- 今日固定牌运（实现全在 daily.py，入口层不设转发层） ----------

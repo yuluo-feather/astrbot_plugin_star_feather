@@ -11,17 +11,19 @@
 import time
 
 import pytest
-from data.plugins.astrbot_plugin_star_feather.daily import _is_daily_request
-from data.plugins.astrbot_plugin_star_feather.main import _is_help_request
+from data.plugins.astrbot_plugin_star_feather.intent import (
+    is_daily_request,
+    is_help_request,
+)
 
 
 def is_help(text: str) -> bool:
-    """帮助判定入口 = main._is_help_request（与生产同一个函数）。
+    """帮助判定入口 = intent.is_help_request（与生产同一个函数）。
 
     旧版在这里复刻判定逻辑，于是 main 侧收紧（多行闸门）时测试继续绿、
     生产行为已变——复刻的那份总会失联。
     """
-    return _is_help_request(text)
+    return is_help_request(text)
 
 
 # ---------- 帮助请求判定 ----------
@@ -73,7 +75,7 @@ class TestHelpJudgement:
 
 # ---------- 每日牌运判定 ----------
 class TestDailyJudgement:
-    """_is_daily_request：明确运势词即算；泛时间词须无具体主题。"""
+    """is_daily_request：明确运势词即算；泛时间词须无具体主题。"""
 
     @pytest.mark.parametrize("q", [
         # 明确运势词（含英文）
@@ -84,7 +86,7 @@ class TestDailyJudgement:
         # 修复项：泛时间词缺料（这个月/这两天/这段时间——不含「这周/本周」，
         # 它们与「这周六见面」类事件问法无法区分，宁可漏网不误伤，见 not_trigger）
         "这个月如何", "这两天怎么样", "这段时间还好吗",
-        # 运势词 + 主题：仍算牌运（牌固定，解读按主题分缓存，见 _norm_topic）
+        # 运势词 + 主题：仍算牌运（牌固定，解读按主题分缓存，见 norm_topic）
         "今天感情运势",
         # 摘「他」的正向登记（2026-10-02，判据见 daily.SPECIFIC_WORDS 上方注释）：
         # 这两条从前因命中单字「他」（其他／吉他）被判成具体问题，摘后归泛问。
@@ -94,7 +96,7 @@ class TestDailyJudgement:
         "最近其他事情怎么样", "今天弹吉他怎么样",
     ])
     def test_trigger(self, q):
-        assert _is_daily_request(q), f"应当判为每日牌运: {q!r}"
+        assert is_daily_request(q), f"应当判为每日牌运: {q!r}"
 
     @pytest.mark.parametrize("q", [
         # 泛时间词 + 具体主题：按具体问题选阵（v0.5.3 踩过的坑）
@@ -106,6 +108,11 @@ class TestDailyJudgement:
         "最近我们的关系",
         "这个月考研如何",
         "我最近和同事的关系",
+        # 选阵词表新增的事业词自动成为具体主题（SPECIFIC_WORDS 由 KEYWORD_MAP 派生）：
+        # 不能因为「最近 + 怎么样」的泛问句式就被吞进固定牌运。
+        "最近想转行怎么样",
+        "最近要不要跳槽",
+        "最近情感怎么样",
         # 主题词单独出现（他/她/我们/喜欢 等）不落入泛问
         "最近的他",
         "最近喜欢上了剧本杀",
@@ -119,13 +126,13 @@ class TestDailyJudgement:
         "占卜",
     ])
     def test_not_trigger(self, q):
-        assert not _is_daily_request(q), f"不应当判为每日牌运: {q!r}"
+        assert not is_daily_request(q), f"不应当判为每日牌运: {q!r}"
 
     def test_known_edge_has_fortune_word_is_daily(self):
         """已知边界（锁定现状）：「他有运气吗」命中的是 DAILY 词「运气」，
         落入今日牌运而非具体占卜——口语「运气」作宾语时无法与「运势查询」区分，
         收益 vs 规则复杂度不成比例，锁定不修。"""
-        assert _is_daily_request("他有运气吗")
+        assert is_daily_request("他有运气吗")
 
 
 class TestDailyEventAttribution:
@@ -148,7 +155,7 @@ class TestDailyEventAttribution:
         "我最近老是丢东西，是不是运气问题",
     ])
     def test_event_attribution_not_daily(self, q):
-        assert not _is_daily_request(q), f"事件归因式不应判为每日牌运: {q!r}"
+        assert not is_daily_request(q), f"事件归因式不应判为每日牌运: {q!r}"
 
     @pytest.mark.parametrize("q", [
         # 运势主题在前：真·运势查询，「是不是」是追问语气而非事件归因
@@ -163,7 +170,7 @@ class TestDailyEventAttribution:
         "今天是不是运气好",
     ])
     def test_still_daily(self, q):
-        assert _is_daily_request(q), f"仍是每日牌运: {q!r}"
+        assert is_daily_request(q), f"仍是每日牌运: {q!r}"
 
 
 class TestDailyGenericWhitelist:
@@ -188,7 +195,7 @@ class TestDailyGenericWhitelist:
         "今天会下雨吗，如何出门",
     ])
     def test_event_state_not_daily(self, q):
-        assert not _is_daily_request(q), f"事件/状态描述不应判为每日牌运: {q!r}"
+        assert not is_daily_request(q), f"事件/状态描述不应判为每日牌运: {q!r}"
 
     @pytest.mark.parametrize("q", [
         # a. 泛问句式
@@ -199,7 +206,7 @@ class TestDailyGenericWhitelist:
         "每日塔罗", "今天来一签", "每日一签",
     ])
     def test_generic_ask_still_daily(self, q):
-        assert _is_daily_request(q), f"泛问/签文类仍是每日牌运: {q!r}"
+        assert is_daily_request(q), f"泛问/签文类仍是每日牌运: {q!r}"
 
 
 class TestHelpAntiRegression:

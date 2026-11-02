@@ -17,6 +17,7 @@ MIN_SEGMENT_SIZE = 50           # 分段长度下限
 DEFAULT_AI_TIMEOUT = 30         # 单次 AI 解读超时（秒）；0 = 不限制单个请求
 MIN_AI_TIMEOUT = 5              # 非 0 取值的下限：不足 5 秒按 5 秒算（0 是特例，表示不限制）
 DEFAULT_AI_BUDGET = 120         # 单次占卜的 AI 总预算（秒，ai.ai_budget_seconds）：所有 AI 阶段共用一个截止点
+DEFAULT_AI_PARALLEL_STAGES = True  # 牌灵的话与解读两段 AI 并发（ai.parallel_stages）：关掉则顺序执行
 MAX_AI_BUDGET = 24 * 3600       # 预算上限（秒）：一次占卜超过一天没有意义，再大也只会让截止点算不出来
 AI_BUDGET_MIN_ATTEMPT = 1.0     # 剩余预算不足此值（秒）就不再发起新请求——注定超时，只是白等一次
 DEFAULT_SPIRIT_STAGE_BUDGET = 20  # 牌灵的话的阶段上限（秒）：次要内容不许独吞整笔预算
@@ -159,6 +160,10 @@ class TarotSettings:
         # 表示「不限制」，其余坏值一律回退默认，别让取整/溢出把保护悄悄关掉
         self.ai_budget = _budget_seconds(
             _cfg_get(config, "ai", "ai_budget_seconds", DEFAULT_AI_BUDGET))
+        # 两段 AI 是否并发（ai.parallel_stages）：默认开，耗时取较慢的一段；
+        # 单槽本地模型或对同一 Provider 限流严格的环境可关掉，改成顺序执行。
+        self.ai_parallel_stages = _cfg_bool(config, "ai", "parallel_stages",
+                                            DEFAULT_AI_PARALLEL_STAGES)
         # 自然语言入口开关：默认值在 settings，工具注册是静态的，开关只在运行期判断（见 main.divine_tool）
         self.llm_tool_enabled = _cfg_bool(config, "tool", "llm_tool_enabled", True)
         self.llm_tool_cooldown = _cfg_int(config, "tool", "llm_tool_cooldown",

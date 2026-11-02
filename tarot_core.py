@@ -43,6 +43,7 @@ class StarTarot:
     ai_max_len: int
     ai_persona: str
     ai_budget: int
+    ai_parallel_stages: bool
     structure_check: str
 
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -54,10 +55,10 @@ class StarTarot:
                    "disclaimer", "daily_fixed", "daily_card", "ai_timeout", "ai_cooldown",
                    "llm_tool_enabled", "llm_tool_cooldown", "cmd_rate_limit",
                    "daily_count_limit", "ai_provider_id", "ai_max_len", "ai_persona",
-                   # 末三项：牌灵人设（只改口吻，见 prompts.build_system_prompt）、
-                   # 单次占卜的 AI 总预算（见 interpret.AiBudget）与解读结构校验强度
-                   # （见 interpret.AiInterpreter._accept_structure）
-                   "ai_budget", "structure_check"):
+                   # 末四项：牌灵人设（只改口吻，见 prompts.build_system_prompt）、
+                   # 单次占卜的 AI 总预算（见 interpret.AiBudget）、两段 AI 是否并发
+                   # （main._run_reading）与解读结构校验强度（见 interpret._accept_structure）
+                   "ai_budget", "ai_parallel_stages", "structure_check"):
             setattr(self, _k, getattr(st, _k))
         # 日期边界的唯一来源（⑨）：时区优先取框架全局配置（clock.resolve_timezone），
         # 拿不到才跟随本地。放在子组件之前——daily / gating 都从这里取同一份，

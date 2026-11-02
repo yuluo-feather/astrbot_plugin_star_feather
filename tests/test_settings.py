@@ -84,7 +84,8 @@ class TestTarotSettings:
         assert fields <= set(vars(StarTarot(None, None))), "setattr 循环漏字段：实例上少了属性"
 
     def test_grouped_values(self):
-        cfg = {"ai": {"ai_timeout": 7, "enable_ai": False, "question_max_len": 0},
+        cfg = {"ai": {"ai_timeout": 7, "enable_ai": False, "question_max_len": 0,
+                      "parallel_stages": False},
                "output": {"send_mode": "plain", "disclaimer": "x", "daily_fixed": False},
                "limit": {"daily_count": 3},
                "tool": {"llm_tool_enabled": False}}
@@ -93,6 +94,14 @@ class TestTarotSettings:
         assert s.send_mode == "plain" and s.ai_max_len == 0
         assert s.daily_count_limit == 3 and s.disclaimer == "x" and s.daily_fixed is False
         assert s.llm_tool_enabled is False
+        assert s.ai_parallel_stages is False
+
+    def test_parallel_stages_defaults_on(self):
+        """两段 AI 默认并发（ai.parallel_stages=true），关掉才顺序执行。"""
+        from data.plugins.astrbot_plugin_star_feather.settings import (
+            DEFAULT_AI_PARALLEL_STAGES,
+        )
+        assert TarotSettings(None).ai_parallel_stages is DEFAULT_AI_PARALLEL_STAGES
 
     def test_negative_question_max_len_falls_back_to_default(self):
         """负数不是「更不压缩」：坏值回默认，只有 0 才表示明确关闭截断。"""

@@ -516,6 +516,18 @@ class TestWrapAndSignatureLines:
         lines = card_render._wrap_text(d, long_text, card_render._load_font(22), 60)
         assert len(lines) > 1 and "".join(lines) == long_text  # 拆行不丢字
 
+    def test_wrap_text_avoids_single_char_last_line(self):
+        """均衡断行：最后一行不能只剩一个字（「延迟的快 / 乐」），两行都不孤零零。"""
+        d = self._draw()
+        font = card_render._load_font(22)
+        text = "延迟的快乐向前走"
+        # 找一个恰好把末字挤到第二行的宽度
+        max_w = d.textlength(text[:-1], font=font)
+        lines = card_render._wrap_text(d, text, font, max_w)
+        assert len(lines) == 2, lines
+        assert len(lines[0]) > 1 and len(lines[1]) > 1
+        assert "".join(lines) == text
+
     def test_signature_line_oversized_glyph_terminates(self):
         """单字宽于画布必须有限步结束：旧实现 cut 恒 0、seg 长度不减 → 死循环，
         而本函数跑在 to_thread 里，触发即静默挂死一个线程池槽位。"""

@@ -8,11 +8,12 @@ import asyncio
 import types
 
 import pytest
-from data.plugins.astrbot_plugin_star_feather.daily import (
-    _daily_pick,
-    _is_daily_request,
-)
+from data.plugins.astrbot_plugin_star_feather.daily import _daily_pick
 from data.plugins.astrbot_plugin_star_feather.dailylines import pick_signature
+from data.plugins.astrbot_plugin_star_feather.intent import (
+    build_request,
+    is_daily_request,
+)
 from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
 from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
 from data.plugins.astrbot_plugin_star_feather.tarot_data import (
@@ -26,29 +27,29 @@ T = StarTarot.__new__(StarTarot)  # 绕过 __init__（不依赖 Context），供
 # ---------- 今日固定牌运 ----------
 class TestDailyRequest:
     def test_hit_fortune_words(self):
-        assert _is_daily_request("看看今天的运势")
-        assert _is_daily_request("今日运势怎么样")
-        assert _is_daily_request("最近运气不错吧")
-        assert _is_daily_request("来张每日牌运")
-        assert _is_daily_request("daily luck?")
+        assert is_daily_request("看看今天的运势")
+        assert is_daily_request("今日运势怎么样")
+        assert is_daily_request("最近运气不错吧")
+        assert is_daily_request("来张每日牌运")
+        assert is_daily_request("daily luck?")
 
     def test_specific_questions_not_daily(self):
         # 「今天她理我吗」是具体问题，不是运势请求
-        assert not _is_daily_request("今天她理我吗")
-        assert not _is_daily_request("我和她的感情")
-        assert not _is_daily_request("下周面试")
-        assert not _is_daily_request("")
+        assert not is_daily_request("今天她理我吗")
+        assert not is_daily_request("我和她的感情")
+        assert not is_daily_request("下周面试")
+        assert not is_daily_request("")
 
     def test_time_words_with_specific_topic_not_daily(self):
         # 「最近/近期」不是运势词：带具体主题的问题是具体请求，
         # 不该被吞进今日固定牌（踩过：问什么都返回同一张牌同一段解读）
-        assert not _is_daily_request("最近她对我什么感觉")
-        assert not _is_daily_request("我最近的学业怎么样")
-        assert not _is_daily_request("近期和他复合还有可能吗")
-        assert not _is_daily_request("最近和男朋友吵架了，占卜一下关系")
-        assert not _is_daily_request("今天她理我吗")  # 与上同旨：时间词+主题词
-        assert _is_daily_request("最近怎么样")  # 无主题泛问 → 当日牌运
-        assert _is_daily_request("每日一签")
+        assert not is_daily_request("最近她对我什么感觉")
+        assert not is_daily_request("我最近的学业怎么样")
+        assert not is_daily_request("近期和他复合还有可能吗")
+        assert not is_daily_request("最近和男朋友吵架了，占卜一下关系")
+        assert not is_daily_request("今天她理我吗")  # 与上同旨：时间词+主题词
+        assert is_daily_request("最近怎么样")  # 无主题泛问 → 当日牌运
+        assert is_daily_request("每日一签")
 
 
 class TestDailyPick:
@@ -83,7 +84,7 @@ class TestDailyPick:
 
 # ---------- 统一抽牌 _pick_reading ----------
 class TestPickReading:
-    """stub 插件实例：验证「今日固定 vs 自由随机」的分流规则。"""
+    """stub 插件实例：验证「今日固定 vs 自由随机」的分流规则（由 ReadingRequest 决定）。"""
 
     @staticmethod
     def _evt(uid="u1"):
@@ -105,44 +106,41 @@ class TestPickReading:
     def test_daily_hit(self):
         cached = ("羽签", ["你的当下"], [PICK])
         p = self._plugin(cached=cached)
-        r = asyncio.run(p._pick_reading(self._evt(), "看看今日运势"))
-        assert r[0] is True and r[1] == "u1" and r[2] == "羽签" and r[3] == ["你的当下"]
+        req = build_request("auto", "看看今日运势")
+        assert req.kind == "daily" and req.fixed
+        r = asyncio.run(p._pick_reading(self._evt(), req))
+        assert r[0] == "u1" and r[1] == "羽签" and r[2] == ["你的当下"]
 
     def test_daily_disabled_falls_to_random(self):
+        req = build_request("auto", "今日运势", daily_enabled=False)
+        assert req.kind == "spread"
         p = self._plugin(daily_fixed=False, cached=("羽签", ["你的当下"], [PICK]))
-        r = asyncio.run(p._pick_reading(self._evt(), "今日运势"))
-        assert r[0] is False
+        r = asyncio.run(p._pick_reading(self._evt(), req))
+        assert r[1] == "羽时三刻"
 
-    def test_single_force_daily(self):
+    def test_single_request_never_uses_daily_cache(self):
+        req = build_request("single", "")
+        assert req.kind == "single" and not req.fixed
         p = self._plugin(cached=("羽签", ["你的当下"], [PICK]))
-        r = asyncio.run(p._pick_reading(self._evt(), "", force_daily=True))
-        assert r[0] is True
+        r = asyncio.run(p._pick_reading(self._evt(), req))
+        assert r[1] == "羽签"
 
     def test_cache_miss_falls_back_random(self):
         p = self._plugin(cached=None)
-        r = asyncio.run(p._pick_reading(self._evt(), "今日运势"))
-        assert r[0] is False and r[2] == "羽时三刻"  # 运势词经兜底落羽时三刻
+        req = build_request("auto", "今日运势")
+        r = asyncio.run(p._pick_reading(self._evt(), req))
+        assert r[1] == "羽签"  # 固定牌运不可用 → 按请求里的羽签自由抽
 
-    def test_specific_question_random_with_fixed_formation(self):
+    def test_specific_question_uses_selected_formation(self):
         p = self._plugin()
-        r = asyncio.run(p._pick_reading(self._evt(), "我和她的感情", fixed_formation="羽签"))
-        assert r[0] is False and r[2] == "羽签"
+        req = build_request("auto", "考研复习计划")
+        assert req.formation == "羽镜"
+        r = asyncio.run(p._pick_reading(self._evt(), req))
+        assert r[1] == "羽镜"
 
-    def test_specific_question_selects_formation(self):
-        p = self._plugin()
-        r = asyncio.run(p._pick_reading(self._evt(), "考研复习计划"))
-        assert r[0] is False and r[2] == "羽镜"
-
-# ---------- 收尾句窗口：测试里不睡墙钟 ----------
-@pytest.fixture
-def no_epilogue_delay(monkeypatch):
-    """把收尾句窗口清零：走命令入口的用例不必为它白等两秒。
-
-    窗口本身另有专测（TestEpilogueWindow）；这里只是别让每个命令入口用例睡墙钟——
-    那种慢会随用例数线性增长，而且测不到任何行为。
-    """
-    from data.plugins.astrbot_plugin_star_feather import main as sf_main
-    monkeypatch.setattr(sf_main, "_EPILOGUE_DELAY_SECONDS", 0)
+# ---------- 收尾句次序：结果发送完成之后才轮到收尾句 ----------
+# 不再有「等窗口」：_command_entry 对每个 yield 结果 await event.send，完成后才恢复
+# _run_reading 去直发收尾句。窗口那套（固定 2 秒赌合并转发卡先落地）慢网络下仍会倒序。
 
 # ---------- 统一流程 _run_reading ----------
 class _FakeTarot:
@@ -153,6 +151,7 @@ class _FakeTarot:
     deliverer = types.SimpleNamespace(forward_result=False,
                                       forward_for=lambda event: False)
     ai_persona = "off"  # 牌灵人设：main 的 resolve_persona 从这里取
+    ai_parallel_stages = True  # 两段 AI 并发开关（ai.parallel_stages）
 
     def new_budget(self):
         # 真实现委托 AiInterpreter（tarot_core.StarTarot.new_budget）：桩只需要「有个
@@ -255,6 +254,52 @@ class TestRunReading:
         out = self._collect(p._run_reading(self._evt(), "羽签", ["你的当下"], [PICK], "问感情"))
         assert out[0] == "[sig]AI"
 
+    def test_parallel_stages_switch_serializes(self):
+        """ai.parallel_stages=false：牌灵的话跑完才开解读，同一 Provider 不会同时压两个请求。"""
+        p = self._plugin(hint=False)
+        p.tarot.ai_parallel_stages = False
+        order = []
+
+        async def fake_spirit(event, uid, picks, clean, persona_eff, budget=None):
+            order.append("spirit-start")
+            await asyncio.sleep(0)
+            order.append("spirit-end")
+            return "sig"
+
+        async def fake_interpret(ev, fmt, pos, picks, clean, persona_eff=None, budget=None):
+            order.append("interp-start")
+            return "AI"
+
+        p.daily.spirit_cached = fake_spirit
+        p.tarot._ai_interpret = fake_interpret
+        out = self._collect(p._run_reading(self._evt(), "羽签", ["你的当下"], [PICK], "问感情"))
+        assert order == ["spirit-start", "spirit-end", "interp-start"]
+        assert out[0] == "[sig]AI"
+
+    def test_parallel_stage_exception_cancels_sibling(self):
+        """一段抛异常时另一段必须被取消：gather 只抛不取消，后台会继续烧 AI 预算。"""
+        p = self._plugin(hint=False)
+        spirit_started = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        async def fake_spirit(event, uid, picks, clean, persona_eff, budget=None):
+            spirit_started.set()
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+        async def fake_interpret(ev, fmt, pos, picks, clean, persona_eff=None, budget=None):
+            await spirit_started.wait()
+            raise RuntimeError("解读炸了")
+
+        p.daily.spirit_cached = fake_spirit
+        p.tarot._ai_interpret = fake_interpret
+        with pytest.raises(Exception):  # TaskGroup 包成 ExceptionGroup，仍是 Exception
+            self._collect(p._run_reading(self._evt(), "羽签", ["你的当下"], [PICK], "问感情"))
+        assert cancelled.is_set(), "兄弟任务没有被取消"
+
     def test_daily_card_switch_off_skips_poster(self):
         # output.daily_card=False：牌运卡海报不渲染（回退普通牌面图），解读照常走缓存
         p = self._plugin(hint=False)
@@ -281,7 +326,7 @@ class TestRunReading:
         from data.plugins.astrbot_plugin_star_feather import main as main_mod
         seen = {}
 
-        def counting_resolve(persona):
+        def counting_resolve(persona, seed=None):
             seen["calls"] = seen.get("calls", 0) + 1
             return "persona#" + str(seen["calls"])
 
@@ -388,7 +433,7 @@ class TestRunReading:
         sig = pick_signature(PICK["card"], PICK["upright"], "", strftime("%Y%m%d"))
         assert out == [f"[{sig}]AI:（空问题）"]
 
-    def test_epilogue_sent_separately_for_command_entry(self, no_epilogue_delay):
+    def test_epilogue_sent_separately_for_command_entry(self):
         # 命令入口 epilogue=True：收尾句不再传入 _deliver（yield 里无 |epi:），
         # 改为结果之后独立 event.send 一条（与洗牌提示同模式，不进合并转发）
         from time import strftime
@@ -421,11 +466,12 @@ class TestCommandEntry:
     def _plugin():
         p = StarFeatherPlugin.__new__(StarFeatherPlugin)
         p.tarot = _FakeTarot()
+        p.daily_fixed = True
         async def fake_gate(event, for_command):
             return None
         p.gate = types.SimpleNamespace(check=fake_gate)
-        async def fake_pick(event, text, force_daily=False, fixed_formation=""):
-            return (False, "", "羽签", ["你的当下"], [PICK])
+        async def fake_pick(event, request):
+            return ("", "羽签", ["你的当下"], [PICK])
         p._pick_reading = fake_pick
         async def fake_run(event, fmt, pos, picks, question, **kw):
             yield event.plain_result("res")
@@ -456,8 +502,10 @@ class TestCommandEntry:
         p = self._plugin()
         evt = self._evt()
         out = self._collect(p._command_entry(evt, " 问题 ",
-                                             err_tpl="占卜断了，换个时候再来。", helpable=True))
-        assert out == ["res"]
+                                             err_tpl="占卜断了，换个时候再来。"))
+        # 结果由入口 await event.send 直发（yield 出去的结果要等响应阶段，慢于收尾句）
+        assert evt.sent == ["res"]
+        assert out == []
         assert ("should_call_llm", True) in evt.calls
         assert ("stop_event",) not in evt.calls
 
@@ -465,7 +513,7 @@ class TestCommandEntry:
         p = self._plugin()
         evt = self._evt()
         out = self._collect(p._command_entry(evt, "帮助",
-                                             err_tpl="占卜断了，换个时候再来。", helpable=True))
+                                             err_tpl="占卜断了，换个时候再来。"))
         assert out == [p._help()], "帮助页只能产出一条，别在它后面再补一次抽牌"
         assert ("should_call_llm", True) in evt.calls
         assert ("stop_event",) not in evt.calls
@@ -476,7 +524,7 @@ class TestCommandEntry:
         for q in ("help", "使用帮助", "帮我看看帮助说明", "help一下"):
             evt = self._evt()
             out = self._collect(p._command_entry(evt, q,
-                                                 err_tpl="占卜断了，换个时候再来。", helpable=True))
+                                                 err_tpl="占卜断了，换个时候再来。"))
             assert out and "星羽塔罗" in out[0], q
 
     def test_help_word_inside_question_not_help(self):
@@ -486,9 +534,9 @@ class TestCommandEntry:
         evt = self._evt()
         out = self._collect(p._command_entry(
             evt, "最近公司调岗，帮助我做出决定",
-            err_tpl="占卜断了，换个时候再来。", helpable=True))
-        assert out and out[0] == "res"  # 走正常抽牌流程而非帮助文本
-        assert "星羽塔罗" not in out[0]
+            err_tpl="占卜断了，换个时候再来。"))
+        assert evt.sent == ["res"]  # 走正常抽牌流程而非帮助文本
+        assert all("星羽塔罗" not in str(x) for x in out + evt.sent)
 
     def test_single_help_returns_help_page(self):
         """/单抽 帮助 与 /占卜 一样走帮助页，而不是真抽一张牌。"""
@@ -506,8 +554,7 @@ class TestCommandEntry:
             raise RuntimeError("C:\\secret\\plugin\\path\\leak")
         p.gate.check = boom_gate
         out = self._collect(p._command_entry(
-            evt, " 问题 ", err_tpl="哼，这场占卜断了。牌灵今天状态不好，换个时候再来问。",
-            helpable=True))
+            evt, " 问题 ", err_tpl="哼，这场占卜断了。牌灵今天状态不好，换个时候再来问。"))
         assert out == ["哼，这场占卜断了。牌灵今天状态不好，换个时候再来问。"]
         joined = "".join(out)
         assert "C:" not in joined and "leak" not in joined and "RuntimeError" not in joined
@@ -542,7 +589,7 @@ class TestRunReadingRealChain:
         evt.send = send
         return evt
 
-    def test_command_epilogue_sent_separately_not_in_nodes(self, no_epilogue_delay):
+    def test_command_epilogue_sent_separately_not_in_nodes(self):
         from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
         from data.plugins.astrbot_plugin_star_feather.prompts import RESULT_EPILOGUE
         from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
@@ -691,7 +738,7 @@ class TestCommandEntryEpilogueEndToEnd:
         evt.send = send
         return evt
 
-    def test_command_entry_sends_epilogue(self, no_epilogue_delay):
+    def test_command_entry_sends_epilogue(self):
         from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
         from data.plugins.astrbot_plugin_star_feather.prompts import RESULT_EPILOGUE
         from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
@@ -706,6 +753,7 @@ class TestCommandEntryEpilogueEndToEnd:
         p = StarFeatherPlugin.__new__(StarFeatherPlugin)
         p.tarot = t
         p._shuffle_hint = lambda: None
+        p.daily_fixed = True
         async def fake_spirit(event, uid, picks, clean, persona_eff, budget=None):
             from time import strftime
             return pick_signature(picks[0]["card"], picks[0]["upright"], uid, strftime("%Y%m%d"))
@@ -713,8 +761,8 @@ class TestCommandEntryEpilogueEndToEnd:
         async def fake_gate(event, for_command):
             return None
         p.gate = types.SimpleNamespace(check=fake_gate)
-        async def fake_pick(event, text, force_daily=False, fixed_formation=""):
-            return (False, "", "羽时三刻", ["过去"], [PICK])
+        async def fake_pick(event, request):
+            return ("", "羽时三刻", ["过去"], [PICK])
         p._pick_reading = fake_pick
         evt = self._evt()
         self._collect(p._command_entry(evt, "问感情", err_tpl="断了"))
@@ -722,17 +770,63 @@ class TestCommandEntryEpilogueEndToEnd:
         assert texts, "命令入口应当独立直发收尾句"
         assert texts[-1] in RESULT_EPILOGUE, f"末条直发不是收尾句：{texts!r}"
 
-# ---------- 收尾句窗口：结果先到、收尾句后到的唯一手段 ----------
-class TestEpilogueWindow:
-    """命令入口的收尾句必须先等一个窗口再直发，而且这个窗口不能挡住 handler。
+# ---------- 收尾句次序：结果发送完成之后才轮到收尾句 ----------
+# ---------- 三个命令的意图分流 ----------
+class TestCommandIntent:
+    """命令入口只构造 ReadingRequest：/占卜 走规则，/单抽 与 /今日牌运 显式定型。"""
 
-    为什么值得一条红线：2026-10-13 实测命令入口 5/5 倒序（洗牌提示 → 收尾句 → 结果），
-    工具入口 5/5 正常；进程内次序经探针核对是「结果先提交、收尾句后提交」，差别只在
-    合并转发卡的落地慢于紧随其后的纯文本。窗口被删掉或清零，倒序就静默回归——这条锁
-    「窗口存在、值为正、且确实排在收尾句发送之前」。
+    @staticmethod
+    def _plugin(seen):
+        p = StarFeatherPlugin.__new__(StarFeatherPlugin)
+        p.tarot = _FakeTarot()
+        p.daily_fixed = True
 
-    2026-10-17 起窗口搬进后台任务：命令处理协程在结果提交后立刻收尾，不再为用户多挂
-    两秒；后台任务仍按原次序「先等窗口、再直发」。
+        async def fake_gate(event, for_command):
+            return None
+        p.gate = types.SimpleNamespace(check=fake_gate)
+
+        async def spy_pick(event, request):
+            seen.append(request)
+            return ("", request.formation, ["你的当下"], [PICK])
+        p._pick_reading = spy_pick
+
+        async def fake_run(event, fmt, pos, picks, question, **kw):
+            yield event.plain_result("res")
+        p._run_reading = fake_run
+        return p
+
+    @staticmethod
+    def _collect(agen):
+        async def run():
+            return [x async for x in agen]
+        return asyncio.run(run())
+
+    def test_single_command_is_a_fresh_draw(self):
+        seen = []
+        p = self._plugin(seen)
+        self._collect(p.single(TestCommandEntry._evt(), "我的事业"))
+        assert seen[0].kind == "single" and seen[0].fixed is False
+        assert seen[0].formation == "羽签"
+
+    def test_daily_command_is_fixed(self):
+        seen = []
+        p = self._plugin(seen)
+        self._collect(p.daily(TestCommandEntry._evt(), "财运"))
+        assert seen[0].kind == "daily" and seen[0].fixed is True
+
+    def test_divine_command_uses_rules_only(self):
+        seen = []
+        p = self._plugin(seen)
+        self._collect(p.divine(TestCommandEntry._evt(), "考研复习"))
+        assert seen[0].kind == "spread" and seen[0].formation == "羽镜"
+
+
+class TestEpilogueOrder:
+    """命令入口先 `await event.send(结果)`，再恢复 _run_reading 直发收尾句。
+
+    旧实现靠固定 2 秒后台等待赌「合并转发卡先落地」，慢网络下照样会倒序（2026-11-02
+    复核）。yield 出去的结果要等整个 handler 结束后的响应阶段才发送，所以入口必须
+    在消费结果时自己 await——生成器恢复的那一刻，就是「结果已经发完」的证明。
     """
 
     @staticmethod
@@ -741,177 +835,36 @@ class TestEpilogueWindow:
             return [x async for x in agen]
         return asyncio.run(run())
 
-    def test_window_runs_in_background_between_result_and_epilogue(self, monkeypatch):
-        from data.plugins.astrbot_plugin_star_feather import main as sf_main
-        from data.plugins.astrbot_plugin_star_feather.prompts import RESULT_EPILOGUE
-        from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
-        assert sf_main._EPILOGUE_DELAY_SECONDS > 0, "窗口为零：收尾句会抢在结果前面到"
+    def test_result_is_awaited_before_epilogue(self):
         order = []
-
-        async def fake_epilogue(event, text, delay):
-            order.append(("window", delay))
-            await event.send(types.SimpleNamespace(chain=[types.SimpleNamespace(text=text)]))
-
-        # 只换「等窗口 + 直发」这个后台协程，调度与 drain 仍走真实 asyncio
-        monkeypatch.setattr(sf_main, "_send_epilogue_after_window", fake_epilogue)
-        t = StarTarot(FakeContext(None), None)
-
-        async def fake_interp(event, formation, positions, picks, clean,
-                              persona_eff=None, budget=None):
-            return "【第1张·过去】一段过去。\
-【总结】结论。"
-
-        async def fake_render(formation, positions, picks, *a):
-            return None
-
-        t._ai_interpret = fake_interp
-        t._maybe_render_image = fake_render
         p = StarFeatherPlugin.__new__(StarFeatherPlugin)
-        p.tarot = t
         p._shuffle_hint = lambda: None
+        p.daily_fixed = True
 
-        async def fake_spirit(event, uid, picks, clean, persona_eff, budget=None):
-            from time import strftime
-            return pick_signature(picks[0]["card"], picks[0]["upright"],
-                                  uid, strftime("%Y%m%d"))
+        async def fake_gate(event, for_command):
+            return None
+        p.gate = types.SimpleNamespace(check=fake_gate)
 
-        p.daily = types.SimpleNamespace(spirit_cached=fake_spirit)
-        evt = types.SimpleNamespace()
-        evt.result = None
-        evt.get_self_id = lambda: "12345"
-        evt.get_platform_name = lambda: "aiocqhttp"   # 转发路径要白名单平台名
+        async def fake_pick(event, request):
+            return ("", "羽签", ["你的当下"], [PICK])
+        p._pick_reading = fake_pick
 
-        def chain_result(chain):
-            evt.result = chain
-            order.append(("yield", None))
-            return chain
+        async def fake_run(event, fmt, pos, picks, question, **kw):
+            yield event.plain_result("res")
+            # 生成器被恢复＝调用方已经 await 完上一条结果的发送
+            order.append("epilogue")
 
-        evt.chain_result = chain_result
+        p._run_reading = fake_run
+
+        evt = types.SimpleNamespace(message_str="/占卜 问题")
+        evt.should_call_llm = lambda v: None
+        evt.plain_result = lambda s: s
+        evt.chain_result = lambda c: c
 
         async def send(chain):
-            order.append(("send", chain.chain[0].text))
+            order.append("send:" + str(chain))
 
         evt.send = send
-        async def run():
-            out = [x async for x in p._run_reading(evt, "羽时三刻", ["过去"], [PICK],
-                                                  "问感情", epilogue=True)]
-            assert [k for k, _ in order] == ["yield"], \
-                f"handler 在窗口结束前就返回了：{order!r}"
-            while sf_main._EPILOGUE_TASKS:
-                await asyncio.gather(*list(sf_main._EPILOGUE_TASKS), return_exceptions=True)
-                await asyncio.sleep(0)
-            return out
 
-        asyncio.run(run())
-        assert [k for k, _ in order] == ["yield", "window", "send"], f"次序不对：{order!r}"
-        assert order[1][1] == sf_main._EPILOGUE_DELAY_SECONDS
-        assert order[-1][1] in RESULT_EPILOGUE
-        assert not sf_main._EPILOGUE_TASKS, "后台任务结束后应从强引用集合自摘"
-
-    def test_background_task_sleeps_before_sending(self, monkeypatch):
-        """窗口真的睡在发送之前：次序由后台协程自己保证，不靠调度先后碰运气。"""
-        from data.plugins.astrbot_plugin_star_feather import main as sf_main
-        order = []
-
-        async def fake_sleep(seconds, result=None):   # 与 asyncio.sleep 同宽
-            order.append(("window", seconds))
-
-        evt = types.SimpleNamespace(send=self._recorder(order))
-        monkeypatch.setattr(sf_main.asyncio, "sleep", fake_sleep)
-        asyncio.run(sf_main._send_epilogue_after_window(evt, "尾句", 2.0))
-        assert order == [("window", 2.0), ("send", "尾句")], f"次序不对：{order!r}"
-
-    @staticmethod
-    def _recorder(order):
-        async def send(chain):
-            order.append(("send", chain.chain[0].text))
-        return send
-
-    def test_background_task_swallows_send_failure(self, monkeypatch):
-        """收尾句发送失败只告警：任务不能把异常写进 loop 的未处理异常里。"""
-        from data.plugins.astrbot_plugin_star_feather import main as sf_main
-
-        async def boom(chain):
-            raise RuntimeError("平台断了")
-
-        async def run():
-            task = asyncio.create_task(
-                sf_main._send_epilogue_after_window(
-                    types.SimpleNamespace(send=boom), "尾句", 0))
-            await asyncio.gather(task, return_exceptions=True)
-            return task
-
-        task = asyncio.run(run())
-        assert task.exception() is None, "收尾句失败不该冒泡"
-
-    @staticmethod
-    def _harness(monkeypatch, interp_text):
-        """最小 _run_reading 链路：只关心「窗口有没有睡」，返回 (plugin, event, order)。"""
-        from data.plugins.astrbot_plugin_star_feather import main as sf_main
-        from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
-        order = []
-
-        async def fake_sleep(seconds):
-            order.append(("window", seconds))
-
-        # 只替 sleep，其余照真实现走：main 里两段 AI 用 asyncio.gather 并发，
-        # 桩若只给 sleep，gather 会在到达窗口之前就炸掉（2026-11-01）
-        monkeypatch.setattr(sf_main, "asyncio",
-                            types.SimpleNamespace(sleep=fake_sleep, gather=asyncio.gather))
-        t = StarTarot(FakeContext(None), None)
-
-        async def fake_interp(event, formation, positions, picks, clean,
-                              persona_eff=None, budget=None):
-            return interp_text
-
-        async def fake_render(formation, positions, picks, *a):
-            return None
-
-        t._ai_interpret = fake_interp
-        t._maybe_render_image = fake_render
-        p = StarFeatherPlugin.__new__(StarFeatherPlugin)
-        p.tarot = t
-        p._shuffle_hint = lambda: None
-
-        async def fake_spirit(event, uid, picks, clean, persona_eff, budget=None):
-            from time import strftime
-            return pick_signature(picks[0]["card"], picks[0]["upright"],
-                                  uid, strftime("%Y%m%d"))
-
-        p.daily = types.SimpleNamespace(spirit_cached=fake_spirit)
-        evt = types.SimpleNamespace()
-        evt.result = None
-        evt.get_self_id = lambda: "12345"
-        evt.get_platform_name = lambda: "aiocqhttp"   # 转发路径要白名单平台名
-
-        def chain_result(chain):
-            evt.result = chain
-            order.append(("yield", None))
-            return chain
-
-        evt.chain_result = chain_result
-
-        async def send(chain):
-            order.append(("send", chain.chain[0].text))
-
-        evt.send = send
-        return p, evt, order
-
-    def test_no_window_when_delivery_is_plain(self, monkeypatch):
-        """窗口只买「合并转发卡落地慢」这一件事；plain / text_only 与收尾句同走纯文本通道，
-        提交次序即落地次序，再睡 2 秒就是白等。"""
-        p, evt, order = self._harness(
-            monkeypatch, "【第1张·过去】一段过去。\n【总结】结论。")
-        p.tarot.send_mode = "plain"
-        p.tarot.deliverer.forward_result = False
-        self._collect(p._run_reading(evt, "羽时三刻", ["过去"], [PICK], "问感情",
-                                     epilogue=True))
-        assert [k for k, _ in order] == ["yield", "send"], f"plain 模式不该睡窗口：{order!r}"
-
-    def test_no_window_when_ai_falls_back(self, monkeypatch):
-        """AI 全失败回退本地牌义时，结果同样是一条普通链消息（不是 Nodes），
-        转发卡那条理由不成立，别让用户多等一个窗口。"""
-        p, evt, order = self._harness(monkeypatch, None)
-        self._collect(p._run_reading(evt, "羽时三刻", ["过去"], [PICK], "问感情",
-                                     epilogue=True))
-        assert [k for k, _ in order] == ["yield", "send"], f"回退路径不该睡窗口：{order!r}"
+        self._collect(p._command_entry(evt, "问题", err_tpl="断了"))
+        assert order == ["send:res", "epilogue"], f"收尾句抢在结果前面：{order!r}"
