@@ -56,6 +56,15 @@ _STAGE_INTERPRET = "AI 解读"
 UNLIMITED_TIMEOUT = float("inf")
 
 
+class _QueueTimeout:
+    """并发闸排队耗尽了本次请求预算（本地原因，不是 Provider 服务失败）。"""
+
+    __slots__ = ()
+
+
+QUEUE_TIMEOUT = _QueueTimeout()
+
+
 def _rate_text(numerator: int, denominator: int) -> str:
     """拒绝率的统一写法：`分子/分母 (xx.xx%)`；分母为 0 输出 `N/A`。
 
@@ -435,7 +444,9 @@ class AiInterpreter:
                 self._stage_stop(bd, _STAGE_SPIRIT)
                 break  # 总预算或阶段上限见底：候选链剩下的不再试（共享截止点，不重置）
             text = await self._chat_once(provider, prompt, system, timeout)
-            if not text:
+            if text is QUEUE_TIMEOUT:
+                continue
+            if not isinstance(text, str) or not text:
                 continue
             text = text.strip().strip(_QUOTE_CHARS).strip()
             if not text:
@@ -472,25 +483,47 @@ class AiInterpreter:
         return sem
 
     async def _chat_once(self, provider, prompt: str, system_prompt: str,
-                         timeout: float | None = None) -> str | None:
+                         timeout: float | None = None) -> str | None | _QueueTimeout:
         """对单个候选发起解读请求：超时或异常一律返回 None，交给下一个候选。
 
         timeout：本次请求的有效超时，由调用方按预算算出（AiBudget.step_timeout）；
         不传则用实例的 ai_timeout——直接调用本方法的老口径不变。
         两者为 0 或 inf 时视为**不限制单请求**：不加 wait_for。上游若还有总预算或
         阶段上限，算出来的就不是 inf，这里自然照旧加（不限制 ≠ 整段没有上界）。
+
+        并发闸的排队也算在这笔 timeout 里：先按同一截止点等槽位，拿到槽位后用
+        剩余时间发请求。排队超时返回 QUEUE_TIMEOUT——它是本地资源不足，不是
+        Provider 服务失败，调用方不得据此记失败冷却。
         """
         raw = self.ai_timeout if timeout is None else timeout
         limit = UNLIMITED_TIMEOUT if raw is None or float(raw) <= 0 else float(raw)
+        loop = asyncio.get_running_loop()
+        started = loop.time()
         try:
             # 调用本身也放进 try：同步抛异常（签名不匹配、参数校验失败）同样
             # 只是「这个候选失败」，不许绕过 AI 失败的兜底边界带走整条卦
             sem = self._semaphore_for(provider)
-            if sem is not None:
-                async with sem:
-                    resp = await self._await_chat(provider, prompt, system_prompt, limit)
-            else:
+            if sem is None:
                 resp = await self._await_chat(provider, prompt, system_prompt, limit)
+            else:
+                remaining = limit
+                if limit == UNLIMITED_TIMEOUT:
+                    await sem.acquire()
+                else:
+                    try:
+                        await asyncio.wait_for(sem.acquire(), timeout=limit)
+                    except asyncio.TimeoutError:
+                        logger.warning("AI 并发闸排队超时：拿到槽位前已耗尽本次预算，按本地原因放弃")
+                        return QUEUE_TIMEOUT
+                    remaining = limit - (loop.time() - started)
+                    if remaining <= 0:
+                        sem.release()
+                        logger.warning("AI 并发闸排队耗尽本次预算，按本地原因放弃")
+                        return QUEUE_TIMEOUT
+                try:
+                    resp = await self._await_chat(provider, prompt, system_prompt, remaining)
+                finally:
+                    sem.release()
         except asyncio.TimeoutError:
             logger.warning(f"AI 解读超时（>{limit:g}s），放弃该提供商")
             return None
@@ -661,7 +694,9 @@ class AiInterpreter:
                 break  # 预算见底：剩下的候选与供应商回退都不再试（截止点不重置）
             tried += 1
             text = await self._chat_once(provider, prompt, system_prompt, timeout)
-            if not text:
+            if text is QUEUE_TIMEOUT:
+                continue
+            if not isinstance(text, str) or not text:
                 self._mark_fail(pid)  # 服务级失败：只冷却这个 provider
                 continue
             got_text = True

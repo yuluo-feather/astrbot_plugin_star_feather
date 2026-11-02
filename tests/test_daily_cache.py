@@ -806,6 +806,33 @@ class TestSingleFlight:
         assert asyncio.run(go()) == ["x", "x"]
         assert len(calls) == 1
 
+    def test_owner_cancel_lets_waiter_retry(self):
+        from data.plugins.astrbot_plugin_star_feather.services.singleflight import (
+            SingleFlight,
+        )
+        sf = SingleFlight()
+        started, calls = asyncio.Event(), []
+
+        async def factory():
+            calls.append(1)
+            if len(calls) == 1:
+                started.set()
+                await asyncio.sleep(3600)
+            return "retry-ok"
+
+        async def go():
+            owner = asyncio.create_task(sf.run("k", factory))
+            await started.wait()
+            waiter = asyncio.create_task(sf.run("k", factory))
+            await asyncio.sleep(0)
+            owner.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await owner
+            return await waiter
+
+        assert asyncio.run(go()) == "retry-ok"
+        assert len(calls) == 2
+
     def test_waiter_cancel_does_not_cancel_owner(self):
         from data.plugins.astrbot_plugin_star_feather.services.singleflight import (
             SingleFlight,
@@ -880,3 +907,41 @@ class TestSchema2Reset:
         assert rec["schema"] == 2
         assert "（今日牌运）" in rec["interps"]
         assert "old" not in str(rec)
+
+
+class TestSpiritDoesNotRewriteDailyCard:
+    """P0 回归：普通占卜写牌灵的话，不许把今日固定牌的 card_id 覆盖掉。"""
+
+    @staticmethod
+    def _fortune(kv):
+        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+
+        class _Ctx:
+            async def get_kv_data(self, key, default=None):
+                return kv.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                kv[key] = value
+
+        class _Interp:
+            async def spirit_line(self, *a, **kw):
+                return "牌灵今天懒得开口"
+
+            async def interpret(self, *a, **kw):
+                return "解读"
+
+        return DailyFortune(_Ctx(), persona="", interpreter=_Interp())
+
+    def test_daily_single_daily_keeps_the_same_card(self):
+        kv = {}
+        df = self._fortune(kv)
+        first = asyncio.run(df.pick_cached("u1"))
+        daily_card_id = first[2][0]["card"]["id"]
+
+        other_card = next(c for c in TAROT_CARDS if c["id"] != daily_card_id)
+        other = {"card": other_card, "upright": True}
+        asyncio.run(df.spirit_cached(None, "u1", [other], "随便问问", None))
+
+        second = asyncio.run(df.pick_cached("u1"))
+        assert second[2][0]["card"]["id"] == daily_card_id
+        assert kv["sf_daily_u1"]["card_id"] == daily_card_id

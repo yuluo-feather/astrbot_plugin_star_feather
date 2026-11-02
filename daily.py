@@ -20,7 +20,7 @@ from .core.draw import render_detail
 from .core.log import log
 from .dailylines import pick_signature
 from .intent import norm_topic
-from .kv_utils import kv_get, kv_put
+from .kv_utils import kv_delete, kv_get, kv_put
 from .services.daily_store import DailyRecord
 from .services.singleflight import SingleFlight
 from .settings import DEFAULT_AI_PERSONA
@@ -77,14 +77,6 @@ def _spirit_sign(picks: list[dict]) -> str:
     return "|".join(f"{p['card']['cn']}:{1 if p['upright'] else 0}" for p in picks)
 
 
-def _fill_card(record: DailyRecord, picks: list[dict], today: str) -> None:
-    record.date = today
-    if picks:
-        record.card_id = picks[0]["card"]["id"]
-        record.upright = bool(picks[0]["upright"])
-        record.sign = _reading_sign(picks)
-
-
 async def _ai_output(awaitable, what: str, who: str = ""):
     """装饰性 AI 产出的统一故障边界：异常 → None，走各自的降级路。"""
     try:
@@ -109,12 +101,21 @@ class DailyFortune:
         self.clock = clock or Clock()
         self.persona = str(persona or "")
         self.interpreter = interpreter
+        # 旧版 sf_spirit_* 键只删一次：合并成单键后它们不会再被读，但会永久占着
+        self._legacy_cleaned: set[str] = set()
         # 缓存读-判-写串行化（gating 同款防线）：并发占卜时两条协程各自读旧值再写回，
         # 后写的会把先写的分桶整个覆盖掉。
         self._kv_lock = asyncio.Lock()
 
     def _key(self, uid: str) -> str:
         return f"sf_daily_{uid}"
+
+    async def _cleanup_legacy_spirit(self, uid: str) -> None:
+        """删掉旧版独立的 sf_spirit_* 键（每个用户一次）。"""
+        if not uid or uid in self._legacy_cleaned:
+            return
+        self._legacy_cleaned.add(uid)
+        await kv_delete(self.kv_store, f"sf_spirit_{uid}", "旧牌灵缓存")
 
     async def pick_cached(self, uid: str) -> tuple | None:
         """今日固定抽牌：一个用户一条记录，按日期判失效。
@@ -124,6 +125,7 @@ class DailyFortune:
         """
         if not uid:
             return None
+        await self._cleanup_legacy_spirit(uid)
         key, today = self._key(uid), self.clock.today()
         async with self._kv_lock:
             raw, ok = await kv_get(self.kv_store, key, None, "每日牌运缓存")
@@ -139,9 +141,7 @@ class DailyFortune:
                 sig = _reading_sign(picks)
                 keep = record.same_context(today, sig, _PROMPT_V, self.persona)
                 fresh = record if keep else DailyRecord()
-                _fill_card(fresh, picks, today)
-                fresh.prompt_v = _PROMPT_V
-                fresh.persona = self.persona
+                fresh.put_pick(card["id"], upright, sig, today, _PROMPT_V, self.persona)
                 if not keep:
                     fresh.interps, fresh.spirit_line, fresh.spirit_sign = {}, "", ""
                 await kv_put(self.kv_store, key, fresh.to_raw(), "每日牌运缓存")
@@ -190,9 +190,7 @@ class DailyFortune:
                 return interp
             if not fresh.same_context(today, sig, _PROMPT_V, self.persona):
                 fresh = DailyRecord()
-            _fill_card(fresh, picks, today)
-            fresh.prompt_v = _PROMPT_V
-            fresh.persona = self.persona
+            fresh.put_context(today, sig, _PROMPT_V, self.persona)
             parsed = interp if isinstance(interp, Interpretation) else parse_interpretation(str(interp))
             if parsed is not None:
                 fresh.interps[topic] = parsed.to_record()
@@ -214,6 +212,7 @@ class DailyFortune:
         fallback = pick_signature(card, upright, uid, today)
         if not uid:
             return fallback
+        await self._cleanup_legacy_spirit(uid)
         key, sig = self._key(uid), _spirit_sign(picks)
         reg_key = (key, sig, today, _PROMPT_V)
 
@@ -241,14 +240,15 @@ class DailyFortune:
         async with self._kv_lock:
             fresh_raw, _ = await kv_get(self.kv_store, key, None, "牌灵的话缓存")
             fresh = DailyRecord.from_raw(fresh_raw)
+            if fresh.date > today:
+                # 生成跨过了午夜：KV 已是新一天的记录，别用昨天启动的写回盖掉
+                return line
             if (fresh.date == today and fresh.prompt_v == _PROMPT_V
                     and fresh.spirit_sign == sig and fresh.spirit_line):
                 return fresh.spirit_line
             if fresh.date != today:
                 fresh = DailyRecord()
-            _fill_card(fresh, picks, today)
-            fresh.prompt_v = _PROMPT_V
-            fresh.spirit_sign = sig
-            fresh.spirit_line = line
+            # 只写牌灵字段：普通占卜的牌灵写回不许碰今日固定牌的 card_id/upright
+            fresh.put_spirit(line, sig, today, _PROMPT_V)
             await kv_put(self.kv_store, key, fresh.to_raw(), "牌灵的话缓存")
         return line

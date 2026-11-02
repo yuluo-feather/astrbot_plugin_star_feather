@@ -24,6 +24,9 @@ class PluginKV:
     async def put_kv_data(self, key, value):
         await self._store.put_kv_data(key, value)
 
+    async def delete_kv_data(self, key):
+        await self._store.delete_kv_data(key)
+
     async def get(self, key: str, default=None) -> tuple:
         try:
             return await self._store.get_kv_data(key, default), True
