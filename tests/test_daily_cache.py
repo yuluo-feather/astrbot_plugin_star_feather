@@ -12,13 +12,22 @@ from data.plugins.astrbot_plugin_star_feather.daily import (
 )
 from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
 from data.plugins.astrbot_plugin_star_feather.prompts import READING_PROMPT_V
-from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
 from data.plugins.astrbot_plugin_star_feather.tarot_data import (
     TAROT_CARDS,
 )
 from stubs import PICK
 
-T = StarTarot.__new__(StarTarot)  # 绕过 __init__（不依赖 Context），供抽牌/编排用例复用
+
+class _Interp:
+    """把旧的 _ai_interpret 桩适配到解释器接口（detail 参数由服务层格式化）。"""
+
+    def __init__(self, fn):
+        self.fn = fn
+
+    async def interpret(self, umo, formation, positions, picks, user_input, detail,
+                        persona_eff=None, budget=None):
+        return await self.fn(umo, formation, positions, picks, user_input,
+                             persona_eff=persona_eff, budget=budget)
 
 
 # ---------- 每日缓存合并写（解读分桶保留 / 跨天作废） ----------
@@ -42,7 +51,7 @@ class TestDailyCacheMerge:
             async def put_kv_data(self, key, value):
                 kv_store[key] = value
 
-        p.daily = DailyFortune(_Ctx(), T)
+        p.daily = DailyFortune(_Ctx())
         return p
 
     def test_keeps_existing_interps_when_regenerating(self):
@@ -101,7 +110,7 @@ class TestDailyCachedCardAnchor:
             async def put_kv_data(self, key, value):
                 kv_store[key] = value
 
-        return DailyFortune(_Ctx(), T)
+        return DailyFortune(_Ctx())
 
     def test_type_drifted_copy_still_hits(self):
         """字段类型漂移后仍须命中：只有牌库里真的没有这个 id 才算缓存不可用。"""
@@ -167,7 +176,7 @@ class TestDailyInterpTopic:
             calls.append(clean)
             return f"解读:{clean}"
 
-        return DailyFortune(_Ctx(), types.SimpleNamespace(_ai_interpret=fake_ai)), calls
+        return DailyFortune(_Ctx(), persona="", interpreter=_Interp(fake_ai)), calls
 
     def test_topic_table_decoupled_from_daily_judgement(self):
         """分桶与判定解耦：有具体主题仍走每日固定牌，但解读不与泛问共用。
@@ -252,7 +261,7 @@ class TestDailyInterpTopic:
             await asyncio.sleep(0.02)
             return f"解读:{clean}"
 
-        df = DailyFortune(_Ctx(), types.SimpleNamespace(_ai_interpret=slow_ai))
+        df = DailyFortune(_Ctx(), persona="", interpreter=_Interp(slow_ai))
 
         async def go():
             return await asyncio.gather(
@@ -304,8 +313,7 @@ class TestDailyInterpTopic:
             calls.append(clean)
             return f"解读:{clean}"
 
-        df = DailyFortune(_Ctx(), types.SimpleNamespace(_ai_interpret=fake_ai,
-                                                       ai_persona="tsundere"))
+        df = DailyFortune(_Ctx(), persona="tsundere", interpreter=_Interp(fake_ai))
         kv["sf_daily_u1"]["date"] = df.clock.today()
         out = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK],
                                            "今天感情运势"))
@@ -360,7 +368,7 @@ class TestDailyInterpTopic:
             await asyncio.sleep(0.01)        # AI 调用期间另一条协程会进来
             return f"解读:{clean}"
 
-        df = DailyFortune(_SlowCtx(), types.SimpleNamespace(_ai_interpret=fake_ai))
+        df = DailyFortune(_SlowCtx(), persona="", interpreter=_Interp(fake_ai))
         t1, t2 = "今天感情运势", "最近事业运"
 
         async def go():
@@ -402,7 +410,7 @@ class TestDailyInterpTopic:
             calls.append(clean)
             return f"解读:{clean}"
 
-        df = DailyFortune(_FlakyCtx(), types.SimpleNamespace(_ai_interpret=fake_ai))
+        df = DailyFortune(_FlakyCtx(), persona="", interpreter=_Interp(fake_ai))
 
         async def go():
             await df.pick_cached("u1")             # 读故障：不写回、不清理
@@ -468,7 +476,7 @@ class TestDailyInterpCap:
             calls.append(clean)
             return f"解读:{clean}"
 
-        return DailyFortune(kv, types.SimpleNamespace(_ai_interpret=fake_ai)), calls
+        return DailyFortune(kv, persona="", interpreter=_Interp(fake_ai)), calls
 
     def _ask(self, df, nums):
         """按顺序问这些编号的主题（同一事件循环内串行，与真实问答同形）。"""
@@ -622,7 +630,7 @@ class TestDailyKvFallback:
     @staticmethod
     def _daily(kv):
         from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
-        return DailyFortune(kv, T)
+        return DailyFortune(kv)
 
     def test_context_like_no_kv_interface(self):
         """模拟真实 Context：对象上根本没有 get_kv_data/put_kv_data。"""
@@ -676,7 +684,7 @@ class TestDailyPoisonedCacheValue:
             calls.append(clean)
             return f"解读:{clean}"
 
-        return DailyFortune(_Ctx(), types.SimpleNamespace(_ai_interpret=fake_ai)), calls
+        return DailyFortune(_Ctx(), persona="", interpreter=_Interp(fake_ai)), calls
 
     def test_truthy_non_dict_cache_value_self_heals(self):
         """truthy 非 dict：既不抛异常，也要把坏值覆盖成合法结构（真正自愈）。"""
@@ -734,7 +742,7 @@ class TestDailyNullInterp:
             calls.append(clean)
             return ret
 
-        return DailyFortune(_Ctx(), types.SimpleNamespace(_ai_interpret=fake_ai)), calls
+        return DailyFortune(_Ctx(), persona="", interpreter=_Interp(fake_ai)), calls
 
     def test_none_interp_not_written_into_slots(self):
         import time as _time

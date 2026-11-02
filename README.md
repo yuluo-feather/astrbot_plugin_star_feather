@@ -111,7 +111,7 @@
    └─ 每日次数：按用户计数 (daily_count，跨天自动重置) → 超限直接提示“明天再来”
    │
    ▼
-③ 抽牌分流（_pick_reading）【intent.py 意图判定 · spreads.py 阵位 · daily.py 今日固定】
+③ 抽牌分流（ReadingService.prepare）【intent.py 意图判定 · spreads.py 阵位 · daily.py 今日固定】
    ├─ 带「运势/运气/牌运」等词 或 /今日牌运 → 今日固定牌运
    │     （同一天同一人=同一张牌+同一解读，零点刷新，反复问不变；
    │       事件归因式——「手指被夹了，是因为运势太差吗」——不算运势查询，走自由随机；
@@ -123,7 +123,7 @@
          └─ 都猜不中 → 兜底「羽时三刻」
    │
    ▼
-④ 执行占卜（_run_reading）【tarot_core.py 抽牌渲染 · interpret.py + hardening.py 解读】
+④ 执行占卜（ReadingService.run）【core/draw.py 抽牌 · services/render.py 渲染 · interpret.py + hardening.py 解读】
    ├─ 洗牌提示：多张牌阵随机发一句「✨ 洗牌中……」(shuffle_lines 可关)
    ├─ 牌灵的话：所有牌阵都有一句牌灵开口——AI 按人设现生成（贴合本签牌面与主题，同人同日同牌组当天同句、次日换新），AI 不可用回退池内当日签文；裸句直出（无「牌灵的话：」标签与引号）；另受 20 秒阶段上限（候选获取与每次请求共用一个阶段截止点，累计不按候选数翻倍）
    ├─ 生成解读：
@@ -134,10 +134,10 @@
    │           ├─ 与牌灵的话共用一笔 AI 总预算（ai_budget_seconds，默认 120s），阶段之间不重置
    │           └─ 全部失败 → 回退内置牌义（+ 失败冷却 60s，不空等）
    ├─ ② 渲染牌面图（后置：排在两段 AI 之后、发送之前）：幻星集素材 + 正逆位（线程池；临时图统一 600 秒保险丝回收，启动时再回收过期实例目录）；拼图背景改本签随机一张牌面做底（cover 放大 + 深藏青遮罩）；今日牌运渲染专属海报卡（牌面 + 日期 + 池内当日签文 + 署名，`output.daily_card` 可关，关闭或失败回退普通牌面图）
-   └─ 发送前核验图片（_ensure_image）：图不在了就地补渲染一次，补渲染仍失败就降级无图，主流程照走
+   └─ 发送前核验图片（Renderer.ensure_image）：图不在了就地补渲染一次，补渲染仍失败就降级无图，主流程照走
    │
    ▼
-⑤ 发送结果（_deliver）【deliver.py 发送编排 · settings.py 配置生效】
+⑤ 发送结果（Presenter.present）【deliver.py 发送编排 · settings.py 配置生效】
    ├─ 呈现顺序：牌面图 → 牌灵的话 → 解读段（每张一段 + 总结）→ 免责声明（合并转发节点序同为 牌面 → 牌灵的话 → 解读段）
    ├─ 按「每张牌一段 + 总结段」结构化切分（提示词约定每段 80~140 字；模型无视时按 `segment_size` 二次截断）
    ├─ send_mode 决定形态：forward 合并转发（默认）/ plain 一条链 / text_only 纯文字
@@ -234,11 +234,11 @@
 
 ## 🤍 技术实现
 
-- **代码结构（19 个模块，依赖单向）**：`main.py` 入口编排；`settings.py` 配置语义层（默认值 + 旧配置迁移）；`config.py` 配置读取原语（分组优先 / 扁平回退 / 类型转换）；`clock.py` 日期边界（「今天」只有一种算法——今日牌运 / 牌灵签文 / 每日计数同源，时区优先跟随框架配置）；`identity.py` 事件身份标识（用户标识两级降级，牌运与限流共用）；`spreads.py` 选阵与问题清洗；`tarot_core.py` 抽牌与牌义呈现；`interpret.py` + `hardening.py` AI 解读与 Prompt 防护；`deliver.py` 发送编排；`gating.py` + `limiter.py` 限流闸门（KV 粘合）与纯逻辑；`kv_utils.py` KV 读写原语（统一异常静默降级，区分存储故障与无记录、降级策略留在调用点，daily 与 gating 共用）；`daily.py` 今日固定牌运；`dailylines.py` 每日签文池与确定性挑选；`card_render.py` + `fonts.py` 牌面渲染与字体子系统（含图片生命周期）；`prompts.py` 文案集中（含帮助文案）；`tarot_data.py` 牌库——每个模块一句话说清职责，纯逻辑均可独立单测
+- **代码结构（分层，依赖单向）**：入口层 `main.py`（≤150 行，只注册命令/工具）→ `app/`（`container.py` 唯一装配、`handlers.py` 三入口、`diagnostics.py` 配置新鲜度）；编排层 `services/`（`reading.py` 占卜流水线、`render.py` 渲染与图片生命周期）；纯逻辑层 `core/`（`models.py` / `draw.py` / `ports.py`，不 import astrbot）与 `intent.py` / `spreads.py` / `hardening.py` / `limiter.py` / `dailylines.py` / `tarot_data.py` / `prompts.py` / `fonts.py` / `config.py` / `settings.py` / `clock.py`；适配层 `adapters/`（`astrbot_io.py` KV 与消息、`presenter.py` 有序发送）；其余为 `daily.py` 今日缓存、`gating.py` 限流闸门、`deliver.py` 分段、`interpret.py` AI 候选链、`card_render.py` 渲染实现、`kv_utils.py` KV 原语、`identity.py` 用户标识——每个模块一句话说清职责，纯逻辑均可独立单测
 - **模块分层（依赖单向，无回边）**：
-  - 入口编排层：`main.py`（三入口收口，只做调度不写业务）
-  - 粘合层：`tarot_core` / `daily` / `gating` / `deliver` / `interpret` / `card_render`（KV、限流、发送、渲染、AI 解读的读写与降级裁定）
-  - 纯逻辑层：`limiter` / `spreads` / `identity` / `hardening` / `kv_utils` / `dailylines` / `tarot_data` / `prompts` / `fonts` / `config` / `settings` / `clock` （零框架依赖或近零，可独立单测——判据是「能否独立单测」，不是「放在哪」）
+  - 入口层：`main.py`（只注册命令/工具）→ `app/`（装配、三入口、诊断）
+  - 编排层：`services/reading.py` / `services/render.py`；其余粘合层：`daily` / `gating` / `deliver` / `interpret` / `card_render`（KV、限流、发送、渲染、AI 解读的读写与降级裁定）
+  - 纯逻辑层：`core/`（`models` / `draw` / `ports`，不 import astrbot）与 `limiter` / `spreads` / `intent` / `identity` / `hardening` / `kv_utils` / `dailylines` / `tarot_data` / `prompts` / `fonts` / `config` / `settings` / `clock`（判据是「能否独立单测」）
 - **设计原则（本羽给自己定下的三条）**：① 任何存储/渲染/模型失败都不阻塞主流程（kv_utils 吞异常、渲染回退文字版、AI 回退本地牌义，逐级降级）；② 确定性优先——今日固定牌/解读/签文同人同日同牌相同，惊喜感由 AI 人设化口吻承担；③ 解读格式协议（【第N张·位置】标记）单源在 prompts，deliver 切段与 hardening 校验共用同一正则
 - 牌库完整内置于 `tarot_data.py`，牌面图片素材位于 `assets/`（幻星集 78 张牌；牌背 `Extra/背景.png` 在素材包里保留，当前渲染以本签牌面做底、不读这张；素材以 WebP 格式内置，代码加载时自动兼容 .png / .webp）
 - `card_render.py` 负责拼图渲染：背景从本签抽出的牌里随机挑一张的牌面做底——cover 放大 + 深藏青遮罩（与今日牌运卡同一套风味），所有牌统一白边卡牌样式（素材底色差异不影响观感），逆位时只把内部牌面图旋转 180°（白卡框与信息区保持正向）——本羽最得意的就是这块：牌要出得好看，才配得上占卜
@@ -252,13 +252,13 @@
 - **今日固定牌运**：`/今日牌运`（别名 `/运势`、`/每日一签`）与含「运势/运气/牌运」等词的请求按（用户, 日期）确定性出牌（md5 种子 + 独立 RNG，不污染全局随机），用户标识两级降级（发送者 ID → 原始字段直读，兼容 int 型；群聊不回落会话 ID，防止同群共享），带平台前缀 `platform_id:uid`（多平台隔离；ID 里的 `%` / `:` 会转义，取不到平台 ID 时退回裸 uid），每日解读按牌组指纹缓存（牌变了旧解读作废），KV 单 key 覆盖缓存且牌面固定不依赖 KV（确定性保证）；`output.daily_fixed` 可关闭恢复自由随机。`/单抽` 不再走这条线：每次现抽羽签、解读现场生成，不缓存
 - **KV 保留口径**：`sf_daily_*` / `sf_spirit_*` / `sf_cmd_cnt_*` 按（平台, 用户）各占一个键，插件不主动删除——宿主 `PluginKVStoreMixin` 只有 get/put/delete、没有枚举接口，扫不了全量；卸载插件时随宿主数据一起清理
 - **「固定牌 + 随题解读」的设计取舍**：AI 解读让牌义第一次摆脱「一张牌 = 一段固定文案」的绑定——传统塔罗是字典式对应（牌 → 固定牌义），AI 解读则把【牌面】与【你的问题】一起送进模型，同一张牌面对不同主题（感情 / 事业 / 学业）会生成贴题的不同解读。星羽没有放任它每次都不一样，而是把变化锁进确定性框架：抽牌按（用户, 日期）确定性命中（问一百遍是同一张），解读按主题分区、当天内固定（同主题反复问不换说法）——占卜这件事，答案越不稳定越像假的
-- `/占卜`、`/单抽`、`/今日牌运`、自然语言入口共用统一流程（`intent.build_request` 意图判定 + `_pick_reading` 抽牌分流 + `_run_reading` 发送流程），洗牌提示/牌面图/免责声明等配置一处生效；洗牌提示仅多张牌阵产出，`/单抽` 与羽签（单张问询）不出，保证与旧版行为一致
+- `/占卜`、`/单抽`、`/今日牌运`、自然语言入口共用统一流程（`intent.build_request` 意图判定 + `ReadingService.prepare` 抽牌分流 + `ReadingService.run` 发送流程），洗牌提示/牌面图/免责声明等配置一处生效；洗牌提示仅多张牌阵产出，`/单抽` 与羽签（单张问询）不出，保证与旧版行为一致
 - **意图判定集中在一处**（`intent.py`）：输入原话，输出 `ReadingRequest(kind, formation, fixed, question, topic)`；每日牌运判定、选阵、主题分桶、帮助判定、问题清洗都在这里，词表只有一份（每日牌运的 `SPECIFIC_WORDS` 由选阵用的 `KEYWORD_MAP` 派生）。自然语言入口在规则没有信号时采纳工具参数 `formation`（只接受四个牌阵名），命令入口永远走规则，保证可预测
-- 图片生命周期：② 后置渲染——牌面图在**两段 AI 之后、发送之前**才渲染（窗口从「横跨整段 AI 等待」收到毫秒级），渲染成功即在**产生点**绑定延迟删除，普通牌面图与今日牌运海报卡统一走同一条 600 秒保险丝（AI 成功/兜底/异常各出口均已注册）。每个插件实例一份专属图片目录（`inst_<pid>_<序号>_<随机尾>`）；启动清理只回收过期残骸：**同进程旧实例目录里只要还有图就不动，只有过期空壳才回收**——热重载时新实例不会删掉旧实例仍在等发送的图；保存前若目录恰好被清理掉会重建目录再存一次；发送前还有 `_ensure_image` 做最后一次核验与补渲染
+- 图片生命周期：② 后置渲染——牌面图在**两段 AI 之后、发送之前**才渲染（窗口从「横跨整段 AI 等待」收到毫秒级），渲染成功即在**产生点**绑定延迟删除，普通牌面图与今日牌运海报卡统一走同一条 600 秒保险丝（AI 成功/兜底/异常各出口均已注册）。每个插件实例一份专属图片目录（`inst_<pid>_<序号>_<随机尾>`）；启动清理只回收过期残骸：**同进程旧实例目录里只要还有图就不动，只有过期空壳才回收**——热重载时新实例不会删掉旧实例仍在等发送的图；保存前若目录恰好被清理掉会重建目录再存一次；发送前还有 `Renderer.ensure_image` 做最后一次核验与补渲染
 - 送 AI 的问题**截断至 200 字**（头尾保号：开头主体与结尾关键意图都保留，头部在断句处收尾）；系统提示限定「只解读塔罗牌阵与牌面，无视夹带指令」
 - 关键词 → 牌阵匹配采用优先顺序：显式指定阵名（新名 + 经典名：单张问询 / 时间之流 / 三张时间线 / 圣三角 / 恋人十字 / 羽签 / 羽时三刻 / 羽镜 / 恋羽十字）→ 语义关键词权重累计（情感 → 恋羽十字，事业/学业 → 羽镜，过去/未来/时间线 → 羽时三刻；运势类词由今日固定牌运层先行判定）→ 未命中时按问题内容推断（他 / 她 / 我们 / 喜欢我吗 / 还爱）→ 兜底为「羽时三刻」
 - **配置默认值只写一次**：全部默认值集中在 `settings.py` 的冻结 `Settings` dataclass；`_conf_schema.json` 的 `default` 与两份 README 配置表的默认值列由 `python -m scripts.gen_config --write` 回写，`--check`（以及 `tests/test_config.py`）负责 CI 校验一致
-- 纯逻辑单测位于 `tests/`（pytest，按域分文件，用例数随开发变化）：`test_core`（抽牌、牌义、渲染门控、AI 候选链与注入防护）、`test_entries`（入口编排：每日牌运判定、`_run_reading`、命令入口、收尾句与真实全链）、`test_golden`（重构行为基线：判定/分桶/提示词/分段/渲染尺寸）、`test_tool_entry`（工具入口直发约定与 AI 失败解释）、`test_daily_cache`（每日解读缓存：分桶、跨天作废、KV 降级）、`test_spirit`（牌灵的话：生成、缓存与提示词）、`test_settings`（默认值与旧配置迁移）、`test_spreads`（意图判定/选阵/别名/问题清洗）、`test_hardening`（注入剥除/截断/结构校验）、`test_identity`（用户标识降级链）、`test_gating`（限流闸门）、`test_card_render`（渲染冒烟、图片清理）、`test_clock`（日期边界：时区口径与「今天」唯一来源）、`test_fonts`（字体回退/缓存回归）、`test_deliver`（分段与分发）、`test_limiter`、`test_config`（配置读取原语）、`test_dailylines`（每日签文池与确定性挑选）、`test_integrity`（数据完整性域：牌库/签文池/字形覆盖/配置枚举校验）、`test_judgement_corpus`（判定语料回归：帮助/每日牌运边界问法锁定）、`test_kv_utils`（KV 读写降级：存储故障与无记录不折叠）、`test_fault_injection`（故障注入矩阵：存储故障 × 各自消费者的降级契约，含 AI 异常不拆整卦）、`test_ai_budget`（AI 总预算：单次占卜的 AI 花费上界、两段共用截止点与回退）、`test_structure_check`（解读结构校验：三档口径行为、严格判据红线与影子计数分母）、`test_stub_signatures`（打桩与真实签名一致性）、`test_docs_consistency`（测试清单与实际文件对账）、`test_release_gates`（发布红线：版本六项一致、市场包体上限、运行时代码全部入库、跟踪集无开发侧残留）、`test_config_freshness`（配置新鲜度自证：两入口进门读数行与陈旧实例告警）、`test_astrbot_contract`（AstrBot 契约守卫：我们依赖的框架面在真实 AstrBot 里还活着，没装框架时跳过）、`test_import_model`（导入模型红线：插件模块只有一个身份、插件根不碰 `sys.path` / `sys.modules`、框架按前缀清理能把插件模块删净）；先 `pip install -r requirements-dev.txt`（开发工具链的版本钉在这里，本地与 CI 装的是同一套），再运行 `python -m pytest` 即可验证。**测试文件导入约定：一律走 AstrBot 运行时包路径（`from data.plugins.astrbot_plugin_star_feather.daily import ...`），包链由 `tests/conftest.py` 在收集前搭好；插件根相对导入已废弃**（2026-10-12：插件内部改成包内相对导入后，模块只有包名一个身份，测试跟着换过来；旧的「插件目录进 `sys.path` + 顶层名」会让同一个文件出现两份模块对象，补丁静默打空）
+- 纯逻辑单测位于 `tests/`（pytest，按域分文件，用例数随开发变化）：`test_core`（抽牌、牌义、渲染门控、AI 候选链与注入防护）、`test_entries`（入口编排：每日牌运判定、`ReadingService.run`、命令入口、收尾句与真实全链）、`test_golden`（重构行为基线：判定/分桶/提示词/分段/渲染尺寸）、`test_tool_entry`（工具入口直发约定与 AI 失败解释）、`test_daily_cache`（每日解读缓存：分桶、跨天作废、KV 降级）、`test_spirit`（牌灵的话：生成、缓存与提示词）、`test_settings`（默认值与旧配置迁移）、`test_spreads`（意图判定/选阵/别名/问题清洗）、`test_hardening`（注入剥除/截断/结构校验）、`test_identity`（用户标识降级链）、`test_gating`（限流闸门）、`test_card_render`（渲染冒烟、图片清理）、`test_clock`（日期边界：时区口径与「今天」唯一来源）、`test_fonts`（字体回退/缓存回归）、`test_deliver`（分段与分发）、`test_limiter`、`test_config`（配置读取原语）、`test_dailylines`（每日签文池与确定性挑选）、`test_integrity`（数据完整性域：牌库/签文池/字形覆盖/配置枚举校验）、`test_judgement_corpus`（判定语料回归：帮助/每日牌运边界问法锁定）、`test_kv_utils`（KV 读写降级：存储故障与无记录不折叠）、`test_fault_injection`（故障注入矩阵：存储故障 × 各自消费者的降级契约，含 AI 异常不拆整卦）、`test_ai_budget`（AI 总预算：单次占卜的 AI 花费上界、两段共用截止点与回退）、`test_structure_check`（解读结构校验：三档口径行为、严格判据红线与影子计数分母）、`test_stub_signatures`（打桩与真实签名一致性）、`test_docs_consistency`（测试清单与实际文件对账）、`test_release_gates`（发布红线：版本六项一致、市场包体上限、运行时代码全部入库、跟踪集无开发侧残留）、`test_config_freshness`（配置新鲜度自证：两入口进门读数行与陈旧实例告警）、`test_astrbot_contract`（AstrBot 契约守卫：我们依赖的框架面在真实 AstrBot 里还活着，没装框架时跳过）、`test_import_model`（导入模型红线：插件模块只有一个身份、插件根不碰 `sys.path` / `sys.modules`、框架按前缀清理能把插件模块删净）；先 `pip install -r requirements-dev.txt`（开发工具链的版本钉在这里，本地与 CI 装的是同一套），再运行 `python -m pytest` 即可验证。**测试文件导入约定：一律走 AstrBot 运行时包路径（`from data.plugins.astrbot_plugin_star_feather.daily import ...`），包链由 `tests/conftest.py` 在收集前搭好；插件根相对导入已废弃**（2026-10-12：插件内部改成包内相对导入后，模块只有包名一个身份，测试跟着换过来；旧的「插件目录进 `sys.path` + 顶层名」会让同一个文件出现两份模块对象，补丁静默打空）
 
 ## 📜 更新记录
 

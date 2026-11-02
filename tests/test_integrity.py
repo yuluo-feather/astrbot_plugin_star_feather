@@ -9,7 +9,7 @@ from data.plugins.astrbot_plugin_star_feather import fonts
 from data.plugins.astrbot_plugin_star_feather.dailylines import SIGIL_LINES
 from data.plugins.astrbot_plugin_star_feather.settings import (
     PERSONA_VALUES,
-    TarotSettings,
+    parse,
 )
 from data.plugins.astrbot_plugin_star_feather.tarot_data import TAROT_CARDS
 from PIL import ImageFont
@@ -193,18 +193,18 @@ class TestSchemaIntegrity:
         assert PERSONA_VALUES == ("off", "tsundere", "gentle", "mystic", "random")
 
     def test_defaults(self):
-        s = TarotSettings(None)
-        assert s.send_mode == "forward"
-        assert s.shuffle_lines is True
-        assert s.disclaimer == "✨ 占卜仅供娱乐参考，选择权永远在你手里。"
-        assert s.daily_fixed is True
-        assert s.enable_ai is True
-        assert s.segment_size == 300
-        assert s.ai_timeout == 30
-        assert s.ai_cooldown == 60
-        assert s.llm_tool_enabled is True
-        assert s.llm_tool_cooldown == 60
-        assert s.cmd_rate_limit == 10
-        assert s.daily_count_limit == 0
-        assert s.ai_provider_id == ""
-        assert s.ai_max_len == 200
+        s = parse(None)
+        assert s.output.send_mode == "forward"
+        assert s.output.shuffle_lines is True
+        assert s.output.disclaimer == "✨ 占卜仅供娱乐参考，选择权永远在你手里。"
+        assert s.output.daily_fixed is True
+        assert s.ai.enable_ai is True
+        assert s.output.segment_size == 300
+        assert s.ai.timeout == 30
+        assert s.ai.fail_cooldown == 60
+        assert s.tool.llm_enabled is True
+        assert s.tool.llm_cooldown == 60
+        assert s.tool.cmd_rate_limit == 10
+        assert s.limit.daily_count == 0
+        assert s.ai.provider_id == ""
+        assert s.ai.question_max_len == 200

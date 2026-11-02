@@ -1,13 +1,10 @@
-"""配置语义层单测：send_mode 三态 / 旧配置迁移 / TarotSettings 解析。
+"""配置语义层单测：send_mode 三态 / 旧配置迁移 / Settings 解析。
 ——默认值都在这，别处别自作主张。"""
 from data.plugins.astrbot_plugin_star_feather.settings import (
     DEFAULT_AI_PERSONA,
-    TarotSettings,
+    parse,
     resolve_send_mode,
 )
-
-# 字段对齐用例要拿 StarTarot 的注解表做对照（配置字段在插件侧的落点）
-from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
 
 
 class TestResolveSendMode:
@@ -41,13 +38,13 @@ class TestDailyCard:
     """output.daily_card：今日牌运卡海报开关（关闭 → 回退普通牌面图）。"""
 
     def test_default_true(self):
-        assert TarotSettings(None).daily_card is True
+        assert parse(None).output.daily_card is True
 
     def test_off_false(self):
-        assert TarotSettings({"output": {"daily_card": False}}).daily_card is False
+        assert parse({"output": {"daily_card": False}}).output.daily_card is False
 
     def test_flat_legacy(self):
-        assert TarotSettings({"daily_card": False}).daily_card is False
+        assert parse({"daily_card": False}).output.daily_card is False
 
 
 class TestAiPersona:
@@ -55,112 +52,96 @@ class TestAiPersona:
 
     def test_default_random(self):
         assert DEFAULT_AI_PERSONA == "random"
-        assert TarotSettings(None).ai_persona == "random"
+        assert parse(None).ai.persona == "random"
 
     def test_valid_values(self):
         for v in ("off", "tsundere", "gentle", "mystic", "random"):
-            assert TarotSettings({"ai": {"persona": v}}).ai_persona == v
+            assert parse({"ai": {"persona": v}}).ai.persona == v
 
     def test_invalid_falls_back_random(self):
-        assert TarotSettings({"ai": {"persona": "evil"}}).ai_persona == "random"
-        assert TarotSettings({"ai": {"persona": ""}}).ai_persona == "random"
-        assert TarotSettings({"ai": {"persona": 123}}).ai_persona == "random"
+        assert parse({"ai": {"persona": "evil"}}).ai.persona == "random"
+        assert parse({"ai": {"persona": ""}}).ai.persona == "random"
+        assert parse({"ai": {"persona": 123}}).ai.persona == "random"
 
     def test_flat_legacy(self):
         # 旧扁平配置兼容：顶层 persona 键（config 扁平回退规则）
-        assert TarotSettings({"persona": "mystic"}).ai_persona == "mystic"
+        assert parse({"persona": "mystic"}).ai.persona == "mystic"
 
 
-class TestTarotSettings:
-    def test_field_table_matches_settings(self):
-        """配置字段三处口径同集合：settings 解析出的 = tarot_core 的注解表 = 实例上真有的。
-
-        插件侧字段靠 tarot_core.__init__ 的 setattr 循环装配，静态分析看不见循环，
-        所以那里另有一份注解表给静态检查用（mypy 格）。两份一旦漂开：轻则静态检查
-        报「没有这个属性」，重则运行期 AttributeError——这条就是拦住它俩的。
-        """
-        fields = set(vars(TarotSettings(None)))
-        assert set(StarTarot.__annotations__) == fields, "tarot_core 的字段注解表与 settings 漂了"
-        assert fields <= set(vars(StarTarot(None, None))), "setattr 循环漏字段：实例上少了属性"
-
+class TestParsedSettings:
     def test_grouped_values(self):
         cfg = {"ai": {"ai_timeout": 7, "enable_ai": False, "question_max_len": 0,
                       "parallel_stages": False},
                "output": {"send_mode": "plain", "disclaimer": "x", "daily_fixed": False},
                "limit": {"daily_count": 3},
                "tool": {"llm_tool_enabled": False}}
-        s = TarotSettings(cfg)
-        assert s.ai_timeout == 7 and s.enable_ai is False
-        assert s.send_mode == "plain" and s.ai_max_len == 0
-        assert s.daily_count_limit == 3 and s.disclaimer == "x" and s.daily_fixed is False
-        assert s.llm_tool_enabled is False
-        assert s.ai_parallel_stages is False
+        s = parse(cfg)
+        assert s.ai.timeout == 7 and s.ai.enable_ai is False
+        assert s.output.send_mode == "plain" and s.ai.question_max_len == 0
+        assert s.limit.daily_count == 3 and s.output.disclaimer == "x"
+        assert s.output.daily_fixed is False
+        assert s.tool.llm_enabled is False
+        assert s.ai.parallel_stages is False
 
     def test_parallel_stages_defaults_on(self):
         """两段 AI 默认并发（ai.parallel_stages=true），关掉才顺序执行。"""
         from data.plugins.astrbot_plugin_star_feather.settings import (
             DEFAULT_AI_PARALLEL_STAGES,
         )
-        assert TarotSettings(None).ai_parallel_stages is DEFAULT_AI_PARALLEL_STAGES
+        assert parse(None).ai.parallel_stages is DEFAULT_AI_PARALLEL_STAGES
 
     def test_negative_question_max_len_falls_back_to_default(self):
         """负数不是「更不压缩」：坏值回默认，只有 0 才表示明确关闭截断。"""
         from data.plugins.astrbot_plugin_star_feather.settings import (
             DEFAULT_QUESTION_MAX_LEN,
         )
-        assert TarotSettings({"ai": {"question_max_len": -5}}).ai_max_len == DEFAULT_QUESTION_MAX_LEN
+        assert parse({"ai": {"question_max_len": -5}}).ai.question_max_len == DEFAULT_QUESTION_MAX_LEN
         # -0.5 会被 int() 截成 0，不能当成「明确关闭截断」
-        assert TarotSettings({"ai": {"question_max_len": -0.5}}).ai_max_len == DEFAULT_QUESTION_MAX_LEN
+        assert parse({"ai": {"question_max_len": -0.5}}).ai.question_max_len == DEFAULT_QUESTION_MAX_LEN
         # YAML 的 .inf / -.inf 在 int() 处抛 OverflowError，不能带走插件加载
-        assert TarotSettings({"ai": {"question_max_len": float("inf")}}).ai_max_len == DEFAULT_QUESTION_MAX_LEN
-        assert TarotSettings({"ai": {"question_max_len": float("-inf")}}).ai_max_len == DEFAULT_QUESTION_MAX_LEN
-        assert TarotSettings({"ai": {"question_max_len": 120}}).ai_max_len == 120
+        assert parse({"ai": {"question_max_len": float("inf")}}).ai.question_max_len == DEFAULT_QUESTION_MAX_LEN
+        assert parse({"ai": {"question_max_len": float("-inf")}}).ai.question_max_len == DEFAULT_QUESTION_MAX_LEN
+        assert parse({"ai": {"question_max_len": 120}}).ai.question_max_len == 120
 
     def test_ai_timeout_semantics_zero_unlimited_others_floored(self):
-        """0 = 不限制单个请求；**非 0 取值一律不低于 5 秒**（2026-10-14 主人定）。
-
-        两句话合起来才完整：0 是「关掉这一档」的开关，1~4 秒与负数照旧夹成 5 秒——
-        「还没发出去就注定超时」不是用户想要的自由度，是自残。
-        不限制时仍有总预算与牌灵阶段上限两道独立约束，见 AiBudget。
-        """
-        assert TarotSettings({"ai": {"ai_timeout": 0}}).ai_timeout == 0
-        assert TarotSettings({"ai": {"ai_timeout": 3}}).ai_timeout == 5
-        assert TarotSettings({"ai": {"ai_timeout": -3}}).ai_timeout == 5
-        # 边界：恰好 5 秒与更大的值原样保留
-        assert TarotSettings({"ai": {"ai_timeout": 5}}).ai_timeout == 5
-        assert TarotSettings({"ai": {"ai_timeout": 30}}).ai_timeout == 30
+        """0 = 不限制单个请求；**非 0 取值一律不低于 5 秒**（2026-10-14 主人定）。"""
+        assert parse({"ai": {"ai_timeout": 0}}).ai.timeout == 0
+        assert parse({"ai": {"ai_timeout": 3}}).ai.timeout == 5
+        assert parse({"ai": {"ai_timeout": -3}}).ai.timeout == 5
+        assert parse({"ai": {"ai_timeout": 5}}).ai.timeout == 5
+        assert parse({"ai": {"ai_timeout": 30}}).ai.timeout == 30
 
     def test_ai_budget_only_explicit_zero_means_unlimited(self):
         """只有显式 0 = 不限制；负数/非数字回退默认值（-10 不许被夹成 0）。"""
         from data.plugins.astrbot_plugin_star_feather.settings import DEFAULT_AI_BUDGET
-        assert TarotSettings({"ai": {"ai_budget_seconds": 0}}).ai_budget == 0
-        assert TarotSettings({"ai": {"ai_budget_seconds": -10}}).ai_budget == DEFAULT_AI_BUDGET
-        assert TarotSettings({"ai": {"ai_budget_seconds": "oops"}}).ai_budget == DEFAULT_AI_BUDGET
-        assert TarotSettings({"ai": {"ai_budget_seconds": 300}}).ai_budget == 300
+        assert parse({"ai": {"ai_budget_seconds": 0}}).ai.budget_seconds == 0
+        assert parse({"ai": {"ai_budget_seconds": -10}}).ai.budget_seconds == DEFAULT_AI_BUDGET
+        assert parse({"ai": {"ai_budget_seconds": "oops"}}).ai.budget_seconds == DEFAULT_AI_BUDGET
+        assert parse({"ai": {"ai_budget_seconds": 300}}).ai.budget_seconds == 300
         # 小数不能被截成 0（0.5 秒 -> 至少 1 秒），布尔 / inf 一律回退默认值
-        assert TarotSettings({"ai": {"ai_budget_seconds": 0.5}}).ai_budget == 1
-        assert TarotSettings({"ai": {"ai_budget_seconds": True}}).ai_budget == DEFAULT_AI_BUDGET
-        assert TarotSettings({"ai": {"ai_budget_seconds": float("inf")}}).ai_budget == DEFAULT_AI_BUDGET
+        assert parse({"ai": {"ai_budget_seconds": 0.5}}).ai.budget_seconds == 1
+        assert parse({"ai": {"ai_budget_seconds": True}}).ai.budget_seconds == DEFAULT_AI_BUDGET
+        assert parse({"ai": {"ai_budget_seconds": float("inf")}}).ai.budget_seconds == DEFAULT_AI_BUDGET
         # 超大整数（float 溢出）与下溢成 -0.0 的极小负数都不许变成「不限制」
-        assert TarotSettings({"ai": {"ai_budget_seconds": 10 ** 400}}).ai_budget == DEFAULT_AI_BUDGET
-        assert TarotSettings({"ai": {"ai_budget_seconds": "-1e-9999"}}).ai_budget == DEFAULT_AI_BUDGET
-        assert TarotSettings({"ai": {"ai_budget_seconds": -0.0}}).ai_budget == DEFAULT_AI_BUDGET
+        assert parse({"ai": {"ai_budget_seconds": 10 ** 400}}).ai.budget_seconds == DEFAULT_AI_BUDGET
+        assert parse({"ai": {"ai_budget_seconds": "-1e-9999"}}).ai.budget_seconds == DEFAULT_AI_BUDGET
+        assert parse({"ai": {"ai_budget_seconds": -0.0}}).ai.budget_seconds == DEFAULT_AI_BUDGET
         # 下溢成 +0.0 的极小正数同样是坏值：它不是「显式 0」
-        assert TarotSettings({"ai": {"ai_budget_seconds": "1e-9999"}}).ai_budget == DEFAULT_AI_BUDGET
+        assert parse({"ai": {"ai_budget_seconds": "1e-9999"}}).ai.budget_seconds == DEFAULT_AI_BUDGET
         # 有限但大到算不出截止点的值（1e308）回退默认；上限本身仍可用
-        assert TarotSettings({"ai": {"ai_budget_seconds": "1e308"}}).ai_budget == DEFAULT_AI_BUDGET
-        assert TarotSettings({"ai": {"ai_budget_seconds": 24 * 3600 + 1}}).ai_budget == DEFAULT_AI_BUDGET
-        assert TarotSettings({"ai": {"ai_budget_seconds": 24 * 3600}}).ai_budget == 24 * 3600
+        assert parse({"ai": {"ai_budget_seconds": "1e308"}}).ai.budget_seconds == DEFAULT_AI_BUDGET
+        assert parse({"ai": {"ai_budget_seconds": 24 * 3600 + 1}}).ai.budget_seconds == DEFAULT_AI_BUDGET
+        assert parse({"ai": {"ai_budget_seconds": 24 * 3600}}).ai.budget_seconds == 24 * 3600
 
     def test_legacy_flat_still_loads(self):
         # 升级前扁平配置：分组缺失时回退顶层读取
-        s = TarotSettings({"show_image": False, "forward_result": True})
-        assert s.send_mode == "forward"
-        assert TarotSettings({"ai_timeout": 9}).ai_timeout == 9
+        s = parse({"show_image": False, "forward_result": True})
+        assert s.output.send_mode == "forward"
+        assert parse({"ai_timeout": 9}).ai.timeout == 9
 
 
 class TestSettingsDataclass:
-    """冻结的嵌套 Settings：默认值只在这里，扁平视图只是迁移期兼容层。"""
+    """冻结的嵌套 Settings：默认值只在这里。"""
 
     def test_defaults_are_grouped_and_frozen(self):
         import dataclasses
@@ -172,7 +153,6 @@ class TestSettingsDataclass:
             DEFAULT_DAILY_COUNT,
             DEFAULT_SEND_MODE,
             Settings,
-            parse,
         )
         s = parse(None)
         assert isinstance(s, Settings)
@@ -185,17 +165,13 @@ class TestSettingsDataclass:
         with pytest.raises(dataclasses.FrozenInstanceError):
             s.ai.timeout = 1
 
-    def test_parse_nested_matches_flat_view(self):
-        from data.plugins.astrbot_plugin_star_feather.settings import parse
+    def test_parse_nested_values(self):
         cfg = {"ai": {"ai_timeout": 7, "parallel_stages": False, "ai_budget_seconds": 60},
                "tool": {"llm_tool_cooldown": 5},
                "limit": {"daily_count": 3},
                "output": {"send_mode": "plain", "segment_size": 120}}
         s = parse(cfg)
-        t = TarotSettings(cfg)
         assert (s.ai.timeout, s.ai.parallel_stages, s.ai.budget_seconds) == (7, False, 60)
-        assert (t.ai_timeout, t.ai_parallel_stages, t.ai_budget) == (7, False, 60)
-        assert s.tool.llm_cooldown == t.llm_tool_cooldown == 5
-        assert s.limit.daily_count == t.daily_count_limit == 3
-        assert (s.output.send_mode, s.output.segment_size) == (t.send_mode, t.segment_size) \
-            == ("plain", 120)
+        assert s.tool.llm_cooldown == 5
+        assert s.limit.daily_count == 3
+        assert (s.output.send_mode, s.output.segment_size) == ("plain", 120)

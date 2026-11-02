@@ -71,7 +71,7 @@ import conftest  # noqa: F401  装上 astrbot 桩与插件包链
 
 pkg = "{pkg}"
 main1 = importlib.import_module(pkg + ".main")
-core1 = importlib.import_module(pkg + ".tarot_core")
+core1 = importlib.import_module(pkg + ".services.render")
 tracked = sorted(n for n in sys.modules if n.startswith(pkg + "."))
 assert len(tracked) >= 10, "插件模块没挂在包名下：" + repr(tracked)
 assert pkg + ".daily" in tracked and pkg + ".prompts" in tracked, str(tracked)
@@ -83,10 +83,10 @@ left = sorted(n for n in sys.modules if n.startswith(pkg + "."))
 assert left == [], "前缀清理漏了：" + repr(left)
 
 main2 = importlib.import_module(pkg + ".main")
-core2 = importlib.import_module(pkg + ".tarot_core")
+core2 = importlib.import_module(pkg + ".services.render")
 card2 = importlib.import_module(pkg + ".card_render")
 assert main2 is not main1 and core2 is not core1, "重新导入拿到的是旧模块（僵尸没清掉）"
-# 同源自检：tarot_core 的模块级名字引用的必须是新 card_render 里的那个函数
+# 同源自检：services.render 的模块级名字引用的必须是新 card_render 里的那个函数
 assert core2._schedule_image_cleanup.__globals__ is card2.__dict__, "两模块不是同一代"
 print("OK:" + str(len(tracked)))
 '''

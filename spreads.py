@@ -1,7 +1,7 @@
 """牌阵定义：阵名 → 牌位列表（张数取 len）。
 
 选阵与问题清洗已收进 intent.py（2026-11-02）：这里只留牌阵本身的数据，
-tarot_core 抽牌、intent 校验/选阵、deliver 展示都读同一份。
+core.draw 抽牌、intent 校验/选阵、deliver 展示都读同一份。
 """
 
 FORMATIONS = {

@@ -108,27 +108,28 @@ READ_OK_MODES = ["write_down", "poison_list", "poison_str", "poison_int",
 READ_FAIL_MODES = ["read_down", "no_interface"]
 
 
-# ---------------- 上游桩（tarot / 渲染） ----------------
-def _fake_tarot(interp="AI解读文本", spirit="AI牌灵的话", exc=None, render_lock=None):
-    t = types.SimpleNamespace(_render_lock=render_lock)
+# ---------------- 上游桩（解释器 / 渲染） ----------------
+class _FakeInterp:
+    """解释器桩：候选链与缓存层都只认 interpret / spirit_line 两个方法。"""
 
-    async def _ai_interpret(event, formation, positions, picks, clean, persona_eff=None, budget=None):
-        if exc:
-            raise exc
-        return interp
+    def __init__(self, interp="AI解读文本", spirit="AI牌灵的话", exc=None):
+        self.interp, self.spirit, self.exc = interp, spirit, exc
 
-    async def spirit_line(event, pairs, topic, persona_eff, budget=None):
-        if exc:
-            raise exc
-        return spirit
+    async def interpret(self, umo, formation, positions, picks, user_input, detail,
+                        persona_eff=None, budget=None):
+        if self.exc:
+            raise self.exc
+        return self.interp
 
-    t._ai_interpret = _ai_interpret
-    t.interpreter = types.SimpleNamespace(spirit_line=spirit_line)
-    return t
+    async def spirit_line(self, umo, cards, topic, persona_eff, budget=None):
+        if self.exc:
+            raise self.exc
+        return self.spirit
 
 
 def _fortune(kv, **kw):
-    return daily_mod.DailyFortune(kv, _fake_tarot(**kw))
+    kw.pop("render_lock", None)
+    return daily_mod.DailyFortune(kv, interpreter=_FakeInterp(**kw))
 
 
 def _expected_pick():
@@ -346,167 +347,129 @@ def test_gate_cooldown_write_failure_passes():
 # ================= ⑤ 渲染故障：海报挂了不拦主流程 =================
 @pytest.mark.parametrize("outcome", ["raise", None, "", "   ", 123])
 def test_poster_render_failure_returns_none(monkeypatch, outcome):
-    """海报渲染任何失败形态（抛异常 / None / 空串 / 非 str）一律返回 None，
-    调用方回退普通牌面图——海报是装饰，不是主流程。"""
+    """海报渲染任何失败形态一律返回 None，调用方回退普通牌面图。"""
+    from data.plugins.astrbot_plugin_star_feather.clock import Clock
+    from data.plugins.astrbot_plugin_star_feather.services import render as render_mod
+    from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
+
     def fake_render(card, upright, signature, date_text, save_dir=None):
         if outcome == "raise":
             raise RuntimeError("pillow down")
         return outcome
 
-    monkeypatch.setattr(daily_mod, "_render_daily_card_img", fake_render)
-    monkeypatch.setattr(daily_mod, "_schedule_image_cleanup", lambda img, delay=30: None)
-    got = _run(_fortune(KvSpy()).render_daily_card(["今日牌运"], [PICK], UID))
+    monkeypatch.setattr(render_mod, "_render_daily_card_img", fake_render)
+    monkeypatch.setattr(render_mod, "_schedule_image_cleanup", lambda img, delay=30: None)
+    got = _run(Renderer("", "plain").daily_card([PICK], UID, Clock()))
     assert got is None
 
 
 def test_poster_render_success_is_scheduled_for_cleanup(monkeypatch):
-    """对照组：成功路径要真的登记清理（否则图只会堆在临时目录里没人删）。
+    """对照组：成功路径要真的登记清理；延迟由 card_render 的统一保险丝给。"""
+    from data.plugins.astrbot_plugin_star_feather.clock import Clock
+    from data.plugins.astrbot_plugin_star_feather.services import render as render_mod
+    from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
 
-    延迟不进调用点：注册时只传路径，时长由 card_render.IMAGE_TTL_SECONDS 统一给
-    （此处断言 fake 收到的 delay 是 None＝调用点没自带数字）——曾出现普通牌面图
-    30 秒、海报 300 秒两个数字维护同一件事。
-    """
     seen = {}
-    monkeypatch.setattr(daily_mod, "_render_daily_card_img",
+    monkeypatch.setattr(render_mod, "_render_daily_card_img",
                         lambda card, upright, sig, date_text, save_dir=None: "C:/tmp/x.png")
-    monkeypatch.setattr(daily_mod, "_schedule_image_cleanup",
+    monkeypatch.setattr(render_mod, "_schedule_image_cleanup",
                         lambda img, delay=None: seen.update(img=img, delay=delay))
-    got = _run(_fortune(KvSpy()).render_daily_card(["今日牌运"], [PICK], UID))
+    got = _run(Renderer("", "plain").daily_card([PICK], UID, Clock()))
     assert got == "C:/tmp/x.png"
     assert seen == {"img": "C:/tmp/x.png", "delay": None}
 
 
-def test_poster_uses_lock_from_tarot(monkeypatch):
-    """渲染必须走 tarot._render_lock 那道并发闸（海报与普通牌面图同一把）。"""
-    import asyncio as aio
-    lock = aio.Semaphore(1)
-    monkeypatch.setattr(daily_mod, "_schedule_image_cleanup", lambda img, delay=30: None)
-    monkeypatch.setattr(daily_mod, "_render_daily_card_img",
-                        lambda card, upright, sig, date_text, save_dir=None: "C:/tmp/x.png")
-    f = _fortune(KvSpy(), render_lock=lock)
-    assert _run(f.render_daily_card(["今日牌运"], [PICK], UID)) == "C:/tmp/x.png"
-    assert lock._value == 1  # 用完归还：没被吞掉
-
-
-def test_render_slot_degrades_when_no_lock():
-    """桩对象（没有 tarot / 没有锁）退化成不限并发，而不是 AttributeError 崩掉。"""
-    with daily_mod._render_slot(types.SimpleNamespace()):
-        pass
-
-
-def test_render_slot_keeps_a_falsy_lock():
-    """锁「假值但非 None」也必须照用：判据是 is not None，不是真值。
-
-    旧写法 `getattr(...) or nullcontext()` 会把任何 falsy 的锁换成不限并发——
-    渲染并发锁被静默绕过，日志里一行痕迹都没有。asyncio.Semaphore 恰好没有
-    __bool__（默认真值恒真），真实锁把这个口子盖住了；换成自定义锁当场现形。
-    """
-    entered = []
-
-    class FalsyLock:
-        def __bool__(self):
-            return False  # 伪装成「没有锁」，但它是锁
-
-        async def __aenter__(self):
-            entered.append(True)
-
-        async def __aexit__(self, *exc):
-            return False
-
-    fortune = types.SimpleNamespace(tarot=types.SimpleNamespace(_render_lock=FalsyLock()))
-
-    async def run():
-        async with daily_mod._render_slot(fortune):
-            pass
-
-    _run(run())
-    assert entered, "falsy 的锁被 or 换成了 nullcontext：渲染并发锁静默失效"
-
-
 # ================= ⑥ 图片生命周期故障：发送前图没了，不能把整条消息带走 =================
+def _entry_evt():
+    evt = types.SimpleNamespace(unified_msg_origin="umo", message_str="问感情")
+    evt.result = None
+    evt.sent = []
+    evt.get_self_id = lambda: "12345"
+    evt.get_sender_id = lambda: "u1"
+    evt.should_call_llm = lambda v: None
+
+    def chain_result(chain):
+        evt.result = chain
+        return chain
+    evt.chain_result = chain_result
+
+    async def send(chain):
+        evt.sent.append(chain)
+    evt.send = send
+    return evt
+
+
+def _entry_plugin(*, settings, daily, interpreter, renderer):
+    from data.plugins.astrbot_plugin_star_feather.adapters.presenter import Presenter
+    from data.plugins.astrbot_plugin_star_feather.clock import Clock
+    from data.plugins.astrbot_plugin_star_feather.deliver import Deliverer
+    from data.plugins.astrbot_plugin_star_feather.services.reading import ReadingService
+
+    clock = Clock()
+    reading = ReadingService(settings=settings, clock=clock, daily=daily,
+                             interpreter=interpreter, renderer=renderer)
+    presenter = Presenter(Deliverer(settings.output.segment_size,
+                                    settings.output.disclaimer, False))
+
+    async def gate_check(event, for_command):
+        return None
+
+    container = types.SimpleNamespace(
+        settings=settings, gate=types.SimpleNamespace(check=gate_check),
+        reading=reading, presenter=presenter, renderer=renderer, clock=clock)
+    return types.SimpleNamespace(container=container, context=types.SimpleNamespace())
+
+
+def _run_entry(p, evt, question="羽签 问感情"):
+    from data.plugins.astrbot_plugin_star_feather.app import handlers
+    _run(handlers.command_entry(p, evt, question, version="0", err_tpl="断了"))
+
+
+def _plain_settings(**over):
+    from data.plugins.astrbot_plugin_star_feather.settings import parse
+    cfg = {"ai": {"enable_ai": False, "parallel_stages": True},
+           "output": {"send_mode": "plain", "daily_fixed": False,
+                      "daily_card": False, "shuffle_lines": False}}
+    for group, values in over.items():
+        cfg.setdefault(group, {}).update(values)
+    return parse(cfg)
+
+
 class TestImageGoneBeforeSend:
     """Issue #2：牌面图在**发送之前**就没了，平台在发送那一刻读文件读到空，
     整条消息链（图 + 解读 + 牌灵的话）一起被打回——用户什么都没收到。
 
-    真实故障链（2026-09-29 实机日志）：14:23:57 渲染 → 登记 30 秒清理 →
-    14:24:27 定时器删图 → 牌灵的话那次 AI 请求自己跑了 63 秒 → 14:25:03 发送 →
-    FileNotFoundError。当时的窗口由 ai_timeout × 候选数 × 2 段决定，**没有上界**。
-
-    2026-10-12 之后窗口本身被两道闸收掉了：ai.ai_budget_seconds 给 AI 阶段一个总预算，
-    ② 图片后置渲染把渲染点搬到两段 AI 之后（见 TestRenderAfterAI）——现在渲染到平台
-    读文件只剩毫秒。所以本类守的已经不是「那 63 秒」，而是两件仍然成立的事：
-      · 注入仍按「图渲染成功 → 文件在发送前消失」来做（② 之后这只可能来自外部删除，
-        不再是清理保险丝自己到点）；
-      · 「图片问题绝不带走消息」这条出口纪律，在顺序改动之后依然有效。
-    换句话说：这条链的原病灶被前面的闸堵住了，但如果有人把顺序挪回去、或者把核验删掉，
-    本类必须立刻红——它是那两道闸的下游保险。
-
-    注入方式刻意与真实一致：图正常渲染出来，在渲染返回那一刻把它删掉，
-    再走真 _run_reading → 真 _deliver，只看对外可观测的结果（链里 Image 指的文件
-    此刻到底存不存在、消息还发不发得出去）。非转发模式断言链首那张图——与线上
-    那条 [Image, Plain, Plain, Plain] 的失败链同形。
+    修复后的出口纪律：发送前核验（Renderer.ensure_image）补渲染一次；补不回来就降级无图，
+    消息照发。渲染已后置到两段 AI 之后，这里守的是出口，不是图片年龄。
     """
 
     FORMATION = "羽签"
     POSITIONS = ["你的当下"]
 
     @staticmethod
-    def _collect(agen):
-        async def run():
-            return [x async for x in agen]
-        return asyncio.run(run())
-
-    @staticmethod
-    def _evt():
-        evt = types.SimpleNamespace()
-        evt.result = None
-        evt.sent = []
-        evt.get_self_id = lambda: "12345"
-
-        def chain_result(chain):
-            evt.result = chain
-            return chain
-        evt.chain_result = chain_result
-
-        async def send(chain):
-            evt.sent.append(chain)
-        evt.send = send
-        return evt
-
-    @staticmethod
     def _plugin(render, on_after_render=None):
-        """真入口 + 真核心 + 真分发，只把「渲染」和「AI 那两段」换成可控的桩。
+        """真入口 + 真渲染器 + 真分发，只把「渲染实现」和 AI 换成可控桩。"""
+        from data.plugins.astrbot_plugin_star_feather.clock import Clock
+        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.interpret import AiInterpreter
+        from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
 
-        on_after_render：渲染产图后立刻回调一次（仅第一次渲染触发）。注入点选在
-        这里而不是 AI 里，是因为 ② 之后「图在渲染与发送之间不见」只剩这一种可达
-        路径——删图的手不再是清理保险丝，而是外部因素，它落在渲染刚收工那一瞬。
-        """
-        from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
-        from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
-        t = StarTarot(FakeContext(None), None)
-        # 非转发：结果合并成一条链，链首即牌面图。注意 Deliverer 在构造期就把
-        # send_mode 解析成 forward_result 了，改字段得连它一起改，否则断言看的是别的分支
-        t.send_mode = "plain"
-        t.deliverer.forward_result = False
-        t.enable_ai = False  # 走本地牌义兜底，本用例不碰 provider
         calls = []
 
-        async def fake_render(formation, positions, picks, *a):
+        def fake_sync(formation, positions, picks):
             calls.append(formation)
             path = render()
             if on_after_render and len(calls) == 1:
-                on_after_render()  # 图刚渲染出来就没了：残留窗口的模型
+                on_after_render()
             return path
 
-        t._maybe_render_image = fake_render
-        p = StarFeatherPlugin.__new__(StarFeatherPlugin)
-        p.tarot = t
-        p.daily_card = False
-        p._shuffle_hint = lambda: None
-
-        async def fake_spirit(event, uid, picks, clean, persona_eff, budget=None):
-            return "牌灵今天懒得开口"
-        p.daily = types.SimpleNamespace(spirit_cached=fake_spirit)
+        renderer = Renderer(image_dir="", send_mode="plain")
+        renderer._render_sync = fake_sync
+        settings = _plain_settings()
+        interpreter = AiInterpreter(FakeContext(None), enable_ai=False)
+        daily = DailyFortune(KvSpy(), clock=Clock(), interpreter=interpreter)
+        p = _entry_plugin(settings=settings, daily=daily, interpreter=interpreter,
+                          renderer=renderer)
         return p, calls
 
     @staticmethod
@@ -520,17 +483,17 @@ class TestImageGoneBeforeSend:
         rendered = []
 
         def render():
-            path = fresh if rendered else first  # 第一次给 first（稍后被清理），补渲染给 fresh
+            path = fresh if rendered else first
             rendered.append(path)
             open(path, "wb").write(b"PNG")
             return path
 
         def kill_the_image():
-            os.remove(first)  # 图刚渲染出来就被外部删了（保险丝之外的路径）
+            os.remove(first)
 
         p, calls = self._plugin(render, on_after_render=kill_the_image)
-        evt = self._evt()
-        self._collect(p._run_reading(evt, self.FORMATION, self.POSITIONS, [PICK], "问感情"))
+        evt = _entry_evt()
+        _run_entry(p, evt)
         assert evt.result, "图补回来了，消息必须照发"
         imgs = self._images(evt.result)
         assert len(imgs) == 1
@@ -539,20 +502,20 @@ class TestImageGoneBeforeSend:
         assert calls == [self.FORMATION, self.FORMATION], "正好补渲染一次"
 
     def test_rerender_failure_degrades_to_text_and_still_sends(self, tmp_path):
-        """图没了而且重渲染也失败 → 降级为无图，但解读照发（不能为了张图把结果扣下）。"""
+        """图没了而且重渲染也失败 → 降级为无图，但解读照发。"""
         path = str(tmp_path / "tarot_only.png")
         rendered = []
 
         def render():
             rendered.append(path)
             if len(rendered) > 1:
-                return None  # 第二次：渲染资源也没了
+                return None
             open(path, "wb").write(b"PNG")
             return path
 
         p, calls = self._plugin(render, on_after_render=lambda: os.remove(path))
-        evt = self._evt()
-        self._collect(p._run_reading(evt, self.FORMATION, self.POSITIONS, [PICK], "问感情"))
+        evt = _entry_evt()
+        _run_entry(p, evt)
         assert evt.result, "无图也必须把解读发出去"
         assert not self._images(evt.result), "图已不存在，就不该再把 Image 交出去"
         texts = [getattr(c, "text", "") for c in evt.result]
@@ -560,7 +523,7 @@ class TestImageGoneBeforeSend:
         assert calls == [self.FORMATION, self.FORMATION]
 
     def test_image_alive_adds_no_extra_render(self, tmp_path):
-        """对照组：图还在 → 一次都不多渲染（核验不能变成每签多烧一张图）。"""
+        """对照组：图还在 → 一次都不多渲染。"""
         path = str(tmp_path / "tarot_ok.png")
 
         def render():
@@ -568,52 +531,49 @@ class TestImageGoneBeforeSend:
             return path
 
         p, calls = self._plugin(render)
-        evt = self._evt()
-        self._collect(p._run_reading(evt, self.FORMATION, self.POSITIONS, [PICK], "问感情"))
+        evt = _entry_evt()
+        _run_entry(p, evt)
         assert [c.file for c in self._images(evt.result)] == [path]
         assert calls == [self.FORMATION], "图在就不该重渲染"
 
     def test_no_image_skips_verification(self):
-        """本来就无图（text_only / 渲染失败）：不核验、不重渲染，消息照发。"""
+        """本来就无图：不核验、不重渲染，消息照发。"""
         p, calls = self._plugin(lambda: None)
-        evt = self._evt()
-        self._collect(p._run_reading(evt, self.FORMATION, self.POSITIONS, [PICK], "问感情"))
+        evt = _entry_evt()
+        _run_entry(p, evt)
         assert evt.result
         assert calls == [self.FORMATION]
         assert not self._images(evt.result)
 
-
     def test_verify_image_returns_as_is_on_healthy_path(self, tmp_path):
         """核验函数自身的契约：存在→原样返回；空/None→原样返回（不额外渲染）。"""
         p, calls = self._plugin(lambda: None)
+        renderer = p.container.renderer
         path = str(tmp_path / "tarot_v.png")
         open(path, "wb").write(b"PNG")
-        assert _run(p._ensure_image(path, self.FORMATION, self.POSITIONS, [PICK])) == path
-        assert _run(p._ensure_image(None, self.FORMATION, self.POSITIONS, [PICK])) is None
-        assert _run(p._ensure_image("", self.FORMATION, self.POSITIONS, [PICK])) == ""
+        assert _run(renderer.ensure_image(path, self.FORMATION, self.POSITIONS, [PICK])) == path
+        assert _run(renderer.ensure_image(None, self.FORMATION, self.POSITIONS, [PICK])) is None
+        assert _run(renderer.ensure_image("", self.FORMATION, self.POSITIONS, [PICK])) == ""
         assert calls == [], "这三种情形都不该触发渲染"
 
     def test_verify_image_failure_paths_return_none(self, tmp_path):
-        """核验函数：图不在 → 重渲染；重渲染再失败（None / 抛异常）→ 无图，不把异常带给发送侧。"""
+        """核验函数：图不在 → 重渲染；重渲染再失败 → 无图，不把异常带给发送侧。"""
+        p, _ = self._plugin(lambda: None)
+        renderer = p.container.renderer
+        missing = str(tmp_path / "never_there.png")
+
         async def boom(*a):
             raise RuntimeError("pillow down")
 
-        p, _ = self._plugin(lambda: None)
-        missing = str(tmp_path / "never_there.png")
-        assert _run(p._ensure_image(missing, self.FORMATION, self.POSITIONS, [PICK])) is None
-        p.tarot._maybe_render_image = boom
-        assert _run(p._ensure_image(missing, self.FORMATION, self.POSITIONS, [PICK])) is None
+        renderer.card = boom
+        assert _run(renderer.ensure_image(missing, self.FORMATION,
+                                          self.POSITIONS, [PICK])) is None
 
     def test_verify_image_treats_a_vanishing_file_as_missing(self, tmp_path, monkeypatch):
-        """exists 与 getsize 之间的竞态：getsize 抛 FileNotFoundError 也要走补渲染。
-
-        两步式写法（先 exists 再 getsize）会让「正好在两步之间被外部删掉」落进
-        宽泛的 OSError 分支、把过期路径当健康图交出去。现在只调一次 getsize，
-        FileNotFoundError 按缺失处理；其他 OSError（权限/长度）维持原语义。
-        """
+        """exists 与 getsize 之间的竞态：getsize 抛 FileNotFoundError 也要走补渲染。"""
         stale = str(tmp_path / "tarot_race.png")
         fresh = str(tmp_path / "tarot_fresh.png")
-        open(stale, "wb").write(b"PNG")   # 先真实存在：模拟「判完之后、取值之前被删」
+        open(stale, "wb").write(b"PNG")
 
         def render():
             open(fresh, "wb").write(b"PNG")
@@ -624,19 +584,20 @@ class TestImageGoneBeforeSend:
 
         def flaky(path):
             if path == stale:
-                os.remove(stale)          # 竞态正好发生在这里
+                os.remove(stale)
                 raise FileNotFoundError(path)
             return real_getsize(path)
 
         monkeypatch.setattr(os.path, "getsize", flaky)
-        assert _run(p._ensure_image(stale, self.FORMATION, self.POSITIONS, [PICK])) == fresh
+        assert _run(p.container.renderer.ensure_image(
+            stale, self.FORMATION, self.POSITIONS, [PICK])) == fresh
         assert calls == [self.FORMATION], "消失的图必须补渲染一次"
 
     def test_verify_image_treats_other_oserrors_as_missing(self, tmp_path, monkeypatch):
-        """权限 / 路径非法等 OSError 同样走补渲染：未核验的路径不交给发送侧。"""
+        """权限 / 路径非法等 OSError 同样走补渲染。"""
         stale = str(tmp_path / "tarot_unreadable.png")
         fresh = str(tmp_path / "tarot_fresh2.png")
-        open(stale, "wb").write(b"PNG")   # 先存在，再让取值失败
+        open(stale, "wb").write(b"PNG")
 
         def render():
             open(fresh, "wb").write(b"PNG")
@@ -651,7 +612,8 @@ class TestImageGoneBeforeSend:
             return real_getsize(path)
 
         monkeypatch.setattr(os.path, "getsize", denied)
-        assert _run(p._ensure_image(stale, self.FORMATION, self.POSITIONS, [PICK])) == fresh
+        assert _run(p.container.renderer.ensure_image(
+            stale, self.FORMATION, self.POSITIONS, [PICK])) == fresh
         assert calls == [self.FORMATION], "问不出大小的图必须补渲染一次"
 
     def test_verify_image_treats_valueerror_as_missing(self, tmp_path):
@@ -663,87 +625,66 @@ class TestImageGoneBeforeSend:
             return fresh
 
         p, calls = self._plugin(render)
-        assert _run(p._ensure_image("a\0b.png", self.FORMATION,
-                                    self.POSITIONS, [PICK])) == fresh
+        assert _run(p.container.renderer.ensure_image(
+            "a\0b.png", self.FORMATION, self.POSITIONS, [PICK])) == fresh
         assert calls == [self.FORMATION], "ValueError 也必须走补渲染"
 
 
 # ============ ② 图片后置渲染：渲染排在两段 AI 之后（2026-10-12） ============
 class TestRenderAfterBothAI:
-    """顺序契约：渲染必须发生在牌灵的话与解读**之后**、发送之前。
-
-    为什么值得一条红线：这个顺序既是「图熬过 AI 窗口」的解法，也是唯一让它成立的
-    东西——只要有人把渲染挪回 AI 之前（改代码时最容易的动机是「早点出图、让等待被
-    渲染填满」），窗口立刻恢复成 AI 总预算的量级，Issue #2 的故障链原地复活，而
-    功能测试会全绿：谁都还在出图、谁都还在发消息，只是那张图的寿命又不受控了。
-
-    断言用调用时间线，不碰内部实现：只记「谁先被调用」。同时钉住代价的那一面——
-    渲染返回 None 时消息照样发得出去（无图走既有退路），后置不等于把结果扣住。
-    """
+    """顺序契约：渲染必须发生在牌灵的话与解读**之后**、发送之前。"""
 
     FORMATION = "羽签"
     POSITIONS = ["你的当下"]
 
-    @staticmethod
-    def _collect(agen):
-        async def run():
-            return [x async for x in agen]
-        return asyncio.run(run())
-
     def _timeline(self):
-        from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
-        from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
-        t = StarTarot(FakeContext(None), None)
-        t.send_mode = "plain"
-        t.deliverer.forward_result = False
-        t.enable_ai = False
         seen = []
 
-        async def fake_interp(event, formation, positions, picks, clean,
-                              persona_eff=None, budget=None):
-            seen.append("interp")
-            return "【第1张·你的当下】一段解读。"
+        class Daily:
+            async def pick_cached(self, uid):
+                return None
 
-        async def fake_render(formation, positions, picks, *a):
-            seen.append("render")
-            return None
+            async def spirit_cached(self, umo, uid, picks, topic, persona_eff, budget=None):
+                seen.append("spirit")
+                return "牌灵今天懒得开口"
 
-        t._ai_interpret = fake_interp
-        t._maybe_render_image = fake_render
-        p = StarFeatherPlugin.__new__(StarFeatherPlugin)
-        p.tarot = t
-        p.daily_card = False
-        p._shuffle_hint = lambda: None
+            async def interp_cached(self, *a, **kw):
+                return "【第1张·你的当下】一段解读。"
 
-        async def fake_spirit(event, uid, picks, clean, persona_eff, budget=None):
-            seen.append("spirit")
-            return "牌灵今天懒得开口"
-        p.daily = types.SimpleNamespace(spirit_cached=fake_spirit)
+        class Interp:
+            def new_budget(self):
+                from data.plugins.astrbot_plugin_star_feather.interpret import AiBudget
+                return AiBudget(120)
 
-        evt = types.SimpleNamespace()
-        evt.result = None
-        evt.sent = []
-        evt.get_self_id = lambda: "12345"
+            async def interpret(self, umo, formation, positions, picks, user_input,
+                                detail, persona_eff=None, budget=None):
+                seen.append("interp")
+                return "【第1张·你的当下】一段解读。"
 
-        def chain_result(chain):
-            evt.result = chain
-            return chain
-        evt.chain_result = chain_result
+        class Renderer:
+            async def card(self, formation, positions, picks):
+                seen.append("render")
+                return None
 
-        async def send(chain):
-            evt.sent.append(chain)
-        evt.send = send
-        self._collect(p._run_reading(evt, self.FORMATION, self.POSITIONS, [PICK], "问感情"))
+            async def daily_card(self, picks, uid, clock):
+                return None
+
+            async def ensure_image(self, img, formation, positions, picks):
+                return img
+
+        p = _entry_plugin(settings=_plain_settings(), daily=Daily(),
+                          interpreter=Interp(), renderer=Renderer())
+        evt = _entry_evt()
+        _run_entry(p, evt)
         return seen, evt
 
     def test_render_is_called_after_both_ai_stages(self):
         seen, evt = self._timeline()
         assert seen == ["spirit", "interp", "render"], (
-            f"渲染必须在两段 AI 之后：顺序被改回 AI 之前，图片寿命重新变成"
-            f"「AI 总预算量级」，Issue #2 的故障链复活（实际时间线 {seen!r}）")
+            f"渲染必须在两段 AI 之后（实际时间线 {seen!r}）")
 
     def test_render_failure_still_sends_result(self):
-        """渲染返回 None（后置付出的代价里最坏的一档）：结果照发，不因图扣下消息。"""
+        """渲染返回 None：结果照发，不因图扣下消息。"""
         _, evt = self._timeline()
         assert evt.result, "无图也要把解读发出去"
         texts = [getattr(c, "text", "") for c in evt.result]
@@ -762,25 +703,25 @@ class TestRenderAfterBothAI:
 # 名字必须带前缀——第一版顺手写成 _evt，把本文件顶部的模块级 _evt(uid) 覆盖掉了，
 # 于是「对照组：存储正常时配额真的会扣」那条用例拿到别的 uid，KeyError 红。
 # 别名 / 补丁 / 替换这类东西的射程，永远比你以为的宽一格。
-_gone_evt = TestImageGoneBeforeSend._evt
-_gone_collect = TestImageGoneBeforeSend._collect
+_gone_evt = _entry_evt
 
 
 def _live_modules():
-    """返回（StarFeatherPlugin, tarot_core, card_render, daily）——同一份模块对象。
+    """返回（StarFeatherPlugin, services.render, card_render, daily）——同一份模块对象。
 
-    插件内模块之间是包内相对导入，一条链上只有一个 tarot_core、一个 card_render，
-    按包路径直接 import 即得。末尾仍留一条同源自检：万一将来有人把它拆回「一份文件
-    两个身份」的形状，补丁会静默落空、用例变成永远绿的假证据，比红更难查。
+    插件内模块之间是包内相对导入，一条链上只有一个 services.render、一个 card_render，
+    按包路径直接 import 即得。末尾留一条同源自检：补丁打空会变成永远绿的假证据。
     """
-    from data.plugins.astrbot_plugin_star_feather import card_render, daily, tarot_core
+    from data.plugins.astrbot_plugin_star_feather import card_render, daily
     from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
+    from data.plugins.astrbot_plugin_star_feather.services import (
+        render as render_service,
+    )
 
-    fuse = tarot_core._schedule_image_cleanup
+    fuse = render_service._schedule_image_cleanup
     assert fuse.__globals__ is card_render.__dict__, \
-        "补丁会打空：tarot_core 与 card_render 不是同一份模块"
-    assert daily._schedule_image_cleanup is fuse, "daily 引的不是同一个函数对象"
-    return StarFeatherPlugin, tarot_core, card_render, daily
+        "补丁会打空：services.render 与 card_render 不是同一份模块"
+    return StarFeatherPlugin, render_service, card_render, daily
 
 
 class _ShuttingDownLoop:
@@ -809,70 +750,61 @@ def _loop_shutting_down(monkeypatch, *holders):
 
 class TestCleanupFuseNeverCarriesTheReading:
     """2026-10-01 逐点穷举注入查出来的窄口子：牌面图渲染有 try/except + 文字回退，
-    紧跟着的「登记清理」那一行却裸在兜底之外。同一条保险丝，daily 那边被外层 try 整段
-    兜住（登记失败＝海报卡回退），tarot_core 这边登记失败＝整条卦（图 + 解读 + 牌灵的话）
-    一起没：用户只收到提示和报错。
-
-    判据是量级对比：保险丝失效的代价＝临时目录里多一张图（启动清扫兜底），
+    紧跟着的「登记清理」那一行却裸在兜底之外。保险丝失效的代价＝临时目录里多一张图，
     整卦丢掉的代价＝用户这一次占卜没了。前者永远不该换来后者。
     """
 
     FORMATION = "羽签"
     POSITIONS = ["你的当下"]
 
-    def _reading_with_real_fuse(self, StarFeatherPlugin, tarot_core, tmp_path):
-        """真入口 + 真核心 + 真登记清理，只把「渲染」和「AI 两段」换桩。
+    def _reading_with_real_fuse(self, render_service, tmp_path):
+        """真入口 + 真渲染器 + 真登记清理，只把渲染实现与 AI 换桩。"""
+        from data.plugins.astrbot_plugin_star_feather.clock import Clock
+        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.interpret import AiInterpreter
+        from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
 
-        不能借 TestImageGoneBeforeSend._plugin：它把 _maybe_render_image 整个换成假的，
-        被测的那一行正好在它里面。
-        """
         path = str(tmp_path / "fuse_reading.png")
 
-        def fake_render_image(formation, positions, picks):
+        def fake_render_sync(formation, positions, picks):
             open(path, "wb").write(b"PNG")
             return path
 
-        t = tarot_core.StarTarot(FakeContext(None), None)
-        t.send_mode = "plain"
-        t.deliverer.forward_result = False
-        t.enable_ai = False          # 走本地牌义兜底，本用例不碰 provider
-        t._render_image = fake_render_image
-
-        p = StarFeatherPlugin.__new__(StarFeatherPlugin)
-        p.tarot = t
-        p.daily_card = False
-        p._shuffle_hint = lambda: None
-
-        async def fake_spirit(event, uid, picks, clean, persona_eff, budget=None):
-            return "牌灵今天懒得开口"
-        p.daily = types.SimpleNamespace(spirit_cached=fake_spirit)
+        renderer = Renderer(image_dir=str(tmp_path), send_mode="plain")
+        renderer._render_sync = fake_render_sync
+        settings = _plain_settings()
+        interpreter = AiInterpreter(FakeContext(None), enable_ai=False)
+        daily = DailyFortune(KvSpy(), clock=Clock(), interpreter=interpreter)
+        p = _entry_plugin(settings=settings, daily=daily, interpreter=interpreter,
+                          renderer=renderer)
         return p, path
 
     def test_reading_survives_when_fuse_cannot_register(self, monkeypatch, tmp_path):
-        StarFeatherPlugin, tarot_core, _cr, _daily = _live_modules()
-        p, path = self._reading_with_real_fuse(StarFeatherPlugin, tarot_core, tmp_path)
-        _loop_shutting_down(monkeypatch, tarot_core)
+        _Plugin, render_service, _cr, _daily = _live_modules()
+        p, path = self._reading_with_real_fuse(render_service, tmp_path)
+        _loop_shutting_down(monkeypatch, render_service)
         evt = _gone_evt()
-        _gone_collect(p._run_reading(evt, self.FORMATION, self.POSITIONS, [PICK], "问感情"))
+        _run_entry(p, evt)
         assert evt.result, "登记删图失败只是少个保险丝；整条卦不能跟着丢"
         imgs = [c for c in evt.result if type(c).__name__ == "Image"]
         assert [i.file for i in imgs] == [path], "该发出去的图照样发"
         assert any(getattr(c, "text", "") for c in evt.result), "解读/牌义不能缺"
 
     def test_poster_survives_when_fuse_cannot_register(self, monkeypatch, tmp_path):
-        """同一注入、同一条保险丝，走海报卡：登记失败不该把海报降级成普通牌面图。
-        （daily 那层 try 兜得住，所以旧行为不炸——但白渲染一张海报再丢掉。）"""
-        _Plugin, _tc, _cr, daily = _live_modules()
+        """同一注入、同一条保险丝，走海报卡：登记失败不该把海报降级成普通牌面图。"""
+        from data.plugins.astrbot_plugin_star_feather.clock import Clock
+        from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
+        _Plugin, render_service, _cr, _daily = _live_modules()
         path = str(tmp_path / "fuse_poster.png")
 
         def fake_poster(card, upright, signature, date_text, save_dir=None):
             open(path, "wb").write(b"PNG")
             return path
 
-        monkeypatch.setattr(daily, "_render_daily_card_img", fake_poster)
-        _loop_shutting_down(monkeypatch, daily)
-        got = _run(daily.DailyFortune(KvSpy(), _fake_tarot()).render_daily_card(
-            ["今日牌运"], [PICK], UID))
+        monkeypatch.setattr(render_service, "_render_daily_card_img", fake_poster)
+        _loop_shutting_down(monkeypatch, render_service)
+        renderer = Renderer(image_dir=str(tmp_path), send_mode="plain")
+        got = _run(renderer.daily_card([PICK], UID, Clock()))
         assert got == path
 
     def test_fuse_swallows_and_leaves_no_dangling_coroutine(self, monkeypatch):

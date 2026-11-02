@@ -100,25 +100,25 @@ class TestClockWiring:
         monkeypatch.setattr(card_render, "IMAGE_DIR_ROOT", str(tmp_path / "star_feather"))
 
     def test_core_clock_uses_framework_timezone(self):
-        from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
+        from data.plugins.astrbot_plugin_star_feather.clock import Clock
 
-        t = StarTarot(_Ctx({"timezone": "Asia/Shanghai"}), None)
-        assert t.clock.tz is not None and t.clock.tz.key == "Asia/Shanghai"
+        t = Clock.from_context(_Ctx({"timezone": "Asia/Shanghai"}))
+        assert t.tz is not None and t.tz.key == "Asia/Shanghai"
 
     def test_daily_shares_core_clock(self):
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
-        from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
-        from stubs import FakeContext
-
-        t = StarTarot(_Ctx({"timezone": "UTC"}), None)
-        d = DailyFortune(FakeContext(None), t)
-        assert d.clock is t.clock, "今日牌运自己造了第二份时钟：日期键会跟核心的今天分家"
-
-    def test_stub_tarot_still_gets_a_clock(self):
-        """桩对象（单测/诊断）没有 clock：自建一份跟本地时区，不让日期键失联。"""
+        from data.plugins.astrbot_plugin_star_feather.clock import Clock
         from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
         from stubs import FakeContext
 
-        d = DailyFortune(FakeContext(None), object())
+        t = Clock.from_context(_Ctx({"timezone": "UTC"}))
+        d = DailyFortune(FakeContext(None), clock=t)
+        assert d.clock is t, "今日牌运自己造了第二份时钟：日期键会跟核心的今天分家"
+
+    def test_stub_daily_still_gets_a_clock(self):
+        """桩对象（单测/诊断）没传 clock：自建一份跟本地时区，不让日期键失联。"""
+        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from stubs import FakeContext
+
+        d = DailyFortune(FakeContext(None))
         assert isinstance(d.clock, Clock)
         assert len(d.clock.today()) == 8

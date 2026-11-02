@@ -155,7 +155,7 @@ def _load_font(size: int, bold: bool = False, text: str | None = None):
 
     终点口径：候选链走完仍只剩 Pillow 默认字体时，若它连这段文本都编码不了
     （11.0.0 之前 load_default() 是位图字体，只认 latin-1），当场抛 RuntimeError
-    指名原因。上层 tarot_core 有「回退纯文本牌面」这条退路，而编解码错是从
+    指名原因。上层 Renderer 有「回退纯文本牌面」这条退路，而编解码错是从
     ImageDraw 内部甩出来的——读日志的人只看到 latin-1，不知道牌面为什么没了。
 
     【实测口径，2026-09-10 探针：别再提给带 text 路径加二级缓存】

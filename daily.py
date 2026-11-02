@@ -13,16 +13,15 @@ import asyncio
 import hashlib
 import random
 import threading
-from contextlib import AbstractAsyncContextManager, nullcontext
 
-from astrbot.api import logger
-
-from .card_render import IMAGE_DIR_ROOT, _render_daily_card_img, _schedule_image_cleanup
 from .clock import Clock
+from .core.draw import render_detail
+from .core.log import log
 from .dailylines import pick_signature
 from .intent import norm_topic
 from .kv_utils import kv_get, kv_put
 from .prompts import READING_PROMPT_V, SPIRIT_PROMPT_V
+from .settings import DEFAULT_AI_PERSONA
 from .tarot_data import TAROT_CARDS
 
 # AI 生成中的共享登记（牌灵的话 / 每日解读共用），键含用户、牌组、主题与日期。
@@ -119,20 +118,6 @@ def _trim_interp_slots(slots: dict) -> None:
         slots.pop(next(iter(slots)), None)
 
 
-def _render_slot(fortune) -> AbstractAsyncContextManager[None]:
-    """渲染并发位：与核心 _render_image 共用同一把渲染锁（防多人同时占卜时内存暴涨）。
-
-    海报与拼图同是 Pillow 全尺寸合成，绕开锁就是把最重的一条路径漏在锁外。运行时取
-    而非构造期装配：桩对象没有 tarot / 没有锁时退化成不限并发，而不是崩掉渲染路径。
-    返回异步上下文管理器，信号量与 nullcontext 都吃得住 async with。
-
-    判「有没有锁」用 is not None，不用 or 短路：锁若被包成 falsy 对象，or 会静默换成
-    nullcontext()，最重的渲染路径漏在锁外且日志不留痕。红线：test_render_slot_keeps_a_falsy_lock。
-    """
-    lock = getattr(getattr(fortune, "tarot", None), "_render_lock", None)
-    return lock if lock is not None else nullcontext()
-
-
 async def _ai_output(awaitable, what: str, who: str = "") -> str | None:
     """装饰性 AI 产出的统一故障边界：异常 → None，走各自的降级路。
 
@@ -144,72 +129,34 @@ async def _ai_output(awaitable, what: str, who: str = "") -> str | None:
     try:
         return await awaitable
     except Exception as e:
-        logger.warning(f"{what}生成异常（{who or '无标识'}），走降级: {e}")
+        log.warning(f"{what}生成异常（{who or '无标识'}），走降级: {e}")
         return None
 
 
 class DailyFortune:
     """今日固定牌运的缓存与判定：给入口层提供「当天固定牌 + 当天解读」。
 
-    独立持有 kv_store 与 tarot（核心）：kv_store 须提供 get_kv_data/put_kv_data，
-    应传插件实例自身（Star 基类混入 PluginKVStoreMixin）——AstrBot 的 Context
-    没有这两个方法，传错会导致缓存全程静默失效。KV 异常时由确定性函数兜底；
-    入口层（main.py）仅通过本类访问，不直接接触 KV 细节。
+    依赖全部显式注入：kv_store（须提供 get_kv_data/put_kv_data）、clock（日期边界）、
+    persona（人设配置，缓存指纹用）、interpreter（AI 解释器）。本类不再回头去拿
+    编排层的私有成员。
     """
 
-    # 类级兜底（与 __init__ 同口径：本地时区 + 图片根目录）：只有 __new__ 直调才会
-    # 用到（单测、诊断脚本），真实装配一律被 __init__ 的实例属性覆盖。
-    # 为什么要兜而不是让它抛：渲染路径整段裹 try，AttributeError 会被当成「渲染失败」
-    # 静默吞掉，测试里表现为「明明渲染桩成功了却返回 None」——今天这仨红就是这个形状。
-    # 生产口径由 test_clock.py::TestClockWiring 钉住，不靠这两个默认值撑。
+    # 类级兜底：只有 __new__ 直调才会用到（单测、诊断脚本），真实装配一律被
+    # __init__ 的实例属性覆盖。
     clock = Clock()
-    image_dir = IMAGE_DIR_ROOT
 
-    def __init__(self, kv_store, tarot):
-        # kv_store 传插件自身（见类 docstring）、tarot 是 StarTarot 实例
+    def __init__(self, kv_store, clock=None, persona: str = DEFAULT_AI_PERSONA,
+                 interpreter=None):
         self.kv_store = kv_store
-        self.tarot = tarot
-        # 日期边界的唯一来源（clock.Clock）：取 tarot 上那份（同一实例内与框架时区口径
-        # 一致）；桩对象没有就自建一份跟随本地时区——不因诊断/装配形态让日期键失联
-        self.clock = getattr(tarot, "clock", None) or Clock()
-        # 图片目录同样取自核心那份（①实例隔离：海报卡别落到共享父目录去）；
-        # 桩对象没有这个属性才退回根目录（诊断/装配形态不该让渲染无处可放）。
-        # 用 isinstance 而不是 `or`：核心的图片退路彻底失败时会给出空串，那是
-        # 「降级为无图」的信号——`or` 会把它悄悄换成共享根目录，破坏①的每实例一份。
-        _img_dir = getattr(tarot, "image_dir", None)
-        self.image_dir = _img_dir if isinstance(_img_dir, str) else IMAGE_DIR_ROOT
+        self.clock = clock or Clock()
+        self.persona = str(persona or "")
+        self.interpreter = interpreter
         # 缓存读-判-写串行化（gating 同款防线）：并发占卜时两条协程各自读旧值再写回，
         # 后写的会把先写的分桶整个覆盖掉（实测：并发问两个主题，KV 里只剩一个）
         self._kv_lock = asyncio.Lock()
         # 同一（用户, 牌组, 今天）正在生成的牌灵的话登记在模块级 _INFLIGHT：
         # 并发 miss 只让一个人去问 AI，其余等它的结果——否则两句话各自成文，
         # 破坏「当日同牌组同一句」。跨实例共享的理由见模块级注释。
-
-    async def render_daily_card(self, topics: list[str], picks: list[dict], uid: str) -> str | None:
-        """今日牌运卡海报编排：签文（确定性函数）+ 日期文本 + 线程池渲染 + 登记清理。
-
-        渲染失败一律返回 None——调用方回退普通牌面图，不拦占卜主流程；
-        清理走 card_render 的统一保险丝（曾单列 300 秒「别转个身就没了」，
-        其实内容在发送那一刻就被平台取走了，本地文件活多久与用户无关——见
-        IMAGE_TTL_SECONDS）。topics 保留接口（标题固定「星羽塔罗·今日牌运」）。
-        """
-        try:
-            card = picks[0]["card"]
-            upright = bool(picks[0]["upright"])
-            date_text = self.clock.date_text()
-            signature = pick_signature(card, upright, uid, self.clock.today())
-            async with _render_slot(self):
-                # 显式传本实例的目录（①实例隔离）：海报卡与普通牌面图同住一处，
-                # 都由本实例自己的清理路径负责
-                img = await asyncio.to_thread(_render_daily_card_img, card, upright, signature,
-                                              date_text, self.image_dir)
-            if not img or not isinstance(img, str) or not img.strip():
-                return None
-            _schedule_image_cleanup(img)
-            return img
-        except Exception as e:
-            logger.warning(f"今日牌运卡渲染失败，回退普通牌面图: {e}")
-            return None
 
     async def pick_cached(self, uid: str) -> tuple | None:
         """今日固定抽牌：单 key 覆盖式缓存（按日期判失效，无垃圾积累、零清理任务）。
@@ -240,10 +187,11 @@ class DailyFortune:
                     merged.pop("interps", None)  # 跨天：旧解读分桶作废
                 await kv_put(self.kv_store, key, merged, "每日牌运缓存")
             else:
-                logger.warning("每日牌运缓存不可用，改由确定性函数直接出牌")
+                log.warning("每日牌运缓存不可用，改由确定性函数直接出牌")
         return _daily_result(card, upright)
 
-    async def interp_cached(self, event, uid: str, formation: str, positions: list[str],
+    async def interp_cached(self, umo: str | None, uid: str, formation: str,
+                            positions: list[str],
                             picks: list[dict], clean: str,
                             persona_eff=None, budget=None) -> str | None:
         """今日牌运的解读缓存：按主题指纹（norm_topic）分桶缓存。
@@ -264,7 +212,7 @@ class DailyFortune:
         # 面板切人设（ai.persona gentle → tsundere）也要让当天旧解读失效：
         # v 只覆盖「模板文本改版」，配置选择属于另一维，单独进键与记录。
         # random 按原值参与——同一天仍是先到的那句，不因每次掷骰换口吻。
-        persona_cfg = str(getattr(self.tarot, "ai_persona", "") or "")
+        persona_cfg = self.persona
         # 同一天同一主题的并发生成也只允许一个人去问 AI：与牌灵的话同一套登记表。
         # 登记键含 prompt 指纹与日期——升级换了提示词/人设时，旧生成不能喂给新请求。
         reg_key = (key, sig, topic, today, READING_PROMPT_V, persona_cfg)
@@ -299,8 +247,9 @@ class DailyFortune:
                 return None
         try:
             interp = await _ai_output(
-                self.tarot._ai_interpret(
-                    event, formation, positions, picks, clean or "（今日牌运）",
+                self.interpreter.interpret(
+                    umo, formation, positions, picks, clean or "（今日牌运）",
+                    render_detail(positions, picks),
                     persona_eff=persona_eff, budget=budget),
                 "AI 解读", uid)
             if ok:
@@ -345,7 +294,7 @@ class DailyFortune:
         finally:
             _release_inflight(reg_key, pending, None)
 
-    async def spirit_cached(self, event, uid: str, picks: list, topic: str,
+    async def spirit_cached(self, umo: str | None, uid: str, picks: list, topic: str,
                             persona_eff, budget=None) -> str:
         """牌灵的话：AI 按人设生成（贴合本次牌面+主题），当日同牌组缓存同一句；
         AI 失败回退池内当日签文（不写缓存，下次恢复后重新生成）。
@@ -404,8 +353,8 @@ class DailyFortune:
         # 本就该是同一句，传原话只会让这个定型值随用户措辞漂移。
         try:
             line = await _ai_output(
-                self.tarot.interpreter.spirit_line(
-                    event, [(p["card"], p["upright"]) for p in picks],
+                self.interpreter.spirit_line(
+                    umo, [(p["card"], p["upright"]) for p in picks],
                     norm_topic(topic), persona_eff, budget=budget),
                 "牌灵的话", uid)
             if not line:
