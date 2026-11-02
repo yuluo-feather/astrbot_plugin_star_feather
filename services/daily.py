@@ -111,8 +111,6 @@ class DailyFortune:
     persona（人设配置，缓存指纹用）、interpreter（AI 解释器）。
     """
 
-    clock = Clock()
-
     def __init__(self, kv_store, clock=None, persona: str = DEFAULT_AI_PERSONA,
                  interpreter=None):
         self.kv_store = kv_store
@@ -232,13 +230,14 @@ class DailyFortune:
             return fallback
         await self._cleanup_legacy_spirit(uid)
         key, sig = self._key(uid), _spirit_sign(picks)
-        reg_key = (key, sig, today, _PROMPT_V)
+        reg_key = (key, sig, today, _PROMPT_V, self.persona)
 
         async with _shared_kv_lock():
             raw, ok = await kv_get(self.kv_store, key, None, "牌灵的话缓存")
             record = DailyRecord.from_raw(raw)
             if (ok and record.date == today and record.prompt_v == _PROMPT_V
-                    and record.spirit_sign == sig and record.spirit_line):
+                    and record.spirit_sign == sig and record.spirit_persona == self.persona
+                    and record.spirit_line):
                 return record.spirit_line
 
         async def generate():
@@ -265,11 +264,12 @@ class DailyFortune:
                 # 生成跨过了午夜：KV 已是新一天的记录，别用昨天启动的写回盖掉
                 return line
             if (fresh.date == today and fresh.prompt_v == _PROMPT_V
-                    and fresh.spirit_sign == sig and fresh.spirit_line):
+                    and fresh.spirit_sign == sig and fresh.spirit_persona == self.persona
+                    and fresh.spirit_line):
                 return fresh.spirit_line
             if fresh.date != today:
                 fresh = DailyRecord()
             # 只写牌灵字段：普通占卜的牌灵写回不许碰今日固定牌的 card_id/upright
-            fresh.put_spirit(line, sig, today, _PROMPT_V)
+            fresh.put_spirit(line, sig, today, _PROMPT_V, self.persona)
             await kv_put(self.kv_store, key, fresh.to_raw(), "牌灵的话缓存")
         return line

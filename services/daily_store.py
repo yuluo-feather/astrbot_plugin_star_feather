@@ -24,6 +24,7 @@ class DailyRecord:
     interps: dict = field(default_factory=dict)
     spirit_line: str = ""
     spirit_sign: str = ""
+    spirit_persona: str = ""
     schema: int = SCHEMA
 
     @classmethod
@@ -46,6 +47,7 @@ class DailyRecord:
             interps=dict(interps) if isinstance(interps, dict) else {},
             spirit_line=_str(raw.get("spirit_line")),
             spirit_sign=_str(raw.get("spirit_sign")),
+            spirit_persona=_str(raw.get("spirit_persona")),
         )
 
     def to_raw(self) -> dict:
@@ -60,6 +62,7 @@ class DailyRecord:
             "interps": self.interps,
             "spirit_line": self.spirit_line,
             "spirit_sign": self.spirit_sign,
+            "spirit_persona": self.spirit_persona,
         }
 
     def put_pick(self, card_id: str, upright: bool, sign: str, date: str,
@@ -85,12 +88,18 @@ class DailyRecord:
         self.put_context(date, sign, prompt_v, persona)
         self.interps[topic] = record
 
-    def put_spirit(self, line: str, sign: str, date: str, prompt_v: str) -> None:
-        """牌灵的话写入：只改日期/提示词版本/牌灵字段，不碰牌字段。"""
+    def put_spirit(self, line: str, sign: str, date: str, prompt_v: str,
+                   persona: str) -> None:
+        """牌灵的话写入：只改日期/提示词版本/牌灵字段，不碰牌字段。
+
+        persona 写进独立的 spirit_persona，不复用每日解读的 persona——
+        否则普通占卜换人设会把每日牌运的解读上下文一起改掉。
+        """
         self.date = date
         self.prompt_v = prompt_v
         self.spirit_line = line
         self.spirit_sign = sign
+        self.spirit_persona = persona
 
     def same_context(self, date: str, sign: str, prompt_v: str, persona: str) -> bool:
         """同一天、同一牌组、同一版提示词、同一人设才沿用旧分桶。"""

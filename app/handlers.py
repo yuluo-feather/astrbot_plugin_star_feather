@@ -72,15 +72,15 @@ async def tool_entry(plugin, event, formation: str = "", *, version: str) -> str
         await messenger.send_text("星羽塔罗的自然语言占卜未开启～ 试试 /占卜 感情 这样的命令。")
         return "已告知用户自然语言占卜未开启。请自然回应一句，不必再调用工具。"
     text = (getattr(event, "message_str", "") or "").strip()
+    if not text:
+        return ("工具收到空文本：用户没说占卜什么。请回一句，引导用户说出想占卜的内容"
+                "（如感情、事业、学业、今日运势）。")
     request = build_request(
         "auto", text, daily_enabled=container.settings.output.daily_fixed,
         source="tool", formation_hint=formation)
     if request.kind == KIND_HELP:
         await messenger.send_text(help_text(version))
         return "帮助页已发送。请自然回应一句，不必再调用工具。"
-    if not text:
-        return ("工具收到空文本：用户没说占卜什么。请回一句，引导用户说出想占卜的内容"
-                "（如感情、事业、学业、今日运势）。")
     umo = getattr(event, "unified_msg_origin", None) or "global"
     remain = await container.gate.session_throttle(
         f"sf_tool_cd_{umo}", container.settings.tool.llm_cooldown)

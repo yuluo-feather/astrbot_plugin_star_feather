@@ -435,3 +435,79 @@ class TestSpiritPrompt:
         base = prompts.SPIRIT_PROMPT_V
         monkeypatch.setattr(prompts, "_SPIRIT_TEMPLATE", prompts._SPIRIT_TEMPLATE + "改一笔")
         assert prompts._spirit_prompt_fingerprint() != base
+
+# ---------- 牌灵缓存的人设隔离 ----------
+class TestSpiritPersonaIsolation:
+    """同一天、同一组牌，只换人设：必须重新生成，且不能改写每日解读的 persona。"""
+
+    @staticmethod
+    def _ctx(kv):
+        class _Ctx:
+            async def get_kv_data(self, key, default=None):
+                return kv.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                kv[key] = value
+
+        return _Ctx()
+
+    def test_persona_change_regenerates(self):
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
+        kv, calls = {}, []
+
+        async def fake_spirit(event, cards, topic, persona_eff, budget=None):
+            calls.append(persona_eff)
+            return f"句:{persona_eff}"
+
+        prov = types.SimpleNamespace(spirit_line=fake_spirit)
+        a = DailyFortune(self._ctx(kv), persona="tsundere", interpreter=prov)
+        b = DailyFortune(self._ctx(kv), persona="gentle", interpreter=prov)
+        l1 = asyncio.run(a.spirit_cached(EVENT, "u1", [PICK], "今日运势", "tsundere"))
+        l2 = asyncio.run(b.spirit_cached(EVENT, "u1", [PICK], "今日运势", "gentle"))
+        assert (l1, l2) == ("句:tsundere", "句:gentle")
+        assert calls == ["tsundere", "gentle"]
+        assert kv["sf_daily_u1"]["spirit_persona"] == "gentle"
+
+    def test_same_persona_reuses_without_calling_ai(self):
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
+        kv, calls = {}, []
+
+        async def fake_spirit(event, cards, topic, persona_eff, budget=None):
+            calls.append(persona_eff)
+            return "同一句"
+
+        prov = types.SimpleNamespace(spirit_line=fake_spirit)
+        a = DailyFortune(self._ctx(kv), persona="gentle", interpreter=prov)
+        b = DailyFortune(self._ctx(kv), persona="gentle", interpreter=prov)
+        first = asyncio.run(a.spirit_cached(EVENT, "u1", [PICK], "今日运势", "gentle"))
+        second = asyncio.run(b.spirit_cached(EVENT, "u1", [PICK], "今日运势", "gentle"))
+        assert first == second == "同一句"
+        assert len(calls) == 1
+
+    def test_spirit_write_keeps_daily_persona(self):
+        """牌灵写回只动 spirit_persona：每日解读的人设上下文不能被换掉。"""
+        from data.plugins.astrbot_plugin_star_feather.services.daily import (
+            _PROMPT_V,
+            DailyFortune,
+        )
+        from stubs import PICK as _P
+        today = __import__("time").strftime("%Y%m%d")
+        daily_sig = f"{_P['card']['id']}:1"
+        kv = {"sf_daily_u1": {
+            "schema": 2, "date": today, "card_id": _P["card"]["id"], "upright": True,
+            "sign": daily_sig, "prompt_v": _PROMPT_V, "persona": "gentle",
+            "interps": {"旧主题": {"text": "旧解读"}},
+            "spirit_line": "旧句", "spirit_sign": "别的牌:0", "spirit_persona": "gentle",
+        }}
+
+        async def fake_spirit(event, cards, topic, persona_eff, budget=None):
+            return "新句"
+
+        df = DailyFortune(self._ctx(kv), persona="tsundere",
+                          interpreter=types.SimpleNamespace(spirit_line=fake_spirit))
+        line = asyncio.run(df.spirit_cached(EVENT, "u1", [_P], "今日运势", "tsundere"))
+        assert line == "新句"
+        rec = kv["sf_daily_u1"]
+        assert rec["persona"] == "gentle"          # 每日解读上下文不动
+        assert rec["spirit_persona"] == "tsundere"  # 牌灵自己的指纹更新
+        assert rec["interps"] == {"旧主题": {"text": "旧解读"}}  # 分桶也保留

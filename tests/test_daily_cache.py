@@ -1062,3 +1062,37 @@ class TestDailyRecordParsing:
             assert rec.card_id == "" and rec.interps == {}, repr(bad)
         ok = DailyRecord.from_raw(_rec(upright=False))
         assert ok.upright is False and ok.card_id == PICK["card"]["id"]
+
+
+# ---------- 普通占卜的牌灵与今日牌运交替调用 ----------
+class TestNormalSpiritThenDailyPick:
+    """普通占卜先写牌灵、再访问今日牌运：当前设计会清掉普通占卜的牌灵缓存。
+
+    原因是普通占卜不写每日固定牌的 sign，pick_cached 判定上下文不一致后重建记录。
+    这不是抽牌正确性问题，只让普通占卜的牌灵多生成一次；锁住现状，
+    避免以后被误当成回归，也避免有人无意中把每日牌运的上下文改坏。
+    """
+
+    def test_daily_pick_clears_normal_reading_spirit(self):
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
+        kv = {}
+
+        class _Ctx:
+            async def get_kv_data(self, key, default=None):
+                return kv.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                kv[key] = value
+
+        async def fake_spirit(event, cards, topic, persona_eff, budget=None):
+            return "普通占卜的牌灵"
+
+        df = DailyFortune(_Ctx(), persona="",
+                          interpreter=types.SimpleNamespace(spirit_line=fake_spirit))
+        other = {"card": TAROT_CARDS[1], "upright": True}
+        asyncio.run(df.spirit_cached(None, "u1", [other], "随便问问", None))
+        assert kv["sf_daily_u1"]["spirit_line"] == "普通占卜的牌灵"
+
+        asyncio.run(df.pick_cached("u1"))
+        rec = kv["sf_daily_u1"]
+        assert rec["card_id"] and rec["spirit_line"] == ""

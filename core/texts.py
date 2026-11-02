@@ -67,7 +67,7 @@ FORMATION_TITLE = "牌阵 · {formation}"
 DAILY_TITLE = "星羽塔罗·今日牌运"
 DAILY_SIGNATURE = "—— 牌灵·星羽塔罗"
 DAILY_WATERMARK = "星羽塔罗 Star Feather"
-FORWARD_IMAGE_LABEL = "\n✨ 星羽塔罗 · 牌面\""
+FORWARD_IMAGE_LABEL = "\n✨ 星羽塔罗 · 牌面"
 
 RENDER_STRINGS = (
     "牌阵 · ",

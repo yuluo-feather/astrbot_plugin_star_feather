@@ -9,6 +9,7 @@ def parse_interpretation(text: str | None) -> Interpretation | None:
     """AI 原文 → Interpretation；空文本返回 None。
 
     切分只做一次：sections / summary 随对象一起产出，发送与写缓存都复用。
+    标记前的前言也保留为第一段（sections[0]），供 Deliverer 发送。
     """
     if not text or not str(text).strip():
         return None
