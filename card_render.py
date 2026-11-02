@@ -4,7 +4,7 @@
 - 所有牌统一「白边卡牌」样式：外层白色圆角卡底 + 内部牌面图，视觉整齐
 - 画布背景为本签随机一张牌面放大做底 + 深藏青遮罩（与今日牌运卡同款风味）
 - 逆位时内部牌面图旋转 180°，信息区标注正逆位 + 牌名 + 牌义关键词
-素材缺失时抛出异常，由上层（tarot_core）回退纯文本牌面。
+素材缺失时抛出异常，由上层（services.render.Renderer）回退纯文本牌面。
 
 ——本羽最得意的部分：牌要出得好看，才配得上占卜。
 """
@@ -80,10 +80,10 @@ def _schedule_image_cleanup(img: str | None, delay: int = IMAGE_TTL_SECONDS) -> 
 
     契约：本函数永不抛。它只是保险丝，代价必须比它保的东西便宜——登记失败最多
     留一张临时图（启动清理兜底，见 cleanup_stale_images），而抛出去会顺着调用点
-    一路顶到入口，把整条卦带走（tarot_core._maybe_render_image 的调用点就裸在
+    一路顶到入口，把整条卦带走（Renderer.card 的调用点就裸在
     渲染兜底之外）。
 
-    入参允许 None / 空串并原地返回：渲染失败的返回值就是 None（tarot_core._render_image），
+    入参允许 None / 空串并原地返回：渲染失败的返回值就是 None（Renderer._render_sync），
     调用点不必自己先判一遍——判在这儿，一个判据、一个地方。签名不写窄，才敢让
     None 一路传进来。
     """
@@ -516,9 +516,9 @@ def render_cards(positions, picks, formation, save_dir=None) -> str:
     """把抽牌结果渲染成一张图片，返回图片保存路径。
 
     背景跟牌走：从本签抽出的 picks 里随机挑一张的牌面做底（3 张阵 3 选 1、
-    十字阵 4 选 1），与今日牌运卡同一套风味；素材缺失抛异常，由 tarot_core
+    十字阵 4 选 1），与今日牌运卡同一套风味；素材缺失抛异常，由 services.render
     回退纯文本。清理与渲染解耦：调用方在拿到路径后自行
-    _schedule_image_cleanup（tarot_core._maybe_render_image / daily 编排）。
+    _schedule_image_cleanup（services.render 编排）。
     """
     n = len(picks)
     cols = 1 if n <= 1 else (2 if n == 4 else n)
@@ -553,7 +553,7 @@ def render_cards(positions, picks, formation, save_dir=None) -> str:
         _draw_card(canvas, x, y + label_h, pick["card"], pick["upright"])
 
     if save_dir is None:
-        # 生产路径一律显式传实例目录（StarTarot.image_dir，见 new_instance_image_dir）；
+        # 生产路径一律显式传实例目录（Renderer.image_dir，见 new_instance_image_dir）；
         # 这里只是「没有实例上下文」的兜底（离线脚本、单函数测试），
         # 落回根目录的文件由启动清理按过期判据回收
         save_dir = IMAGE_DIR_ROOT
@@ -653,7 +653,7 @@ def _render_daily_card_img(card, upright, signature, date_text, save_dir=None) -
                  _load_font(21, text="星羽塔罗 Star Feather"), _DAILY_FOOT_TEXT)
 
     if save_dir is None:
-        # 生产路径一律显式传实例目录（StarTarot.image_dir，见 new_instance_image_dir）；
+        # 生产路径一律显式传实例目录（Renderer.image_dir，见 new_instance_image_dir）；
         # 这里只是「没有实例上下文」的兜底（离线脚本、单函数测试），
         # 落回根目录的文件由启动清理按过期判据回收
         save_dir = IMAGE_DIR_ROOT

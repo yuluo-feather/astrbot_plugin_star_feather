@@ -140,13 +140,13 @@ def test_budget_and_structure_rows_match_schema_and_code():
         DEFAULT_AI_BUDGET,
         DEFAULT_STRUCTURE_CHECK,
         STRUCTURE_CHECK_VALUES,
-        TarotSettings,
+        parse,
     )
 
     ai = _schema()["ai"]["items"]
     assert ai["ai_budget_seconds"]["default"] == DEFAULT_AI_BUDGET
     assert ai["structure_check"]["default"] == DEFAULT_STRUCTURE_CHECK
-    assert TarotSettings(None).structure_check == DEFAULT_STRUCTURE_CHECK
+    assert parse(None).ai.structure_check == DEFAULT_STRUCTURE_CHECK
     assert tuple(ai["structure_check"]["options"]) == STRUCTURE_CHECK_VALUES
     for rel in CONFIG_SECTIONS:
         rows = _rows(rel)

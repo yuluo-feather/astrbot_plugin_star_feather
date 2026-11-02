@@ -7,6 +7,7 @@ import types
 
 import pytest
 from data.plugins.astrbot_plugin_star_feather import card_render
+from data.plugins.astrbot_plugin_star_feather.core.draw import draw
 
 
 def _mk(suit, num, cn, en, up, down):
@@ -388,17 +389,14 @@ class TestInstanceImageDir:
         assert not card_render._INSTANCE_DIR_RE.match("inst_123_")
         assert not card_render._INSTANCE_DIR_RE.match("inst_123_1_0A1B2C3D")  # 大写不是本格式
 
-    def test_core_and_daily_share_the_instance_dir(self, tmp_path, monkeypatch):
-        """装配口径：核心开目录，今日牌运卡跟着用同一个——别落到共享父目录去。"""
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
-        from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
-        from stubs import FakeContext
+    def test_each_renderer_gets_its_own_instance_dir(self, tmp_path, monkeypatch):
+        """装配口径：每个渲染器一份实例目录——别落到共享父目录去。"""
+        from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
 
         monkeypatch.setattr(card_render, "IMAGE_DIR_ROOT", str(tmp_path / "star_feather"))
-        a = StarTarot(FakeContext(None), None)
-        b = StarTarot(FakeContext(None), None)
+        a = Renderer(card_render.new_instance_image_dir(), "plain")
+        b = Renderer(card_render.new_instance_image_dir(), "plain")
         assert a.image_dir != b.image_dir, "两代实例拿到同一个目录＝①没生效"
-        assert DailyFortune(FakeContext(None), a).image_dir == a.image_dir
 
     def test_root_failure_uses_a_private_unique_dir(self, tmp_path, monkeypatch):
         """根目录建不出来时不退回共享目录：退路也必须是「每实例一份」（①的严格保证）。
@@ -435,12 +433,11 @@ class TestInstanceImageDir:
         monkeypatch.setattr(card_render.tempfile, "mkdtemp", boom)
         assert card_render.new_instance_image_dir() == ""
 
-    def test_daily_keeps_empty_image_dir_instead_of_shared_root(self, tmp_path, monkeypatch):
+    def test_renderer_keeps_empty_image_dir_instead_of_shared_root(self, tmp_path, monkeypatch):
         """空路径是「本次降级为无图」的信号：不许用 `or` 换成共享根目录（①的边界）。"""
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
         monkeypatch.setattr(card_render, "IMAGE_DIR_ROOT", str(tmp_path / "star_feather"))
-        tarot = types.SimpleNamespace(image_dir="")
-        assert DailyFortune(None, tarot).image_dir == ""
+        assert Renderer("", "plain").image_dir == ""
 
 
 class TestReloadIsolationEndToEnd:
@@ -457,11 +454,11 @@ class TestReloadIsolationEndToEnd:
 
     @staticmethod
     def _pair(tmp_path, monkeypatch):
-        """同进程两代实例（真 StarTarot：image_dir 由 new_instance_image_dir 开出）。"""
-        from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
-        from stubs import FakeContext
+        """同进程两代实例（image_dir 由 new_instance_image_dir 开出）。"""
+        from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
         monkeypatch.setattr(card_render, "IMAGE_DIR_ROOT", str(tmp_path / "star_feather"))
-        return StarTarot(FakeContext(None), None), StarTarot(FakeContext(None), None)
+        return (Renderer(card_render.new_instance_image_dir(), "plain"),
+                Renderer(card_render.new_instance_image_dir(), "plain"))
 
     @staticmethod
     def _age(path, seconds):
@@ -473,7 +470,7 @@ class TestReloadIsolationEndToEnd:
         from PIL import Image
         a, b = self._pair(tmp_path, monkeypatch)
         assert a.image_dir != b.image_dir, "两代实例必须各自一份目录"
-        positions, picks = a._draw("羽签")            # 真抽牌
+        positions, picks = draw("羽签")               # 真抽牌
         if kind == "plain":
             img = card_render.render_cards(positions, picks, "羽签", save_dir=a.image_dir)
         else:

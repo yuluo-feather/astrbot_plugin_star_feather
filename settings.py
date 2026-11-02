@@ -3,8 +3,6 @@
 config.py 只提供读取原语（分组优先 / 扁平回退 / 类型转换）；
 「默认值是什么、旧字段怎么迁移、解析成什么样子」全在这一层。
 消费方拿 `parse(config)` 返回的 `Settings`，不再各自对着原始配置问第二遍。
-
-TarotSettings 是迁移期的兼容视图（扁平字段），第 3/4 步消费者改完后删除。
 """
 import decimal
 import math
@@ -247,33 +245,3 @@ def parse(config) -> Settings:
             disclaimer=str(_cfg_get(config, "output", "disclaimer", DEFAULT_DISCLAIMER)),
         ),
     )
-
-
-class TarotSettings:
-    """迁移期兼容视图：把嵌套 Settings 摊平成旧字段名。
-
-    StarTarot / AiInterpreter / Deliverer 仍按扁平字段消费；第 3/4 步把它们改成
-    直接用 Settings 后，本类删除。
-    """
-
-    def __init__(self, config):
-        s = parse(config)
-        self.enable_ai = s.ai.enable_ai
-        self.segment_size = s.output.segment_size
-        self.send_mode = s.output.send_mode
-        self.shuffle_lines = s.output.shuffle_lines
-        self.disclaimer = s.output.disclaimer
-        self.daily_fixed = s.output.daily_fixed
-        self.daily_card = s.output.daily_card
-        self.ai_timeout = s.ai.timeout
-        self.ai_cooldown = s.ai.fail_cooldown
-        self.ai_budget = s.ai.budget_seconds
-        self.ai_parallel_stages = s.ai.parallel_stages
-        self.llm_tool_enabled = s.tool.llm_enabled
-        self.llm_tool_cooldown = s.tool.llm_cooldown
-        self.cmd_rate_limit = s.tool.cmd_rate_limit
-        self.daily_count_limit = s.limit.daily_count
-        self.ai_provider_id = s.ai.provider_id
-        self.ai_max_len = s.ai.question_max_len
-        self.ai_persona = s.ai.persona
-        self.structure_check = s.ai.structure_check

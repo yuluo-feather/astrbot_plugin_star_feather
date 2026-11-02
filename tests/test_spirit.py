@@ -41,7 +41,7 @@ class TestSpiritCache:
             return line
 
         tarot = types.SimpleNamespace(interpreter=types.SimpleNamespace(spirit_line=fake_spirit))
-        return DailyFortune(_Ctx(), tarot), calls
+        return DailyFortune(_Ctx(), interpreter=tarot.interpreter), calls
 
     def test_ai_success_caches_and_reuses(self):
         from time import strftime
@@ -74,7 +74,7 @@ class TestSpiritCache:
             return "并发同一句"
 
         tarot = types.SimpleNamespace(interpreter=types.SimpleNamespace(spirit_line=slow_spirit))
-        df = DailyFortune(_Ctx(), tarot)
+        df = DailyFortune(_Ctx(), interpreter=tarot.interpreter)
 
         async def go():
             return await asyncio.gather(
@@ -107,7 +107,7 @@ class TestSpiritCache:
             return "跨实例同一句"
 
         tarot = types.SimpleNamespace(interpreter=types.SimpleNamespace(spirit_line=slow_spirit))
-        a, b = DailyFortune(_Ctx(), tarot), DailyFortune(_Ctx(), tarot)
+        a, b = DailyFortune(_Ctx(), interpreter=tarot.interpreter), DailyFortune(_Ctx(), interpreter=tarot.interpreter)
 
         async def go():
             return await asyncio.gather(
@@ -137,7 +137,7 @@ class TestSpiritCache:
             return "共享那句"
 
         tarot = types.SimpleNamespace(interpreter=types.SimpleNamespace(spirit_line=slow_spirit))
-        df = DailyFortune(_Ctx(), tarot)
+        df = DailyFortune(_Ctx(), interpreter=tarot.interpreter)
 
         async def go():
             owner = asyncio.create_task(df.spirit_cached(EVENT, "u1", [PICK], "今日运势", None))
@@ -186,7 +186,7 @@ class TestSpiritCache:
 
         tarot = types.SimpleNamespace(interpreter=types.SimpleNamespace(spirit_line=slow_spirit),
                                       clock=clock)
-        df = DailyFortune(_Ctx(), tarot)
+        df = DailyFortune(_Ctx(), clock=clock, interpreter=tarot.interpreter)
 
         async def go():
             first = asyncio.create_task(df.spirit_cached(EVENT, "u1", [PICK], "今日运势", None))
@@ -230,7 +230,7 @@ class TestSpiritCache:
             return "故障期间生成的那句"
 
         tarot = types.SimpleNamespace(interpreter=types.SimpleNamespace(spirit_line=fake_spirit))
-        df = DailyFortune(_FlakyCtx(), tarot)
+        df = DailyFortune(_FlakyCtx(), interpreter=tarot.interpreter)
         l1 = asyncio.run(df.spirit_cached(EVENT, "u1", [PICK], "今日运势", None))
         assert l1 == "故障期间生成的那句" and len(calls) == 1
         cache = next(v for k, v in kv.items() if k.startswith("sf_spirit_"))

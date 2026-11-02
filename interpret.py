@@ -178,7 +178,7 @@ class AiInterpreter:
     冷却粒度是「Provider」而不是插件全局（2026-08-29 调整）：
     单个模型挂掉只冷却它自己，其他模型与其他用户不受拖累；
     候选全部失败/全部冷却时才回退本地牌义。
-    对塔罗数据零依赖：牌面详情（detail）由调用方（StarTarot）格式化传入，
+    对塔罗数据零依赖：牌面详情（detail）由调用方（ReadingService）格式化传入，
     本类只负责「找模型 → 发请求 → 拿文本」与失败兜底状态；
     问题清洗（截断/剥除）与输出校验委托 hardening。
     """
@@ -378,7 +378,7 @@ class AiInterpreter:
             logger.warning(f"候选收集失败（{e}）：本签按无候选处理，回退本地牌义")
             return []
 
-    async def spirit_line(self, event, cards: list, topic: str,
+    async def spirit_line(self, umo: str | None, cards: list, topic: str,
                           persona_eff, budget: AiBudget | None = None) -> str | None:
         """牌灵的一句话（聊天「牌灵的话」）：AI 按人设生成短句
         （要求 25 字内，实际接受 ≤40 字——宽容策略，避免过度丢弃）。
@@ -414,7 +414,6 @@ class AiInterpreter:
         # system 用中立底稿而非 persona 段：persona 段夹带【第N张】解读格式约束，
         # 会让「一句话」生成跑偏成结构化解读；人设风格已拼在 prompt 的 signature_style
         system = SYSTEM_PROMPT_DIVINE
-        umo = getattr(event, "unified_msg_origin", None)
         for provider in await self._gather_candidates(umo, bd, _STAGE_SPIRIT):
             pid = self._provider_id(provider)
             if self._in_cooldown(pid):
@@ -578,7 +577,8 @@ class AiInterpreter:
             f"{t['readings']} 签——不降级 {t['no_degrade']}／降级 {t['degrade']}／"
             f"未观测 {t['unknown']}，累计候选拒绝率 {_rate_text(t['rejected'], t['candidates'])}")
 
-    async def interpret(self, event, formation: str, positions: list[str],
+    async def interpret(self, umo: str | None, formation: str,
+                        positions: list[str],
                         picks: list[dict], user_input: str, detail: str,
                         persona_eff: str | None = None,
                         budget: AiBudget | None = None) -> str | None:
@@ -607,7 +607,6 @@ class AiInterpreter:
         # random 时本签全程同一人格、下一签才换——中途变脸是 bug（有测试锁）
         eff = persona_eff if persona_eff is not None else resolve_persona(self.persona)
         system_prompt = build_system_prompt(eff)
-        umo = getattr(event, "unified_msg_origin", None)
         got_text = False  # 是否至少有一个候选产出了文本（区分“服务失败”与“结构失格”）
         tried = 0
         # 影子计数只在 shadow 档开：其余档位没有「量」的任务，别白记

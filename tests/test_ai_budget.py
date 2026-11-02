@@ -18,16 +18,27 @@ import os
 import time
 import types
 
-from data.plugins.astrbot_plugin_star_feather import card_render
 from data.plugins.astrbot_plugin_star_feather import interpret as interpret_mod
+from data.plugins.astrbot_plugin_star_feather.core.draw import render_text
 from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
 from data.plugins.astrbot_plugin_star_feather.interpret import AiBudget, AiInterpreter
 from data.plugins.astrbot_plugin_star_feather.settings import (
     DEFAULT_AI_BUDGET,
     DEFAULT_SPIRIT_STAGE_BUDGET,
 )
-from data.plugins.astrbot_plugin_star_feather.tarot_core import StarTarot
 from stubs import CARD, EVENT, OK_INTERP, PICK, FakeContext, FakeProvider
+
+
+class _Interp:
+    """把旧的 _ai_interpret 桩适配到解释器接口。"""
+
+    def __init__(self, fn):
+        self.fn = fn
+
+    async def interpret(self, umo, formation, positions, picks, user_input, detail,
+                        persona_eff=None, budget=None):
+        return await self.fn(umo, formation, positions, picks, user_input,
+                             persona_eff=persona_eff, budget=budget)
 
 
 class Clock:
@@ -333,14 +344,13 @@ class TestFallbackAndWiring:
         """预算耗尽 → 真解读器返回 None → 本地牌义（逐牌）非空：不会发出空消息。"""
         clk = Clock()
         prov = FakeProvider("p0", result=OK_INTERP)
-        tarot = StarTarot.__new__(StarTarot)
-        tarot.interpreter = _interp([prov], ai_timeout=30)
+        interp = _interp([prov], ai_timeout=30)
         bd = AiBudget(120, clk)
         clk.advance(120)                       # 开局即耗尽
-        out = asyncio.run(tarot._ai_interpret(EVENT, "羽签", ["你的当下"], [PICK],
-                                              "问感情", budget=bd))
+        out = asyncio.run(interp.interpret(EVENT, "羽签", ["你的当下"], [PICK],
+                                           "问感情", "详情", budget=bd))
         assert out is None and prov.calls == 0
-        local = tarot._render_text("羽签", ["你的当下"], [PICK])
+        local = render_text("羽签", ["你的当下"], [PICK])
         assert local.strip() and "愚者" in local and "你的当下" in local
 
     def test_interp_cached_forwards_the_same_budget_object(self):
@@ -351,7 +361,7 @@ class TestFallbackAndWiring:
             seen["budget"] = budget
             return OK_INTERP
 
-        p = DailyFortune(_KV(), types.SimpleNamespace(_ai_interpret=fake_ai))
+        p = DailyFortune(_KV(), interpreter=_Interp(fake_ai))
         bd = AiBudget(120)
         out = asyncio.run(p.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK],
                                           "今天感情运势", None, bd))
@@ -366,7 +376,7 @@ class TestFallbackAndWiring:
 
         tarot = types.SimpleNamespace(
             interpreter=types.SimpleNamespace(spirit_line=spirit))
-        p = DailyFortune(_KV(), tarot)
+        p = DailyFortune(_KV(), interpreter=tarot.interpreter)
         bd = AiBudget(120)
         out = asyncio.run(p.spirit_cached(EVENT, "u1", [PICK], "今日运势", None, bd))
         assert out == "今天适合慢下来" and seen["budget"] is bd
@@ -408,7 +418,7 @@ class TestEndToEndDeliveryUnderSpentBudget:
         elapsed = self._run(p, evt, "问感情")
 
         assert len(created) == 1, "一次占卜只许开一笔预算，候选/供应商回退都不许重开"
-        assert first.calls == 1, "能试的照试一次"
+        assert first.calls == 2, "两段并发：牌灵的话与解读在同一截止点上各试一次"
         assert second.calls == 0, "预算已耗尽：换供应商也不许重新开一笔请求"
         assert elapsed < 3.0, f"预算 1.2s，端到端却用了 {elapsed:.2f}s"
         self._assert_still_delivered(evt, path)
@@ -428,7 +438,7 @@ class TestEndToEndDeliveryUnderSpentBudget:
         second = FakeProvider("slow-2", result=OK_INTERP, delay=5.0)
         p, evt, path, created = self._plugin(tmp_path, [first, second])
 
-        elapsed = self._run(p, evt, "今日运势", is_daily=True, daily_uid="u1")
+        elapsed = self._run(p, evt, "今日运势")
 
         assert len(created) == 1, "两段 AI 共用同一笔预算：阶段之间不许重置截止点"
         assert first.calls == 2, "两段并发：同一截止点上两段各试一次"
@@ -439,51 +449,72 @@ class TestEndToEndDeliveryUnderSpentBudget:
     def _plugin(self, tmp_path, providers):
         """装一条真入口：真缓存层 + 真总预算 + 只换渲染（不碰 AI 与预算那条链）。
 
-        返回 (插件, 事件, 图片路径, 新开预算清单)。最后一个元素是 new_budget 计数钩子
-        的产出：挂在 AiInterpreter 上，所以无论谁新开一笔预算（入口每段、解读器每
-        候选、阶段兜底）都被记下——「一次占卜一笔预算」这条契约得有个能落地的判据。
-
-        模块一律按包路径取（见 test_fault_injection 的 _live_modules）：插件内只有
-        包名一个身份，用例里的 tarot 与入口用的就是同一份，补丁不会打空。
+        返回 (插件, 事件, 图片路径, 新开预算清单)。new_budget 计数钩子挂在
+        AiInterpreter 上：无论谁新开一笔预算都被记下。
         """
-        from data.plugins.astrbot_plugin_star_feather import daily as daily_mod
-        from data.plugins.astrbot_plugin_star_feather import tarot_core
-        from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
+        from data.plugins.astrbot_plugin_star_feather.adapters.presenter import (
+            Presenter,
+        )
+        from data.plugins.astrbot_plugin_star_feather.clock import Clock as RealClock
+        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.deliver import Deliverer
+        from data.plugins.astrbot_plugin_star_feather.services.reading import (
+            ReadingService,
+        )
+        from data.plugins.astrbot_plugin_star_feather.settings import parse
 
         ctx = FakeContext(using=None, others=list(providers))
-        t = tarot_core.StarTarot(ctx, None)
-        t.send_mode = "plain"
-        t.deliverer.forward_result = False
-        # 单次请求超时 30 秒、总预算 1.2 秒：差值就是这两条用例要的东西——等多久由
-        # 预算说了算，不由供应商的 ai_timeout 说了算
-        t.interpreter = AiInterpreter(ctx, ai_timeout=30, ai_budget=1.2)
-
+        it = AiInterpreter(ctx, ai_timeout=30, ai_budget=1.2)
         created = []
-        real_new_budget = t.interpreter.new_budget      # 挂在最里层：tarot.new_budget 也走它
+        real_new_budget = it.new_budget
 
         def counting_new_budget():
             bd = real_new_budget()
             created.append(bd)
             return bd
-        t.interpreter.new_budget = counting_new_budget
+        it.new_budget = counting_new_budget
 
+        settings = parse({"ai": {"ai_timeout": 30, "ai_budget_seconds": 1.2,
+                                 "parallel_stages": True},
+                          "output": {"send_mode": "plain", "daily_fixed": True,
+                                     "daily_card": False, "shuffle_lines": False},
+                          "limit": {"daily_count": 0}})
+        clock = RealClock()
+        daily = DailyFortune(_KV(), clock=clock, interpreter=it)
         path = str(tmp_path / "e2e.png")
 
-        def fake_render_image(formation, positions, picks):
-            open(path, "wb").write(b"PNG")
-            return path
-        t._render_image = fake_render_image
+        class _Renderer:
+            async def card(self, formation, positions, picks):
+                open(path, "wb").write(b"PNG")
+                return path
 
-        p = StarFeatherPlugin.__new__(StarFeatherPlugin)
-        p.tarot = t
-        p.daily_card = False                        # 走普通牌面图，海报卡另有用例
-        p._shuffle_hint = lambda: None              # 单张牌阵本来也不出提示
-        p.daily = daily_mod.DailyFortune(_KV(), t)  # 真缓存层：牌灵的话走真透传
+            async def daily_card(self, picks, uid, clock):
+                return None
 
-        evt = types.SimpleNamespace()
+            async def ensure_image(self, img, formation, positions, picks):
+                return img
+
+        reading = ReadingService(settings=settings, clock=clock, daily=daily,
+                                 interpreter=it, renderer=_Renderer())
+        presenter = Presenter(Deliverer(settings.output.segment_size,
+                                        settings.output.disclaimer, False))
+
+        async def gate_check(event, for_command):
+            return None
+
+        p = types.SimpleNamespace(
+            context=types.SimpleNamespace(),
+            container=types.SimpleNamespace(
+                settings=settings,
+                gate=types.SimpleNamespace(check=gate_check),
+                reading=reading, presenter=presenter))
+
+        evt = types.SimpleNamespace(unified_msg_origin="umo", message_str="")
         evt.result = None
         evt.sent = []
         evt.get_self_id = lambda: "12345"
+        evt.get_sender_id = lambda: "u1"
+        evt.should_call_llm = lambda v: None
 
         def chain_result(chain):
             evt.result = chain
@@ -517,11 +548,9 @@ class TestEndToEndDeliveryUnderSpentBudget:
 
     @staticmethod
     async def _drain(plugin, evt, question, **kw):
-        async for _ in plugin._run_reading(evt, TestEndToEndDeliveryUnderSpentBudget.FORMATION,
-                                           TestEndToEndDeliveryUnderSpentBudget.POSITIONS,
-                                           [PICK], question, **kw):
-            pass
-
+        from data.plugins.astrbot_plugin_star_feather.app import handlers
+        await handlers.command_entry(plugin, evt, question, version="0",
+                                     err_tpl="断了")
 
 # ---------- 候选来源本身也在预算之内（issue #21 ④-a） ----------
 class _SlowContext(FakeContext):
@@ -624,39 +653,60 @@ class TestUnlimitedBudgetKeepsTheImagePipeline:
     """
 
     def test_zero_budget_rerenders_a_vanished_image(self, tmp_path, monkeypatch):
-        from data.plugins.astrbot_plugin_star_feather import daily as daily_mod
-        from data.plugins.astrbot_plugin_star_feather import tarot_core
-        from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
+        from data.plugins.astrbot_plugin_star_feather.adapters.presenter import (
+            Presenter,
+        )
+        from data.plugins.astrbot_plugin_star_feather.clock import Clock as RealClock
+        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.deliver import Deliverer
+        from data.plugins.astrbot_plugin_star_feather.services.reading import (
+            ReadingService,
+        )
+        from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
+        from data.plugins.astrbot_plugin_star_feather.settings import parse
 
-        monkeypatch.setattr(card_render, "IMAGE_DIR_ROOT", str(tmp_path / "star_feather"))
         ctx = FakeContext(using=None, others=[FakeProvider("p0", result=OK_INTERP)])
-        t = tarot_core.StarTarot(ctx, None)
-        t.send_mode = "plain"
-        t.deliverer.forward_result = False
-        t.interpreter = AiInterpreter(ctx, ai_timeout=30, ai_budget=0)   # 总预算关掉
+        it = AiInterpreter(ctx, ai_timeout=30, ai_budget=0)   # 总预算关掉
 
         gone = str(tmp_path / "gone.png")     # 渲染给了路径，文件却在这几毫秒里没了
         alive = str(tmp_path / "alive.png")
         calls = []
 
-        def fake_render_image(formation, positions, picks):
+        def fake_render_sync(formation, positions, picks):
             calls.append(1)
             if len(calls) == 1:
                 return gone
             open(alive, "wb").write(b"PNG")
             return alive
-        t._render_image = fake_render_image
 
-        p = StarFeatherPlugin.__new__(StarFeatherPlugin)
-        p.tarot = t
-        p.daily_card = False
-        p._shuffle_hint = lambda: None
-        p.daily = daily_mod.DailyFortune(_KV(), t)
+        renderer = Renderer(image_dir=str(tmp_path), send_mode="plain")
+        monkeypatch.setattr(renderer, "_render_sync", fake_render_sync)
 
-        evt = types.SimpleNamespace()
+        settings = parse({"ai": {"ai_timeout": 30, "ai_budget_seconds": 0},
+                          "output": {"send_mode": "plain", "daily_fixed": True,
+                                     "daily_card": False, "shuffle_lines": False}})
+        clock = RealClock()
+        daily = DailyFortune(_KV(), clock=clock, interpreter=it)
+        reading = ReadingService(settings=settings, clock=clock, daily=daily,
+                                 interpreter=it, renderer=renderer)
+        presenter = Presenter(Deliverer(settings.output.segment_size,
+                                        settings.output.disclaimer, False))
+
+        async def gate_check(event, for_command):
+            return None
+
+        p = types.SimpleNamespace(
+            context=types.SimpleNamespace(),
+            container=types.SimpleNamespace(
+                settings=settings, gate=types.SimpleNamespace(check=gate_check),
+                reading=reading, presenter=presenter))
+
+        evt = types.SimpleNamespace(unified_msg_origin="umo", message_str="")
         evt.result = None
         evt.sent = []
         evt.get_self_id = lambda: "12345"
+        evt.get_sender_id = lambda: "u1"
+        evt.should_call_llm = lambda v: None
 
         def chain_result(chain):
             evt.result = chain
@@ -678,5 +728,5 @@ class TestUnlimitedBudgetKeepsTheImagePipeline:
 
     @staticmethod
     async def _drain(plugin, evt):
-        async for _ in plugin._run_reading(evt, "羽签", ["你的当下"], [PICK], "问感情"):
-            pass
+        from data.plugins.astrbot_plugin_star_feather.app import handlers
+        await handlers.command_entry(plugin, evt, "问感情", version="0", err_tpl="断了")

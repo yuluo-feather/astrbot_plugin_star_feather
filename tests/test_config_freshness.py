@@ -215,35 +215,44 @@ class TestEntriesAreWired:
     """接线守卫：两个入口都得进门自报，否则上面那把哨兵永远不会被触发。"""
 
     def test_command_entry_notes_binding(self):
+        from data.plugins.astrbot_plugin_star_feather.app import handlers
+        from data.plugins.astrbot_plugin_star_feather.settings import parse
+
         p = _plugin()
         seen = []
         p._note_entry_binding = seen.append
 
         async def block(event, for_command):
-            return "BLOCK"          # 闸门直接拦下：进门那行就该已经记下了
+            return "BLOCK"
 
-        p.gate = types.SimpleNamespace(check=block)
+        p.container = types.SimpleNamespace(
+            settings=parse(None),
+            gate=types.SimpleNamespace(check=block),
+            reading=types.SimpleNamespace(),
+            presenter=types.SimpleNamespace())
         ev = types.SimpleNamespace(should_call_llm=lambda v: None,
-                                   plain_result=lambda t: t)
+                                   send=lambda chain: asyncio.sleep(0))
 
-        async def collect():
-            return [r async for r in p._command_entry(ev, "", err_tpl="x")]
-
-        asyncio.run(collect())
+        asyncio.run(handlers.command_entry(p, ev, "", version="0", err_tpl="x"))
         assert seen == ["command"]
 
     def test_tool_entry_notes_binding(self):
-        p = _plugin(_tarot(llm_tool_enabled=False))   # 开关关掉：进第一个分支就 return，不必走完流程
+        from data.plugins.astrbot_plugin_star_feather.app import handlers
+        from data.plugins.astrbot_plugin_star_feather.settings import parse
+
+        p = _plugin()
         seen = []
         p._note_entry_binding = seen.append
+        p.container = types.SimpleNamespace(
+            settings=parse({"tool": {"llm_tool_enabled": False}}),
+            gate=types.SimpleNamespace(),
+            reading=types.SimpleNamespace(),
+            presenter=types.SimpleNamespace())
+        ev = types.SimpleNamespace()
 
-        async def fake_send(event, text):
+        async def send(chain):
             return None
+        ev.send = send
 
-        p._tool_send = fake_send
-
-        async def collect():
-            return [r async for r in p.divine_tool(types.SimpleNamespace())]
-
-        asyncio.run(collect())
+        asyncio.run(handlers.tool_entry(p, ev, version="0"))
         assert seen == ["tool"]
