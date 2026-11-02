@@ -8,7 +8,10 @@ import asyncio
 import logging
 import types
 
-from data.plugins.astrbot_plugin_star_feather.ai.chain import AiInterpreter
+from data.plugins.astrbot_plugin_star_feather.ai.chain import (
+    QUEUE_TIMEOUT,
+    AiInterpreter,
+)
 from data.plugins.astrbot_plugin_star_feather.ai.prompts import (
     PERSONA_POOL,
     PERSONA_PROFILES,
@@ -442,9 +445,10 @@ class TestProviderConcurrencyLimit:
     """同一 Provider 的并发闸：默认 2，0 表示不限制。"""
 
     class _SlowProvider:
-        def __init__(self):
+        def __init__(self, delay=0.05):
             self.live = 0
             self.peak = 0
+            self.delay = delay
 
         def meta(self):
             return types.SimpleNamespace(id="slow")
@@ -452,7 +456,7 @@ class TestProviderConcurrencyLimit:
         async def text_chat(self, **kwargs):
             self.live += 1
             self.peak = max(self.peak, self.live)
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(self.delay)
             self.live -= 1
             return types.SimpleNamespace(completion_text=OK_INTERP)
 
@@ -476,6 +480,34 @@ class TestProviderConcurrencyLimit:
 
     def test_one_serializes(self):
         assert self._peak(1) == 1
+
+    def test_queue_wait_counts_against_timeout(self):
+        """排队时间也算进本次请求预算：等不到槽位就返回本地原因哨兵。"""
+        prov = self._SlowProvider(delay=0.2)
+        it = AiInterpreter(FakeContext(prov, [prov]), True, 5, 60, "",
+                           max_concurrency=1, all_providers_fallback=False)
+
+        async def go():
+            first = asyncio.create_task(it._chat_once(prov, "p", "s", timeout=1.0))
+            await asyncio.sleep(0.05)
+            second = await it._chat_once(prov, "p", "s", timeout=0.1)
+            await first
+            return second
+
+        assert asyncio.run(go()) is QUEUE_TIMEOUT
+
+    def test_queue_timeout_does_not_cool_down_the_provider(self):
+        """排队超时是本地原因，不能记成 Provider 服务失败。"""
+        p1 = FakeProvider("p1", result=OK_INTERP)
+        it = AiInterpreter(FakeContext(p1, [p1]), True, 5, 60, "")
+
+        async def fake_chat(*args, **kwargs):
+            return QUEUE_TIMEOUT
+
+        it._chat_once = fake_chat
+        out = asyncio.run(it.interpret(UMO, "羽签", ["你的当下"], [PICK], "问题", "-"))
+        assert out is None
+        assert it._fail_ts_by_provider == {}
 
 
 class _BrokenProviderContext:

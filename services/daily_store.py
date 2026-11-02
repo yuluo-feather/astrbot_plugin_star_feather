@@ -57,6 +57,36 @@ class DailyRecord:
             "spirit_sign": self.spirit_sign,
         }
 
+    def put_pick(self, card_id: str, upright: bool, sign: str, date: str,
+                 prompt_v: str, persona: str) -> None:
+        """抽牌结果写入：牌字段只能从这一处改（P0 的结构保证）。"""
+        self.date = date
+        self.card_id = card_id
+        self.upright = bool(upright)
+        self.sign = sign
+        self.prompt_v = prompt_v
+        self.persona = persona
+
+    def put_context(self, date: str, sign: str, prompt_v: str, persona: str) -> None:
+        """解读/上下文写入：只改日期、牌组指纹与配置指纹，不碰牌字段。"""
+        self.date = date
+        self.sign = sign
+        self.prompt_v = prompt_v
+        self.persona = persona
+
+    def put_interp(self, topic: str, record: dict, sign: str, date: str,
+                   prompt_v: str, persona: str) -> None:
+        """解读写入：只改解读分桶与它依赖的上下文，不碰牌字段。"""
+        self.put_context(date, sign, prompt_v, persona)
+        self.interps[topic] = record
+
+    def put_spirit(self, line: str, sign: str, date: str, prompt_v: str) -> None:
+        """牌灵的话写入：只改日期/提示词版本/牌灵字段，不碰牌字段。"""
+        self.date = date
+        self.prompt_v = prompt_v
+        self.spirit_line = line
+        self.spirit_sign = sign
+
     def same_context(self, date: str, sign: str, prompt_v: str, persona: str) -> bool:
         """同一天、同一牌组、同一版提示词、同一人设才沿用旧分桶。"""
         return (self.schema == SCHEMA and self.date == date and self.sign == sign
