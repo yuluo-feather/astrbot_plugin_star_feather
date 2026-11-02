@@ -18,6 +18,13 @@ from .diagnostics import note_entry_binding
 EMPTY_FALLBACK = "（未提具体问题，请作一般运势解读）"
 
 
+def _exc_detail(exc: BaseException) -> str:
+    """TaskGroup 的 ExceptionGroup 只给一句壳，日志里要展开到具体子异常。"""
+    if isinstance(exc, BaseExceptionGroup):
+        return " | ".join(f"{type(x).__name__}: {x}" for x in exc.exceptions)
+    return f"{type(exc).__name__}: {exc}"
+
+
 def _note(plugin, entry: str) -> None:
     """走插件上的接线点（测试可替换），没有就退回诊断模块的默认实现。"""
     hook = getattr(plugin, "_note_entry_binding", None)
@@ -60,7 +67,7 @@ async def command_entry(plugin, event, text: str, *, version: str, err_tpl: str,
             empty_fallback=empty_fallback, epilogue=True)
         await container.presenter.present(reading, messenger, event)
     except Exception as e:
-        log.error(f"命令占卜失败: {e}", exc_info=True)
+        log.error(f"命令占卜失败: {_exc_detail(e)}", exc_info=True)
         # 异常细节只进日志：err_tpl 是纯友好文案
         await messenger.send_text(err_tpl)
 
@@ -106,6 +113,6 @@ async def tool_entry(plugin, event, formation: str = "", *, version: str) -> str
         await container.presenter.present(reading, messenger, event)
         return note
     except Exception as e:
-        log.error(f"自然语言占卜失败: {e}")
+        log.error(f"自然语言占卜失败: {_exc_detail(e)}")
         await messenger.send_text("这卦起得有点乱……牌灵需要缓缓，换个时候再来问。")
         return note
