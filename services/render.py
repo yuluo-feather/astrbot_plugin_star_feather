@@ -12,11 +12,8 @@ from astrbot.api import logger
 
 from ..core.dailylines import pick_signature
 from ..core.models import Pick
-from ..render import (
-    _render_daily_card_img,
-    _schedule_image_cleanup,
-    render_cards,
-)
+from ..render.draw import render_cards, render_daily_card
+from ..render.store import _schedule_image_cleanup
 
 
 class Renderer:
@@ -62,7 +59,7 @@ class Renderer:
             date_text = clock.date_text()
             signature = pick_signature(card, upright, uid, clock.today())
             async with self._lock:
-                img = await asyncio.to_thread(_render_daily_card_img, card, upright,
+                img = await asyncio.to_thread(render_daily_card, card, upright,
                                               signature, date_text, self.image_dir)
             if not isinstance(img, str) or not img.strip():
                 return None

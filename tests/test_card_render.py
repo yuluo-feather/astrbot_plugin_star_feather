@@ -6,9 +6,10 @@ import time
 import types
 
 import pytest
-from data.plugins.astrbot_plugin_star_feather import render as card_render
 from data.plugins.astrbot_plugin_star_feather.core.draw import draw
+from data.plugins.astrbot_plugin_star_feather.render import assets as render_assets
 from data.plugins.astrbot_plugin_star_feather.render import draw as render_draw
+from data.plugins.astrbot_plugin_star_feather.render import layout as render_layout
 from data.plugins.astrbot_plugin_star_feather.render import store as render_store
 
 
@@ -34,7 +35,7 @@ class TestRenderSmoke:
             {"card": _mk("cups", "2", "圣杯二", "Two of Cups", "两情相悦", "关系失衡"), "upright": False},
             {"card": _mk("major", "19", "太阳", "The Sun", "成功喜悦", "乌云遮日"), "upright": True},
         ]
-        path = card_render.render_cards(positions, picks, "羽时三刻", save_dir=str(tmp_path))
+        path = render_draw.render_cards(positions, picks, "羽时三刻", save_dir=str(tmp_path))
         assert os.path.isfile(path)
         assert path.endswith(".jpg") and os.path.getsize(path) > 10_000
         # 扩展名与编码必须一致：保存实现若退回 PNG，只查后缀/尺寸会静默放行（review 复核）
@@ -50,21 +51,21 @@ class TestRenderSmoke:
         """
         from PIL import ImageDraw
         card = _mk("major", "19", "太阳", "The Sun", "成功喜悦", "乌云遮日")
-        card_render._background_cached.cache_clear()
-        first = card_render._build_card_background(card, 680, 1200)
-        clean = card_render._build_card_background(card, 680, 1200).tobytes()
+        render_draw._background_cached.cache_clear()
+        first = render_draw._build_card_background(card, 680, 1200)
+        clean = render_draw._build_card_background(card, 680, 1200).tobytes()
         ImageDraw.Draw(first).rectangle([0, 0, 40, 40], fill=(255, 0, 0, 255))
-        assert card_render._build_card_background(card, 680, 1200).tobytes() == clean
+        assert render_draw._build_card_background(card, 680, 1200).tobytes() == clean
 
     def test_card_image_cache_is_pure(self):
         """牌面处理缓存只省重算、不改输出；正逆位是两个缓存键。"""
         card = _mk("major", "19", "太阳", "The Sun", "成功喜悦", "乌云遮日")
-        path = card_render._asset_path(card)
-        card_render._load_card_image.cache_clear()
-        up1, w1, h1 = card_render._load_card_image(path, True)
-        down, w2, h2 = card_render._load_card_image(path, False)
-        up2, _, _ = card_render._load_card_image(path, True)
-        info = card_render._load_card_image.cache_info()
+        path = render_assets._asset_path(card)
+        render_draw._load_card_image.cache_clear()
+        up1, w1, h1 = render_draw._load_card_image(path, True)
+        down, w2, h2 = render_draw._load_card_image(path, False)
+        up2, _, _ = render_draw._load_card_image(path, True)
+        info = render_draw._load_card_image.cache_info()
         assert (w1, h1) == (w2, h2)          # 缩放尺寸与正逆无关
         assert up1.tobytes() == up2.tobytes()  # 命中缓存：逐像素不变
         assert info.misses == 2 and info.hits == 1  # 正/逆各占一键，第三次命中
@@ -88,7 +89,7 @@ class TestRenderSmoke:
             {"card": _mk("cups", "2", "圣杯二", "Two of Cups", "两情相悦", "关系失衡"), "upright": False},
             {"card": _mk("wands", "1", "权杖一", "Ace of Wands", "灵感火花", "阻碍重重"), "upright": True},
         ]
-        path = card_render.render_cards(positions, picks, "羽时三刻", save_dir=str(tmp_path))
+        path = render_draw.render_cards(positions, picks, "羽时三刻", save_dir=str(tmp_path))
         assert os.path.isfile(path)
         assert seen[-1] == picks[1]["card"]  # 随机命中第 2 张时背景就是它
         assert all(c in [p["card"] for p in picks] for c in seen)  # 始终在本签牌内挑
@@ -96,7 +97,7 @@ class TestRenderSmoke:
     def test_build_card_background_sizes_and_dim(self):
         # 牌面 cover 做底 + 深藏青遮罩：尺寸吻合、整体压暗（不漏亮底）
         from PIL import Image
-        bg = card_render._build_card_background(
+        bg = render_draw._build_card_background(
             _mk("major", "19", "太阳", "The Sun", "成功喜悦", "乌云遮日"), 120, 80)
         assert isinstance(bg, Image.Image)
         assert bg.size == (120, 80)
@@ -106,19 +107,19 @@ class TestRenderSmoke:
     def test_build_card_background_missing_asset_raises(self):
         import pytest
         with pytest.raises(FileNotFoundError):
-            card_render._build_card_background(
+            render_draw._build_card_background(
                 _mk("major", "99", "不存在", "Nope", "无", "无"), 120, 80)
 
     def test_daily_card_poster_produces_jpeg(self, tmp_path):
         # 今日牌运卡海报：竖版定型尺寸、真实素材可渲染、文件名带 daily 前缀（清理识别用）
-        path = card_render._render_daily_card_img(
+        path = render_draw.render_daily_card(
             _mk("major", "19", "太阳", "The Sun", "成功喜悦", "乌云遮日"), False,
             "别把一时心情当决定，睡一觉再说。", "8月27日·周四", save_dir=str(tmp_path))
         from PIL import Image
         assert os.path.isfile(path)
         assert path.endswith(".jpg")
         with Image.open(path) as im:
-            assert im.size == (card_render.DAILY_CARD_W, card_render.DAILY_CARD_H)
+            assert im.size == (render_layout.DAILY_CARD_W, render_layout.DAILY_CARD_H)
             assert im.mode == "RGB"
             assert im.format == "JPEG"
 
@@ -126,7 +127,7 @@ class TestRenderSmoke:
         # 素材缺失：向调用方抛异常（编排层负责回退，渲染层只保证 fail loudly）
         import pytest
         with pytest.raises(FileNotFoundError):
-            card_render._render_daily_card_img(
+            render_draw.render_daily_card(
                 _mk("major", "99", "不存在", "Nope", "无", "无"), True,
                 "签文", "8月27日·周四", save_dir=str(tmp_path))
 
@@ -143,25 +144,25 @@ class TestRenderSmoke:
         font = fonts._load_font(24)
         text = "别把一时心情当决定，睡一觉再说。"
         w_full = d.textlength(text, font=font)
-        # 生产实参：_render_daily_card_img 传的是「卡宽 - 200」
-        max_w_card = card_render.DAILY_CARD_W - 200
-        lines = card_render._split_signature_lines(d, text, font, max_w_card)
+        # 生产实参：render_daily_card 传的是「卡宽 - 200」
+        max_w_card = render_layout.DAILY_CARD_W - 200
+        lines = render_draw._split_signature_lines(d, text, font, max_w_card)
         assert "".join(lines) == text
         assert len(lines) == 1  # 短签文（约 18 字）：卡宽内保持单行（旧卡观感）
         # 宽度收在「首段宽 … 整句宽」之间：首段放得下、整句放不下 → 必在逗号后断、标点收尾
         w_seg = d.textlength("别把一时心情当决定，", font=font)
-        lines_narrow = card_render._split_signature_lines(
+        lines_narrow = render_draw._split_signature_lines(
             d, text, font, int((w_seg + w_full) / 2))
         assert "".join(lines_narrow) == text
         assert len(lines_narrow) >= 2 and lines_narrow[0].endswith("，")
         # 单句超宽：逐字回落且不丢字（这句无标点，取半句宽必逼出多行）
         long_sig = "这是一句特别长的牌灵的话用来确认换行不丢字也不截断。"
-        lines2 = card_render._split_signature_lines(
+        lines2 = render_draw._split_signature_lines(
             d, long_sig, font, int(d.textlength(long_sig, font=font) / 2))
         assert "".join(lines2) == long_sig
         assert len(lines2) >= 2
         # 短签文（18 字内）足够宽松时一行放下（旧卡同款观感）
-        lines3 = card_render._split_signature_lines(d, text, font, 1000)
+        lines3 = render_draw._split_signature_lines(d, text, font, 1000)
         assert len(lines3) == 1
 
 
@@ -170,17 +171,17 @@ class TestTempCleanup:
     def test_delayed_remove(self, tmp_path):
         f = tmp_path / "tarot_test.png"
         f.write_bytes(b"x")
-        asyncio.run(card_render._delayed_remove(str(f), 0))
+        asyncio.run(render_store._delayed_remove(str(f), 0))
         assert not f.exists()
 
     def test_delayed_remove_missing_ok(self):
         # 文件已被处理：删除不存在的文件不抛异常
-        asyncio.run(card_render._delayed_remove("C:/not/exist/tarot_x.png", 0))
+        asyncio.run(render_store._delayed_remove("C:/not/exist/tarot_x.png", 0))
 
     def test_schedule_cleanup_no_loop_safe(self):
         # 无事件循环环境（同步测试）：静默跳过，不抛异常
-        card_render._schedule_image_cleanup("C:/not/exist/tarot_x.png")
-        card_render._schedule_image_cleanup(None)
+        render_store._schedule_image_cleanup("C:/not/exist/tarot_x.png")
+        render_store._schedule_image_cleanup(None)
 
     def test_cleanup_task_is_referenced_until_it_finishes(self, tmp_path):
         """任务必须留强引用：asyncio 只持弱引用，没人引用时可能被 GC，保险丝静默失效。"""
@@ -188,10 +189,10 @@ class TestTempCleanup:
         f.write_bytes(b"x")
 
         async def go():
-            card_render._schedule_image_cleanup(str(f), delay=0)
-            assert card_render._CLEANUP_TASKS, "任务应被集合引用"
+            render_store._schedule_image_cleanup(str(f), delay=0)
+            assert render_store._CLEANUP_TASKS, "任务应被集合引用"
             await asyncio.sleep(0.05)
-            return not card_render._CLEANUP_TASKS
+            return not render_store._CLEANUP_TASKS
 
         assert asyncio.run(go())
         assert not f.exists()
@@ -206,9 +207,9 @@ class TestTempCleanup:
         默认值与常量同源：不许有人就地写回一个 30 / 300。
         """
         import inspect
-        assert card_render.IMAGE_TTL_SECONDS >= 120, "短于实测故障窗口（63 秒）的量级"
-        for fn in (card_render._delayed_remove, card_render._schedule_image_cleanup):
-            assert inspect.signature(fn).parameters["delay"].default == card_render.IMAGE_TTL_SECONDS
+        assert render_store.IMAGE_TTL_SECONDS >= 120, "短于实测故障窗口（63 秒）的量级"
+        for fn in (render_store._delayed_remove, render_store._schedule_image_cleanup):
+            assert inspect.signature(fn).parameters["delay"].default == render_store.IMAGE_TTL_SECONDS
 
 class TestStaleCleanup:
     """启动清理（①实例隔离的配套动作）：只删「命名合规 + 确认过期」的残骸。
@@ -243,7 +244,7 @@ class TestStaleCleanup:
         fresh = [root / "tarot_a.png", root / "daily_b.png"]
         for p in fresh:
             p.write_bytes(b"img")
-        card_render.cleanup_stale_images()
+        render_store.cleanup_stale_images()
         assert all(p.exists() for p in fresh)
 
     def test_stale_scattered_pngs_removed_but_irregular_kept(self, tmp_path, monkeypatch):
@@ -259,8 +260,8 @@ class TestStaleCleanup:
         odd = root / "tarot_old.bmp"
         odd.write_bytes(b"img")
         for p in (stale_png, junk, odd):
-            self._age(p, card_render.STALE_INSTANCE_DIR_AGE + 60)
-        card_render.cleanup_stale_images()
+            self._age(p, render_store.STALE_INSTANCE_DIR_AGE + 60)
+        render_store.cleanup_stale_images()
         assert not stale_png.exists()
         assert junk.exists() and odd.exists()
 
@@ -272,8 +273,8 @@ class TestStaleCleanup:
         for d in (stale, fresh):
             d.mkdir()
             (d / "tarot_x.png").write_bytes(b"img")
-        self._age(stale, card_render.STALE_INSTANCE_DIR_AGE + 60)
-        card_render.cleanup_stale_images()
+        self._age(stale, render_store.STALE_INSTANCE_DIR_AGE + 60)
+        render_store.cleanup_stale_images()
         assert not stale.exists()
         assert fresh.exists() and (fresh / "tarot_x.png").exists()
 
@@ -283,8 +284,8 @@ class TestStaleCleanup:
         mine = root / "inst_4242_3_0badc0de"
         mine.mkdir()
         (mine / "tarot_mine.png").write_bytes(b"img")
-        self._age(mine, card_render.STALE_INSTANCE_DIR_AGE * 10)
-        card_render.cleanup_stale_images(str(mine))
+        self._age(mine, render_store.STALE_INSTANCE_DIR_AGE * 10)
+        render_store.cleanup_stale_images(str(mine))
         assert (mine / "tarot_mine.png").exists()
 
     def test_same_pid_stale_non_empty_dir_kept(self, tmp_path, monkeypatch):
@@ -301,8 +302,8 @@ class TestStaleCleanup:
         for d in (old, new):
             d.mkdir()
             (d / "tarot_x.png").write_bytes(b"img")
-        self._age(old, card_render.STALE_INSTANCE_DIR_AGE * 10)
-        card_render.cleanup_stale_images(str(new))   # 只传自己：旧实例目录仍须免删
+        self._age(old, render_store.STALE_INSTANCE_DIR_AGE * 10)
+        render_store.cleanup_stale_images(str(new))   # 只传自己：旧实例目录仍须免删
         assert old.exists() and (old / "tarot_x.png").exists()
         assert new.exists()
 
@@ -314,8 +315,8 @@ class TestStaleCleanup:
         new = root / f"inst_{os.getpid()}_2_cafebabe"
         for d in (old, new):
             d.mkdir()
-        self._age(old, card_render.STALE_INSTANCE_DIR_AGE * 10)
-        card_render.cleanup_stale_images(str(new))
+        self._age(old, render_store.STALE_INSTANCE_DIR_AGE * 10)
+        render_store.cleanup_stale_images(str(new))
         assert not old.exists(), "同进程的空壳过期目录应被回收"
         assert new.exists(), "当前实例目录永不删"
 
@@ -326,7 +327,7 @@ class TestStaleCleanup:
         new = root / f"inst_{os.getpid()}_2_cafebabe"
         for d in (old, new):
             d.mkdir()
-        card_render.cleanup_stale_images(str(new))
+        render_store.cleanup_stale_images(str(new))
         assert old.exists(), "没过期的空目录不许回收"
 
     def test_same_pid_empty_current_dir_kept(self, tmp_path, monkeypatch):
@@ -334,8 +335,8 @@ class TestStaleCleanup:
         root = self._root(tmp_path, monkeypatch)
         mine = root / f"inst_{os.getpid()}_3_0badc0de"
         mine.mkdir()
-        self._age(mine, card_render.STALE_INSTANCE_DIR_AGE * 10)
-        card_render.cleanup_stale_images(str(mine))
+        self._age(mine, render_store.STALE_INSTANCE_DIR_AGE * 10)
+        render_store.cleanup_stale_images(str(mine))
         assert mine.exists()
 
     def test_other_pid_stale_dir_is_still_reaped(self, tmp_path, monkeypatch):
@@ -344,8 +345,8 @@ class TestStaleCleanup:
         foreign = root / f"inst_{os.getpid() + 1}_1_deadbeef"
         foreign.mkdir()
         (foreign / "tarot_x.png").write_bytes(b"img")
-        self._age(foreign, card_render.STALE_INSTANCE_DIR_AGE * 10)
-        card_render.cleanup_stale_images()
+        self._age(foreign, render_store.STALE_INSTANCE_DIR_AGE * 10)
+        render_store.cleanup_stale_images()
         assert not foreign.exists()
 
     def test_irregular_names_untouched(self, tmp_path, monkeypatch):
@@ -356,15 +357,15 @@ class TestStaleCleanup:
         (odd_dir / "tarot_x.png").write_bytes(b"img")
         short_hex = root / "inst_1_1_deadbee"          # 7 位十六进制
         short_hex.mkdir()
-        self._age(odd_dir, card_render.STALE_INSTANCE_DIR_AGE * 10)
-        self._age(short_hex, card_render.STALE_INSTANCE_DIR_AGE * 10)
-        card_render.cleanup_stale_images()
+        self._age(odd_dir, render_store.STALE_INSTANCE_DIR_AGE * 10)
+        self._age(short_hex, render_store.STALE_INSTANCE_DIR_AGE * 10)
+        render_store.cleanup_stale_images()
         assert odd_dir.exists() and short_hex.exists()
 
     def test_missing_root_is_noop(self, tmp_path, monkeypatch):
         """根目录不存在（装机首启）：静默返回，不抛也不建。"""
         monkeypatch.setattr(render_store, "IMAGE_DIR_ROOT", str(tmp_path / "nope"))
-        card_render.cleanup_stale_images()
+        render_store.cleanup_stale_images()
 
 
 class TestInstanceImageDir:
@@ -376,28 +377,28 @@ class TestInstanceImageDir:
     def test_two_instances_never_share_a_name(self, tmp_path, monkeypatch):
         root = tmp_path / "star_feather"
         monkeypatch.setattr(render_store, "IMAGE_DIR_ROOT", str(root))
-        a = card_render.new_instance_image_dir()
-        b = card_render.new_instance_image_dir()
+        a = render_store.new_instance_image_dir()
+        b = render_store.new_instance_image_dir()
         assert a != b, "同进程两代实例拿到同一个目录＝新实例会踩旧实例的图"
         for path in (a, b):
             assert os.path.isdir(path)
-            assert card_render._INSTANCE_DIR_RE.match(os.path.basename(path))
+            assert render_store._INSTANCE_DIR_RE.match(os.path.basename(path))
             assert os.path.dirname(path) == str(root)
 
     def test_regex_rejects_same_pid_only_names(self):
         """判据本身：光有 pid 的名字不是合法实例目录（那正是分不开的那一类）。"""
-        assert card_render._INSTANCE_DIR_RE.match("inst_123_1_0a1b2c3d")
-        assert not card_render._INSTANCE_DIR_RE.match("inst_123")
-        assert not card_render._INSTANCE_DIR_RE.match("inst_123_")
-        assert not card_render._INSTANCE_DIR_RE.match("inst_123_1_0A1B2C3D")  # 大写不是本格式
+        assert render_store._INSTANCE_DIR_RE.match("inst_123_1_0a1b2c3d")
+        assert not render_store._INSTANCE_DIR_RE.match("inst_123")
+        assert not render_store._INSTANCE_DIR_RE.match("inst_123_")
+        assert not render_store._INSTANCE_DIR_RE.match("inst_123_1_0A1B2C3D")  # 大写不是本格式
 
     def test_each_renderer_gets_its_own_instance_dir(self, tmp_path, monkeypatch):
         """装配口径：每个渲染器一份实例目录——别落到共享父目录去。"""
         from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
 
         monkeypatch.setattr(render_store, "IMAGE_DIR_ROOT", str(tmp_path / "star_feather"))
-        a = Renderer(card_render.new_instance_image_dir(), "plain")
-        b = Renderer(card_render.new_instance_image_dir(), "plain")
+        a = Renderer(render_store.new_instance_image_dir(), "plain")
+        b = Renderer(render_store.new_instance_image_dir(), "plain")
         assert a.image_dir != b.image_dir, "两代实例拿到同一个目录＝①没生效"
 
     def test_root_failure_uses_a_private_unique_dir(self, tmp_path, monkeypatch):
@@ -419,8 +420,8 @@ class TestInstanceImageDir:
             return real_makedirs(path, *a, **kw)
         monkeypatch.setattr(os, "makedirs", fail_root)
 
-        a = card_render.new_instance_image_dir()
-        b = card_render.new_instance_image_dir()
+        a = render_store.new_instance_image_dir()
+        b = render_store.new_instance_image_dir()
         assert a and b and a != b, "退路也必须每实例一份，不许两代共用"
         assert os.path.isdir(a) and os.path.isdir(b)
         assert os.path.abspath(a) != os.path.abspath(str(broken))
@@ -433,7 +434,7 @@ class TestInstanceImageDir:
             raise OSError("磁盘不可用")
         monkeypatch.setattr(os, "makedirs", boom)
         monkeypatch.setattr(render_store.tempfile, "mkdtemp", boom)
-        assert card_render.new_instance_image_dir() == ""
+        assert render_store.new_instance_image_dir() == ""
 
     def test_renderer_keeps_empty_image_dir_instead_of_shared_root(self, tmp_path, monkeypatch):
         """空路径是「本次降级为无图」的信号：不许用 `or` 换成共享根目录（①的边界）。"""
@@ -459,8 +460,8 @@ class TestReloadIsolationEndToEnd:
         """同进程两代实例（image_dir 由 new_instance_image_dir 开出）。"""
         from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
         monkeypatch.setattr(render_store, "IMAGE_DIR_ROOT", str(tmp_path / "star_feather"))
-        return (Renderer(card_render.new_instance_image_dir(), "plain"),
-                Renderer(card_render.new_instance_image_dir(), "plain"))
+        return (Renderer(render_store.new_instance_image_dir(), "plain"),
+                Renderer(render_store.new_instance_image_dir(), "plain"))
 
     @staticmethod
     def _age(path, seconds):
@@ -474,16 +475,16 @@ class TestReloadIsolationEndToEnd:
         assert a.image_dir != b.image_dir, "两代实例必须各自一份目录"
         positions, picks = draw("羽签")               # 真抽牌
         if kind == "plain":
-            img = card_render.render_cards(positions, picks, "羽签", save_dir=a.image_dir)
+            img = render_draw.render_cards(positions, picks, "羽签", save_dir=a.image_dir)
         else:
             pick = picks[0]
-            img = card_render._render_daily_card_img(pick["card"], bool(pick["upright"]),
+            img = render_draw.render_daily_card(pick["card"], bool(pick["upright"]),
                                                      "心之所向，自有回响。", "10月13日·周一",
                                                      save_dir=a.image_dir)
         assert os.path.isfile(img), "A 得先真渲染出一张图，后面才谈得上「被误删」"
-        self._age(a.image_dir, card_render.STALE_INSTANCE_DIR_AGE + 60)
+        self._age(a.image_dir, render_store.STALE_INSTANCE_DIR_AGE + 60)
 
-        card_render.cleanup_stale_images(b.image_dir)   # StarFeatherPlugin.__init__ 的那一行
+        render_store.cleanup_stale_images(b.image_dir)   # StarFeatherPlugin.__init__ 的那一行
 
         assert os.path.isdir(a.image_dir), "同 PID 旧实例目录被新实例回收了"
         assert os.path.isfile(img), "旧实例仍在用的图被删了"
@@ -501,28 +502,28 @@ class TestWrapAndSignatureLines:
 
     def test_wrap_text_single_line_when_fits(self):
         d = self._draw()
-        font = card_render._load_font(22)
+        font = render_draw._load_font(22)
         text = "短牌义"
         assert d.textlength(text, font=font) <= 480
-        assert card_render._wrap_text(d, text, font, 480) == [text]
+        assert render_draw._wrap_text(d, text, font, 480) == [text]
 
     def test_wrap_text_empty_returns_no_line(self):
-        assert card_render._wrap_text(self._draw(), "", card_render._load_font(22), 480) == []
+        assert render_draw._wrap_text(self._draw(), "", render_draw._load_font(22), 480) == []
 
     def test_wrap_text_splits_when_too_wide(self):
         d = self._draw()
         long_text = "很长的牌义关键词串" * 3
-        lines = card_render._wrap_text(d, long_text, card_render._load_font(22), 60)
+        lines = render_draw._wrap_text(d, long_text, render_draw._load_font(22), 60)
         assert len(lines) > 1 and "".join(lines) == long_text  # 拆行不丢字
 
     def test_wrap_text_avoids_single_char_last_line(self):
         """均衡断行：最后一行不能只剩一个字（「延迟的快 / 乐」），两行都不孤零零。"""
         d = self._draw()
-        font = card_render._load_font(22)
+        font = render_draw._load_font(22)
         text = "延迟的快乐向前走"
         # 找一个恰好把末字挤到第二行的宽度
         max_w = d.textlength(text[:-1], font=font)
-        lines = card_render._wrap_text(d, text, font, max_w)
+        lines = render_draw._wrap_text(d, text, font, max_w)
         assert len(lines) == 2, lines
         assert len(lines[0]) > 1 and len(lines[1]) > 1
         assert "".join(lines) == text
@@ -532,7 +533,7 @@ class TestWrapAndSignatureLines:
         而本函数跑在 to_thread 里，触发即静默挂死一个线程池槽位。"""
         from PIL import Image, ImageDraw
         d = ImageDraw.Draw(Image.new("RGB", (8, 8)))
-        out = card_render._split_signature_lines(d, "字字字", card_render._load_font(24), 1)
+        out = render_draw._split_signature_lines(d, "字字字", render_draw._load_font(24), 1)
         assert "".join(out) == "字字字"
 
 
@@ -546,7 +547,7 @@ class TestDailyCardLayoutInvariants:
     """
 
     def test_card_height_is_derived_not_literal(self):
-        from data.plugins.astrbot_plugin_star_feather.render import (
+        from data.plugins.astrbot_plugin_star_feather.render.layout import (
             CARD_H,
             INFO_H,
             INNER_H,
@@ -555,7 +556,7 @@ class TestDailyCardLayoutInvariants:
         assert CARD_H == PAD_X * 2 + INNER_H + INFO_H
 
     def test_quote_block_sits_between_card_and_watermark(self):
-        from data.plugins.astrbot_plugin_star_feather.render import (
+        from data.plugins.astrbot_plugin_star_feather.render.layout import (
             CARD_H,
             DAILY_CARD_H,
             DAILY_CARD_QUOTE_Y,
@@ -577,21 +578,20 @@ class TestDrawCardFontReuse:
     """
 
     def test_same_size_loaded_once_per_card(self, monkeypatch):
-        from data.plugins.astrbot_plugin_star_feather import render as card_render
         from data.plugins.astrbot_plugin_star_feather.core.tarot_data import TAROT_CARDS
         from PIL import Image
 
         calls = []
-        orig = card_render._load_font
+        orig = render_draw._load_font
 
         def spy(size, bold=False, text=None):
             calls.append((size, bold))
             return orig(size, bold, text=text)
 
-        canvas = Image.new("RGB", (card_render.CARD_OUT_W + 40, card_render.CARD_H + 40),
+        canvas = Image.new("RGB", (render_layout.CARD_OUT_W + 40, render_layout.CARD_H + 40),
                            (250, 250, 250))
         monkeypatch.setattr(render_draw, "_load_font", spy)
-        card_render._draw_card(canvas, 20, 20, TAROT_CARDS[0], True)
+        render_draw._draw_card(canvas, 20, 20, TAROT_CARDS[0], True)
         n22 = calls.count((22, False))
         assert n22 == 1, f"牌义字号被取了 {n22} 次（应 1 次）：{calls}"
         assert len(calls) == len(set(calls)), f"同一次绘制里有重复字号：{calls}"
@@ -626,20 +626,18 @@ class TestBackgroundCacheSizing:
     """
 
     def test_maxsize_covers_largest_spread(self):
-        from data.plugins.astrbot_plugin_star_feather import render as card_render
-        assert card_render._background_cached.cache_info().maxsize >= 4, (
+        assert render_draw._background_cached.cache_info().maxsize >= 4, (
             "maxsize 小于最大牌阵的候选底牌数：填满缓存所需的渲染次数会超过牌阵规模")
 
     def test_same_key_hits_second_time(self):
-        from data.plugins.astrbot_plugin_star_feather import render as card_render
         from data.plugins.astrbot_plugin_star_feather.core.tarot_data import TAROT_CARDS
-        card_render._background_cached.cache_clear()
+        render_draw._background_cached.cache_clear()
         c = TAROT_CARDS[0]
         args = (c["id"], 1148, 986)
-        card_render._background_cached(*args)
-        i1 = card_render._background_cached.cache_info()
-        card_render._background_cached(*args)
-        i2 = card_render._background_cached.cache_info()
+        render_draw._background_cached(*args)
+        i1 = render_draw._background_cached.cache_info()
+        render_draw._background_cached(*args)
+        i2 = render_draw._background_cached.cache_info()
         assert i2.hits == i1.hits + 1 and i2.misses == i1.misses, f"同 key 未命中：{i1} → {i2}"
 
 
@@ -661,7 +659,7 @@ class TestBackgroundRandomHygiene:
         ]
         random.seed(20260913)
         before = random.getstate()
-        path = card_render.render_cards(positions, picks, "羽时三刻", save_dir=str(tmp_path))
+        path = render_draw.render_cards(positions, picks, "羽时三刻", save_dir=str(tmp_path))
         assert os.path.isfile(path)
         assert random.getstate() == before      # 全局随机序一模一样：一次都没被消耗
 
@@ -686,7 +684,7 @@ class TestSaveImageRace:
                     f.write(b"JPEG")
 
         img = _Img()
-        card_render._save_image(img, str(out))
+        render_draw._save_image(img, str(out))
         assert out.exists()
         assert img.calls == 2, "第一次保存失败后应重建目录并重试一次"
 
@@ -700,10 +698,10 @@ class TestSaveImageRace:
 
         src = Image.new("RGBA", (8, 8), (200, 180, 160, 191))
         out = tmp_path / "translucent.jpg"
-        card_render._save_image(src, str(out))
+        render_draw._save_image(src, str(out))
         with Image.open(out) as im:
             r, g, b = im.convert("RGB").getpixel((4, 4))
-        bg = card_render._OPAQUE_BACKDROP
+        bg = render_draw._OPAQUE_BACKDROP
         alpha = 191 / 255
         # 正确合成 = alpha*前景 + (1-alpha)*背景；直接 convert("RGB") 会得到 (200,180,160) 附近，
         # 忽略 alpha，相当于把半透明边缘当不透明处理（深色底上就是一圈亮边）

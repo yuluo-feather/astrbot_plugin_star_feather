@@ -15,7 +15,6 @@ from data.plugins.astrbot_plugin_star_feather.ai.chain import (
 from data.plugins.astrbot_plugin_star_feather.ai.prompts import (
     PERSONA_POOL,
     PERSONA_PROFILES,
-    SHUFFLE_LINES,
     SYSTEM_PROMPT_DIVINE,
     build_reading_prompt,
     build_system_prompt,
@@ -29,6 +28,7 @@ from data.plugins.astrbot_plugin_star_feather.core.draw import (
 from data.plugins.astrbot_plugin_star_feather.core.tarot_data import (
     meaning_text,
 )
+from data.plugins.astrbot_plugin_star_feather.core.texts import SHUFFLE_LINES
 from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
 from stubs import EVENT, OK_INTERP, PICK, FakeContext, FakeProvider
 
@@ -379,7 +379,7 @@ class TestPrompts:
         assert all("洗牌中" in s for s in SHUFFLE_LINES)
 
     def test_help_text_lives_in_prompts(self):
-        from data.plugins.astrbot_plugin_star_feather.ai.prompts import HELP_TEXT
+        from data.plugins.astrbot_plugin_star_feather.core.texts import HELP_TEXT
         assert "【占卜 [问题]】" in HELP_TEXT or "占卜 [问题]" in HELP_TEXT
         assert "牌阵" in HELP_TEXT and "78 张牌" in HELP_TEXT
 

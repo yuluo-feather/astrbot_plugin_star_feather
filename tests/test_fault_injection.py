@@ -360,7 +360,7 @@ def test_poster_render_failure_returns_none(monkeypatch, outcome):
             raise RuntimeError("pillow down")
         return outcome
 
-    monkeypatch.setattr(render_mod, "_render_daily_card_img", fake_render)
+    monkeypatch.setattr(render_mod, "render_daily_card", fake_render)
     monkeypatch.setattr(render_mod, "_schedule_image_cleanup", lambda img, delay=30: None)
     got = _run(Renderer("", "plain").daily_card([PICK], UID, Clock()))
     assert got is None
@@ -373,7 +373,7 @@ def test_poster_render_success_is_scheduled_for_cleanup(monkeypatch):
     from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
 
     seen = {}
-    monkeypatch.setattr(render_mod, "_render_daily_card_img",
+    monkeypatch.setattr(render_mod, "render_daily_card",
                         lambda card, upright, sig, date_text, save_dir=None: "C:/tmp/x.png")
     monkeypatch.setattr(render_mod, "_schedule_image_cleanup",
                         lambda img, delay=None: seen.update(img=img, delay=delay))
@@ -805,7 +805,7 @@ class TestCleanupFuseNeverCarriesTheReading:
             open(path, "wb").write(b"PNG")
             return path
 
-        monkeypatch.setattr(render_service, "_render_daily_card_img", fake_poster)
+        monkeypatch.setattr(render_service, "render_daily_card", fake_poster)
         _loop_shutting_down(monkeypatch, render_service)
         renderer = Renderer(image_dir=str(tmp_path), send_mode="plain")
         got = _run(renderer.daily_card([PICK], UID, Clock()))

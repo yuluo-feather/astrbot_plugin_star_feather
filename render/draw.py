@@ -315,7 +315,7 @@ def _split_signature_lines(d, text, font, max_w) -> list[str]:
     return lines
 
 
-def _render_daily_card_img(card, upright, signature, date_text, save_dir=None) -> str:
+def render_daily_card(card, upright, signature, date_text, save_dir=None) -> str:
     """今日牌运卡海报：同款牌面素材放大做底 + 深色遮罩，竖版 680×1200。
 
     自上而下：标题胶囊「星羽塔罗·今日牌运」/ 日期（如「8月27日·周四」）/

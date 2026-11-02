@@ -25,15 +25,6 @@ def _exc_detail(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
-def _note(plugin, entry: str) -> None:
-    """走插件上的接线点（测试可替换），没有就退回诊断模块的默认实现。"""
-    hook = getattr(plugin, "_note_entry_binding", None)
-    if callable(hook):
-        hook(entry)
-    else:
-        note_entry_binding(plugin, entry)
-
-
 def help_text(version: str) -> str:
     return f"🔮 星羽塔罗 {version}\n{HELP_TEXT}"
 
@@ -44,7 +35,7 @@ async def command_entry(plugin, event, text: str, *, version: str, err_tpl: str,
     """命令入口公共流程（/占卜、/单抽、/今日牌运 共用）。"""
     # 本次事件已由插件处理：should_call_llm(True) 的语义是「禁止默认 LLM」。
     # 不用 stop_event()：响应阶段清空 result 后会塞出空 STOP 结果。
-    _note(plugin, "command")
+    note_entry_binding(plugin, "command")
     event.should_call_llm(True)
     container = plugin.container
     messenger = messenger_for(event)
@@ -74,7 +65,7 @@ async def command_entry(plugin, event, text: str, *, version: str, err_tpl: str,
 
 async def tool_entry(plugin, event, formation: str = "", *, version: str) -> str:
     """自然语言入口：返回给 Agent Loop 的一句收尾引导。"""
-    _note(plugin, "tool")
+    note_entry_binding(plugin, "tool")
     container = plugin.container
     messenger = messenger_for(event)
     if not container.settings.tool.llm_enabled:

@@ -17,9 +17,9 @@ from data.plugins.astrbot_plugin_star_feather.core.intent import (
     select_formation,
 )
 from data.plugins.astrbot_plugin_star_feather.core.tarot_data import TAROT_CARDS
-from data.plugins.astrbot_plugin_star_feather.render import (
-    _render_daily_card_img,
+from data.plugins.astrbot_plugin_star_feather.render.draw import (
     render_cards,
+    render_daily_card,
 )
 from PIL import Image
 
@@ -230,7 +230,7 @@ def test_render_size_golden(formation, expected_size, tmp_path):
 
 
 def test_daily_card_size_golden(tmp_path):
-    path = _render_daily_card_img(_CARDS["愚者"], True, "今天适合慢下来。",
+    path = render_daily_card(_CARDS["愚者"], True, "今天适合慢下来。",
                                   "11月2日·周日", save_dir=str(tmp_path))
     with Image.open(path) as im:
         assert im.size == (680, 1200)

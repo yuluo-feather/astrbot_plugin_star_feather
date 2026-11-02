@@ -7,19 +7,6 @@ from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
-class KV(Protocol):
-    """键值存储：get 返回 (值, 是否正常读到)，put 返回是否写入成功。
-
-    把「存储故障」与「无记录」分开是调用点的降级语义需要——
-    限流要前者放行且不计数，后者正常计数。
-    """
-
-    async def get(self, key: str, default: Any = None) -> tuple[Any, bool]: ...
-
-    async def put(self, key: str, value: Any) -> bool: ...
-
-
-@runtime_checkable
 class Clock(Protocol):
     """日期边界：today() 给键，date_text() 给海报卡面。"""
 

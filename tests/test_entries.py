@@ -8,7 +8,6 @@ import types
 
 import pytest
 from data.plugins.astrbot_plugin_star_feather.adapters.clock import Clock
-from data.plugins.astrbot_plugin_star_feather.ai.prompts import RESULT_EPILOGUE
 from data.plugins.astrbot_plugin_star_feather.app import handlers
 from data.plugins.astrbot_plugin_star_feather.core.intent import (
     build_request,
@@ -16,6 +15,7 @@ from data.plugins.astrbot_plugin_star_feather.core.intent import (
 )
 from data.plugins.astrbot_plugin_star_feather.core.settings import parse
 from data.plugins.astrbot_plugin_star_feather.core.tarot_data import TAROT_CARDS
+from data.plugins.astrbot_plugin_star_feather.core.texts import RESULT_EPILOGUE
 from data.plugins.astrbot_plugin_star_feather.services.daily import _daily_pick
 from data.plugins.astrbot_plugin_star_feather.services.reading import (
     ReadingContext,
