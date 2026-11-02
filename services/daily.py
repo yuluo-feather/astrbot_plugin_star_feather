@@ -1,4 +1,4 @@
-"""今日固定牌运：确定性抽牌与当日缓存（意图判定与主题分桶在 intent.py）。
+"""今日固定牌运：确定性抽牌与当日缓存（意图判定与主题分桶在 core/intent.py）。
 
 用户标识由 identity.py 统一解析、由入口传入（daily 与限流共用同一口径，不各自实现）；
 设计原则：
@@ -34,7 +34,7 @@ _INTERP_FLIGHT = SingleFlight()
 # 提示词版本合成一个指纹：读数或牌灵提示词任一改版，当天缓存都失效。
 _PROMPT_V = f"{READING_PROMPT_V}/{SPIRIT_PROMPT_V}"
 
-# 今日固定牌运的意图判定与主题分桶已收进 intent.py：
+# 今日固定牌运的意图判定与主题分桶已收进 core/intent.py：
 # 本文件只管确定性抽牌与缓存，norm_topic 从那边导入，词表只有一份。
 
 

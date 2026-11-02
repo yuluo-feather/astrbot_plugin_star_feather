@@ -1,6 +1,6 @@
 """AI 解读：候选 Provider 链、超时切换、失败冷却、并发上限与总预算。
 
-输入侧安全（越狱剥除 / 截断）在 hardening.py，输出侧结构校验与解析在 ai/parse.py，
+输入侧安全（越狱剥除 / 截断）在 ai/hardening.py，输出侧结构校验与解析在 ai/parse.py，
 提示词与格式协议在 ai/prompts.py；本模块只做模型调用本身。
 
 说人话：牌抽好了，怎么让 AI 好好讲话，这里管——但它的嘴要听话，由 hardening 管。
@@ -110,7 +110,7 @@ class AiInterpreter:
     def new_budget(self) -> AiBudget:
         """开一笔新的 AI 总预算。
 
-        入口（main._run_reading）在一次占卜开始时调**一次**，把同一个对象喂给这次
+        入口（services.reading.ReadingService.run）在一次占卜开始时调**一次**，把同一个对象喂给这次
         占卜的全部 AI 阶段（牌灵的话 + 解读，含候选重试与供应商回退）——阶段之间
         不许重置截止点，这正是本预算存在的意义。
         """
@@ -262,7 +262,7 @@ class AiInterpreter:
         except asyncio.TimeoutError:
             return _stop_here()
         except Exception as e:
-            # 出口纪律：候选收集自身的意外绝不带走整条消息（同 main._ensure_image）
+            # 出口纪律：候选收集自身的意外绝不带走整条消息（同 Renderer.ensure_image）
             logger.warning(f"候选收集失败（{e}）：本签按无候选处理，回退本地牌义")
             return []
 

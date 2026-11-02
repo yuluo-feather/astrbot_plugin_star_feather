@@ -10,7 +10,7 @@ daily 的透传、main 的「一次占卜开一笔」。塞进 test_core 会被�
   asyncio.wait_for 上。「算法全对但没接线」是这类修复最典型的假绿。
 
 边界：不测单次 ai_timeout 的老语义（那是 test_core 的候选链用例），
-也不测端到端发送延迟上界——预算只约束 AI 阶段，见 main._ensure_image 的说明。
+也不测端到端发送延迟上界——预算只约束 AI 阶段，见 Renderer.ensure_image 的说明。
 """
 import asyncio
 import logging
@@ -654,7 +654,7 @@ class TestUnlimitedBudgetKeepsTheImagePipeline:
 
     判据选最容易被漏掉的那一处：渲染成功后、发送前图被外部删掉——只要有人在两段
     之间插一句 `if budget.limited:`，补渲染就会跟着被跳过，用户拿到一条空图消息。
-    本用例走真入口（_run_reading），只把渲染换成可控桩，AI 与预算那条链原样保留。
+    本用例走真入口（ReadingService.run），只把渲染换成可控桩，AI 与预算那条链原样保留。
     """
 
     def test_zero_budget_rerenders_a_vanished_image(self, tmp_path, monkeypatch):

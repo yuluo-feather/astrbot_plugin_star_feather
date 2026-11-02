@@ -201,7 +201,7 @@ class TestEntryBinding:
     def test_hostile_context_degrades_instead_of_raising(self, caplog):
         """context 读不动时也只许降级——这一句裸放在两个入口的 try 之前。
 
-        抛出去不是丢一行日志，是把那一次占卜/那条命令带走（divine_tool 与 _command_entry
+        抛出去不是丢一行日志，是把那一次占卜/那条命令带走（divine_tool 与 command_entry
         都在自己的 try 之前调它）。降级行同时保住「进门必留一行」这句承诺。
         """
         p = _plugin()

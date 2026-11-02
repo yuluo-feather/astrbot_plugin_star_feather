@@ -62,7 +62,7 @@ class TestSplitSections:
 
 
 class TestDeliverEpilogue:
-    """Deliverer 不再承接收尾句（收尾改由 _run_reading 独立直发 / LLM 回复承担），
+    """Deliverer 不再承接收尾句（收尾改由 handlers.command_entry 独立直发 / LLM 回复承担），
     本类只验证：不传收尾时结果内容不受影响、无 ✨ 收尾句混入。"""
 
     @staticmethod
