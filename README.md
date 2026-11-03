@@ -105,13 +105,13 @@
          └─ 工具描述限定「明确请求」才调用，抱怨/闲聊不会误触
    │
    ▼
-② 限流闸门（三入口统一把关）【gating.py · limiter.py】
+② 限流闸门（三入口统一把关）【services/gating.py · core/limiter.py】
    ├─ 命令：同会话节流 (cmd_rate_limit，防连点)
    ├─ 自然语言：同会话节流 (llm_tool_cooldown，防刷屏)
    └─ 每日次数：按用户计数 (daily_count，跨天自动重置) → 超限直接提示“明天再来”
    │
    ▼
-③ 抽牌分流（ReadingService.prepare）【intent.py 意图判定 · spreads.py 阵位 · daily.py 今日固定】
+③ 抽牌分流（ReadingService.prepare）【core/intent.py 意图判定 · core/spreads.py 阵位 · services/daily.py 今日固定】
    ├─ 带「运势/运气/牌运」等词 或 /今日牌运 → 今日固定牌运
    │     （同一天同一人=同一张牌+同一解读，零点刷新，反复问不变；
    │       事件归因式——「手指被夹了，是因为运势太差吗」——不算运势查询，走自由随机；
@@ -123,7 +123,7 @@
          └─ 都猜不中 → 兜底「羽时三刻」
    │
    ▼
-④ 执行占卜（ReadingService.run）【core/draw.py 抽牌 · services/render.py 渲染 · ai/chain.py + ai/parse.py + hardening.py 解读】
+④ 执行占卜（ReadingService.run）【core/draw.py 抽牌 · services/render.py 渲染 · ai/chain.py + ai/parse.py + ai/hardening.py 解读】
    ├─ 洗牌提示：多张牌阵随机发一句「✨ 洗牌中……」(shuffle_lines 可关)
    ├─ 牌灵的话：所有牌阵都有一句牌灵开口——AI 按人设现生成（贴合本签牌面与主题，同人同日同牌组当天同句、次日换新），AI 不可用回退池内当日签文；裸句直出（无「牌灵的话：」标签与引号）；另受 20 秒阶段上限（候选获取与每次请求共用一个阶段截止点，累计不按候选数翻倍）
    ├─ 生成解读：
@@ -137,7 +137,7 @@
    └─ 发送前核验图片（Renderer.ensure_image）：图不在了就地补渲染一次，补渲染仍失败就降级无图，主流程照走
    │
    ▼
-⑤ 发送结果（Presenter.present）【deliver.py 发送编排 · settings.py 配置生效】
+⑤ 发送结果（Presenter.present）【adapters/deliver.py 发送编排 · core/settings.py 配置生效】
    ├─ 呈现顺序：牌面图 → 牌灵的话 → 解读段（每张一段 + 总结）→ 免责声明（合并转发节点序同为 牌面 → 牌灵的话 → 解读段）
    ├─ 按「每张牌一段 + 总结段」结构化切分（提示词约定每段 80~140 字；模型无视时按 `segment_size` 二次截断）
    ├─ send_mode 决定形态：forward 合并转发（默认）/ plain 一条链 / text_only 纯文字
@@ -170,7 +170,7 @@
 | `ai.parallel_stages` | bool | `true` | 牌灵的话与深度解读是否并发请求。开启后总耗时取较慢的一段；关闭则先出牌灵的话、再出解读。单槽本地模型或对同一 Provider 限流严格时建议关闭，避免同一时刻两个请求触发排队或限流。 |
 | `ai.max_concurrency` | int | `2` | 同一 Provider 的最大并发请求数。默认 2：牌灵的话与解读可以并发，又不会在单槽本地模型或限流严格的服务上排长队；设为 0 表示不限制，负数按默认值处理。 |
 | `ai.all_providers_fallback` | bool | `false` | 候选链走到「指定模型 → 当前会话模型 → 全局默认」之后，是否再把所有已加载 Provider 逐个试一遍。默认关闭，避免在未预期的模型上产生请求与费用。 |
-| `ai.structure_check` | select | `shadow` | 解读结构校验强度：`loose`-宽松（只要求按【第N张·位置】分段、段数不少于牌数，旧行为）；`shadow`-影子（默认，照旧放行，同时用严格口径判一遍并落一行汇总日志：候选拒绝率 + 「按严格口径这一次会不会整段降级」的三态判决与实例级累计）；`strict`-严格（编号 1..N 各出现一次、【总结】0 或 1 次、位置名非空，不合规的候选弃用并继续尝试下一个模型）。 |
+| `ai.structure_check` | select | `loose` | 解读结构校验强度：`loose`-宽松（默认，只要求按【第N张·位置】分段、段数不少于牌数）；`strict`-严格（编号 1..N 各出现一次、【总结】0 或 1 次、位置名非空，不合规的候选弃用并继续尝试下一个模型）。 |
 
 ### [自然语言入口] 对话触发与节流
 
@@ -236,13 +236,13 @@
 
 ## 🤍 技术实现
 
-- **代码结构（分层，依赖单向）**：入口层 `main.py`（≤150 行，只注册命令/工具）→ `app/`（`container.py` 唯一装配、`handlers.py` 三入口、`diagnostics.py` 配置新鲜度）；编排层 `services/`（`reading.py` 占卜流水线、`render.py` 渲染与图片生命周期、`daily_store.py` 单键记录、`singleflight.py` 同键去重）；纯逻辑层 `core/`（`models.py` / `draw.py` / `ports.py`，不 import astrbot）与 `intent.py` / `spreads.py` / `hardening.py` / `limiter.py` / `dailylines.py` / `tarot_data.py` / `ai/prompts.py` / `ai/persona.py` / `ai/parse.py` / `texts.py` / `fonts.py` / `config.py` / `settings.py` / `clock.py`；适配层 `adapters/`（`astrbot_io.py` KV 与消息、`presenter.py` 有序发送）；其余为 `daily.py` 今日缓存、`gating.py` 限流闸门、`deliver.py` 分段、`ai/chain.py` AI 候选链、`render/` 渲染实现（layout / assets / draw / store）、`kv_utils.py` KV 原语、`identity.py` 用户标识——每个模块一句话说清职责，纯逻辑均可独立单测
+- **代码结构（分层，依赖单向）**：入口层 `main.py`（≤150 行，只注册命令/工具）→ `app/`（`container.py` 唯一装配、`handlers.py` 三入口、`diagnostics.py` 配置新鲜度）；编排层 `services/`（`reading.py` 占卜流水线、`render.py` 渲染与图片生命周期、`daily.py` 今日缓存、`gating.py` 限流闸门、`daily_store.py` 单键记录、`singleflight.py` 同键去重）；纯逻辑层 `core/`（`models.py` / `draw.py` / `ports.py` / `intent.py` / `identity.py` / `limiter.py` / `spreads.py` / `dailylines.py` / `tarot_data.py` / `texts.py` / `config.py` / `settings.py`，不 import astrbot）；适配层 `adapters/`（`astrbot_io.py` KV 与消息、`presenter.py` 有序发送、`deliver.py` 分段、`clock.py` 日期边界、`kv_utils.py` KV 原语）；AI 层 `ai/`（`chain.py` 候选链、`budget.py` 预算、`prompts.py` / `persona.py` / `parse.py` / `hardening.py`）；渲染实现 `render/`（layout / assets / draw / store / fonts）——每个模块一句话说清职责，纯逻辑均可独立单测
 - **模块分层（依赖单向，无回边）**：
   - 入口层：`main.py`（只注册命令/工具）→ `app/`（装配、三入口、诊断）
-  - 编排层：`services/reading.py` / `services/render.py`；其余粘合层：`daily` / `gating` / `deliver` / `ai.chain` / `render`（KV、限流、发送、渲染、AI 解读的读写与降级裁定）
-  - 纯逻辑层：`core/`（`models` / `draw` / `ports`，不 import astrbot）与 `limiter` / `spreads` / `intent` / `identity` / `hardening` / `kv_utils` / `dailylines` / `tarot_data` / `prompts` / `fonts` / `config` / `settings` / `clock`（判据是「能否独立单测」）
-- **设计原则（本羽给自己定下的三条）**：① 任何存储/渲染/模型失败都不阻塞主流程（kv_utils 吞异常、渲染回退文字版、AI 回退本地牌义，逐级降级）；② 确定性优先——今日固定牌/解读/签文同人同日同牌相同，惊喜感由 AI 人设化口吻承担；③ 解读格式协议（【第N张·位置】标记）单源在 prompts，deliver 切段与 hardening 校验共用同一正则
-- 牌库完整内置于 `tarot_data.py`，牌面图片素材位于 `assets/`（幻星集 78 张牌；牌背 `Extra/背景.png` 在素材包里保留，当前渲染以本签牌面做底、不读这张；素材以 WebP 格式内置，代码加载时自动兼容 .png / .webp）
+  - 编排层：`services/`（`reading` / `render` / `daily` / `gating`）；适配层：`adapters/`（`astrbot_io` / `presenter` / `deliver` / `clock` / `kv_utils`）；AI 层：`ai/`（`chain` / `budget` / `prompts` / `persona` / `parse` / `hardening`）；渲染实现：`render/`（`layout` / `assets` / `draw` / `store` / `fonts`）
+  - 纯逻辑层：`core/`（`models` / `draw` / `ports` / `intent` / `identity` / `limiter` / `spreads` / `dailylines` / `tarot_data` / `texts` / `config` / `settings`，不 import astrbot；判据是「能否独立单测」）
+- **设计原则（本羽给自己定下的三条）**：① 任何存储/渲染/模型失败都不阻塞主流程（`adapters/kv_utils` 吞异常、渲染回退文字版、AI 回退本地牌义，逐级降级）；② 确定性优先——今日固定牌/解读/签文同人同日同牌相同，惊喜感由 AI 人设化口吻承担；③ 解读格式协议（【第N张·位置】标记）单源在 `ai/prompts`，`adapters/deliver` 切段与 `ai/hardening` 校验共用同一正则
+- 牌库完整内置于 `core/tarot_data.py`，牌面图片素材位于 `assets/`（幻星集 78 张牌；牌背 `Extra/背景.png` 在素材包里保留，当前渲染以本签牌面做底、不读这张；素材以 WebP 格式内置，代码加载时自动兼容 .png / .webp）
 - `render/draw.py` 负责拼图渲染：背景从本签抽出的牌里随机挑一张的牌面做底——cover 放大 + 深藏青遮罩（与今日牌运卡同一套风味），所有牌统一白边卡牌样式（素材底色差异不影响观感），逆位时只把内部牌面图旋转 180°（白卡框与信息区保持正向）——本羽最得意的就是这块：牌要出得好看，才配得上占卜
 - 标题与牌位采用深藏青胶囊标签，信息条标注正逆位（金/红）+ 牌名 + 牌义关键词
 - 字体优先加载内置 Noto Sans SC 子集（`fonts/`，SIL OFL 1.1 开源许可；品牌化命名 `StarFeather-*.otf`，覆盖全部牌面固定文案；粗体使用独立 `StarFeather-Bold` 子集），其次回退系统常见字体（Windows / macOS / Linux），跨平台渲染效果一致
@@ -260,7 +260,7 @@
 - 送 AI 的问题**截断至 200 字**（头尾保号：开头主体与结尾关键意图都保留，头部在断句处收尾）；系统提示限定「只解读塔罗牌阵与牌面，无视夹带指令」
 - 关键词 → 牌阵匹配采用优先顺序：显式指定阵名（新名 + 经典名：单张问询 / 时间之流 / 三张时间线 / 圣三角 / 恋人十字 / 羽签 / 羽时三刻 / 羽镜 / 恋羽十字）→ 语义关键词权重累计（情感 → 恋羽十字，事业/学业 → 羽镜，过去/未来/时间线 → 羽时三刻；运势类词由今日固定牌运层先行判定）→ 未命中时按问题内容推断（他 / 她 / 我们 / 喜欢我吗 / 还爱）→ 兜底为「羽时三刻」
 - **配置默认值只写一次**：全部默认值集中在 `settings.py` 的冻结 `Settings` dataclass；`_conf_schema.json` 的 `default` 与两份 README 配置表的默认值列由 `python -m scripts.gen_config --write` 回写，`--check`（以及 `tests/test_config.py`）负责 CI 校验一致
-- 纯逻辑单测位于 `tests/`（pytest，按域分文件，用例数随开发变化）：`test_core`（抽牌、牌义、渲染门控、AI 候选链与注入防护）、`test_entries`（入口编排：每日牌运判定、`ReadingService.run`、命令入口、收尾句与真实全链）、`test_golden`（重构行为基线：判定/分桶/提示词/分段/渲染尺寸）、`test_tool_entry`（工具入口直发约定与 AI 失败解释）、`test_daily_cache`（每日解读缓存：分桶、跨天作废、KV 降级）、`test_spirit`（牌灵的话：生成、缓存与提示词）、`test_settings`（默认值与旧配置迁移）、`test_spreads`（意图判定/选阵/别名/问题清洗）、`test_hardening`（注入剥除/截断/结构校验）、`test_identity`（用户标识降级链）、`test_gating`（限流闸门）、`test_card_render`（渲染冒烟、图片清理）、`test_clock`（日期边界：时区口径与「今天」唯一来源）、`test_fonts`（字体回退/缓存回归）、`test_deliver`（分段与分发）、`test_limiter`、`test_config`（配置读取原语）、`test_dailylines`（每日签文池与确定性挑选）、`test_integrity`（数据完整性域：牌库/签文池/字形覆盖/配置枚举校验）、`test_judgement_corpus`（判定语料回归：帮助/每日牌运边界问法锁定）、`test_kv_utils`（KV 读写降级：存储故障与无记录不折叠）、`test_fault_injection`（故障注入矩阵：存储故障 × 各自消费者的降级契约，含 AI 异常不拆整卦）、`test_ai_budget`（AI 总预算：单次占卜的 AI 花费上界、两段共用截止点与回退）、`test_structure_check`（解读结构校验：三档口径行为、严格判据红线与影子计数分母）、`test_stub_signatures`（打桩与真实签名一致性）、`test_docs_consistency`（测试清单与实际文件对账）、`test_release_gates`（发布红线：版本六项一致、市场包体上限、运行时代码全部入库、跟踪集无开发侧残留）、`test_config_freshness`（配置新鲜度自证：两入口进门读数行与陈旧实例告警）、`test_astrbot_contract`（AstrBot 契约守卫：我们依赖的框架面在真实 AstrBot 里还活着，没装框架时跳过）、`test_import_model`（导入模型红线：插件模块只有一个身份、插件根不碰 `sys.path` / `sys.modules`、框架按前缀清理能把插件模块删净）；先 `pip install -r requirements-dev.txt`（开发工具链的版本钉在这里，本地与 CI 装的是同一套），再运行 `python -m pytest` 即可验证。**测试文件导入约定：一律走 AstrBot 运行时包路径（`from data.plugins.astrbot_plugin_star_feather.daily import ...`），包链由 `tests/conftest.py` 在收集前搭好；插件根相对导入已废弃**（2026-10-12：插件内部改成包内相对导入后，模块只有包名一个身份，测试跟着换过来；旧的「插件目录进 `sys.path` + 顶层名」会让同一个文件出现两份模块对象，补丁静默打空）
+- 纯逻辑单测位于 `tests/`（pytest，按域分文件，用例数随开发变化）：`test_core`（抽牌、牌义、渲染门控、AI 候选链与注入防护）、`test_entries`（入口编排：每日牌运判定、`ReadingService.run`、命令入口、收尾句与真实全链）、`test_golden`（重构行为基线：判定/分桶/提示词/分段/渲染尺寸）、`test_tool_entry`（工具入口直发约定与 AI 失败解释）、`test_daily_cache`（每日解读缓存：分桶、跨天作废、KV 降级）、`test_spirit`（牌灵的话：生成、缓存与提示词）、`test_settings`（默认值与旧配置迁移）、`test_spreads`（意图判定/选阵/别名/问题清洗）、`test_hardening`（注入剥除/截断/结构校验）、`test_identity`（用户标识降级链）、`test_gating`（限流闸门）、`test_card_render`（渲染冒烟、图片清理）、`test_clock`（日期边界：时区口径与「今天」唯一来源）、`test_fonts`（字体回退/缓存回归）、`test_deliver`（分段与分发）、`test_limiter`、`test_config`（配置读取原语）、`test_dailylines`（每日签文池与确定性挑选）、`test_integrity`（数据完整性域：牌库/签文池/字形覆盖/配置枚举校验）、`test_judgement_corpus`（判定语料回归：帮助/每日牌运边界问法锁定）、`test_kv_utils`（KV 读写降级：存储故障与无记录不折叠）、`test_fault_injection`（故障注入矩阵：存储故障 × 各自消费者的降级契约，含 AI 异常不拆整卦）、`test_ai_budget`（AI 总预算：单次占卜的 AI 花费上界、两段共用截止点与回退）、`test_structure_check`（解读结构校验：宽松/严格两档行为与严格判据红线）、`test_stub_signatures`（打桩与真实签名一致性）、`test_docs_consistency`（测试清单与实际文件对账）、`test_release_gates`（发布红线：版本六项一致、市场包体上限、运行时代码全部入库、跟踪集无开发侧残留）、`test_config_freshness`（配置新鲜度自证：两入口进门读数行与陈旧实例告警）、`test_astrbot_contract`（AstrBot 契约守卫：我们依赖的框架面在真实 AstrBot 里还活着，没装框架时跳过）、`test_import_model`（导入模型红线：插件模块只有一个身份、插件根不碰 `sys.path` / `sys.modules`、框架按前缀清理能把插件模块删净）；先 `pip install -r requirements-dev.txt`（开发工具链的版本钉在这里，本地与 CI 装的是同一套），再运行 `python -m pytest` 即可验证。**测试文件导入约定：一律走 AstrBot 运行时包路径（`from data.plugins.astrbot_plugin_star_feather.services.daily import ...`），包链由 `tests/conftest.py` 在收集前搭好；插件根相对导入已废弃**（2026-10-12：插件内部改成包内相对导入后，模块只有包名一个身份，测试跟着换过来；旧的「插件目录进 `sys.path` + 顶层名」会让同一个文件出现两份模块对象，补丁静默打空）
 
 ## 📜 更新记录
 

@@ -4,12 +4,12 @@ import asyncio
 import types
 
 from astrbot.api.message_components import Nodes
-from data.plugins.astrbot_plugin_star_feather.deliver import (
+from data.plugins.astrbot_plugin_star_feather.adapters.deliver import (
     Deliverer,
     split_sections,
     split_text,
 )
-from data.plugins.astrbot_plugin_star_feather.tarot_data import meaning_text
+from data.plugins.astrbot_plugin_star_feather.core.tarot_data import meaning_text
 from stubs import PICK
 
 
@@ -62,7 +62,7 @@ class TestSplitSections:
 
 
 class TestDeliverEpilogue:
-    """Deliverer 不再承接收尾句（收尾改由 _run_reading 独立直发 / LLM 回复承担），
+    """Deliverer 不再承接收尾句（收尾改由 handlers.command_entry 独立直发 / LLM 回复承担），
     本类只验证：不传收尾时结果内容不受影响、无 ✨ 收尾句混入。"""
 
     @staticmethod
@@ -260,8 +260,12 @@ class TestInterpretationReuse:
     """AI 返回时已经解析过结构：发送层不再用正则重新切一遍。"""
 
     def test_structured_interpretation_skips_resplitting(self, monkeypatch):
-        from data.plugins.astrbot_plugin_star_feather import deliver as deliver_mod
-        from data.plugins.astrbot_plugin_star_feather.ai.parse import Interpretation
+        from data.plugins.astrbot_plugin_star_feather.adapters import (
+            deliver as deliver_mod,
+        )
+        from data.plugins.astrbot_plugin_star_feather.ai.parse import (
+            parse_interpretation,
+        )
 
         def no_split(*a, **kw):
             raise AssertionError("结构化解读不该再走 split_sections")
@@ -271,7 +275,7 @@ class TestInterpretationReuse:
         evt.result = None
         evt.get_self_id = lambda: "0"
         evt.chain_result = lambda chain: chain
-        interp = Interpretation("【第1张·过去】一段。\n【总结】结论。")
+        interp = parse_interpretation("【第1张·过去】一段。\n【总结】结论。")
 
         async def run():
             return [x async for x in Deliverer(300, "", False).deliver(

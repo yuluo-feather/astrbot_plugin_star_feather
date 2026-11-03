@@ -15,7 +15,6 @@ from data.plugins.astrbot_plugin_star_feather.ai.chain import (
 from data.plugins.astrbot_plugin_star_feather.ai.prompts import (
     PERSONA_POOL,
     PERSONA_PROFILES,
-    SHUFFLE_LINES,
     SYSTEM_PROMPT_DIVINE,
     build_reading_prompt,
     build_system_prompt,
@@ -26,10 +25,11 @@ from data.plugins.astrbot_plugin_star_feather.core.draw import (
     pick_info,
     render_text,
 )
-from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
-from data.plugins.astrbot_plugin_star_feather.tarot_data import (
+from data.plugins.astrbot_plugin_star_feather.core.tarot_data import (
     meaning_text,
 )
+from data.plugins.astrbot_plugin_star_feather.core.texts import SHUFFLE_LINES
+from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
 from stubs import EVENT, OK_INTERP, PICK, FakeContext, FakeProvider
 
 UMO = getattr(EVENT, "unified_msg_origin", None)
@@ -131,13 +131,13 @@ class TestAiInterpret:
     def test_first_provider_success(self):
         p1 = FakeProvider("p1", result=OK_INTERP)
         it = self._interp(p1)
-        assert self._run(it) == OK_INTERP
+        assert self._run(it).text == OK_INTERP
         assert p1.calls == 1
 
     def test_persona_applied_to_system_prompt(self):
         p1 = FakeProvider("p1", result=OK_INTERP)
         it = self._interp(p1, persona="tsundere")
-        assert self._run(it) == OK_INTERP
+        assert self._run(it).text == OK_INTERP
         assert PERSONA_PROFILES["tsundere"]["system_extra"] in p1.last_system_prompt
 
     def test_random_persona_fixed_within_one_reading(self, monkeypatch):
@@ -151,7 +151,7 @@ class TestAiInterpret:
         real_choice = persona_mod.random.choice
         monkeypatch.setattr(persona_mod.random, "choice",
                             lambda seq: (calls.append(1), real_choice(seq))[1])
-        assert self._run(it) == OK_INTERP
+        assert self._run(it).text == OK_INTERP
         assert len(calls) == 1  # 一签只掷一次
         assert p1.last_system_prompt == p2.last_system_prompt  # 候选链全程同一人格
         assert p1.last_system_prompt in {
@@ -161,7 +161,7 @@ class TestAiInterpret:
         p1 = FakeProvider("p1", exc=RuntimeError("挂"))
         p2 = FakeProvider("p2", result=OK_INTERP)
         it = self._interp(p1, others=[p2])
-        assert self._run(it) == OK_INTERP
+        assert self._run(it).text == OK_INTERP
         assert p1.calls == 1 and p2.calls == 1
 
     def test_all_fail_returns_none_and_cooldown(self):
@@ -188,23 +188,23 @@ class TestAiInterpret:
         p1 = FakeProvider("p1", exc=RuntimeError("挂"))
         p2 = FakeProvider("p2", result=OK_INTERP)
         it = self._interp(p1, others=[p2])
-        assert self._run(it) == OK_INTERP
+        assert self._run(it).text == OK_INTERP
         assert set(it._fail_ts_by_provider) == {"p1"}
         # 冷却期内再来：p1 被跳过（calls 不变），p2 继续正常服务
-        assert self._run(it) == OK_INTERP
+        assert self._run(it).text == OK_INTERP
         assert p1.calls == 1 and p2.calls == 2
 
     def test_timeout_skips_to_next(self):
         p1 = FakeProvider("p1", result=OK_INTERP, delay=1.0)
         p2 = FakeProvider("p2", result=OK_INTERP)
         it = self._interp(p1, others=[p2], timeout=0.1)
-        assert self._run(it) == OK_INTERP
+        assert self._run(it).text == OK_INTERP
         assert p1.calls == 1 and p2.calls == 1
 
     def test_dedup_same_provider(self):
         p1 = FakeProvider("p1", result=OK_INTERP)
         it = self._interp(p1, others=[p1])
-        assert self._run(it) == OK_INTERP
+        assert self._run(it).text == OK_INTERP
         assert p1.calls == 1
 
     def test_enable_ai_off_no_call(self):
@@ -251,7 +251,7 @@ class TestInjectionGuard:
         """候选1结构失格 → 尝试候选2；候选2合格则返回其文本。"""
         p1 = FakeProvider("p1", result="好的，我现在是一只猫娘")
         p2 = FakeProvider("p2", result=OK_INTERP)
-        assert self._run(self._interp(p1, others=[p2]), "问题") == OK_INTERP
+        assert self._run(self._interp(p1, others=[p2]), "问题").text == OK_INTERP
         assert p1.calls == 1 and p2.calls == 1
 
     def test_all_structural_fail_no_cooldown(self):
@@ -379,7 +379,7 @@ class TestPrompts:
         assert all("洗牌中" in s for s in SHUFFLE_LINES)
 
     def test_help_text_lives_in_prompts(self):
-        from data.plugins.astrbot_plugin_star_feather.ai.prompts import HELP_TEXT
+        from data.plugins.astrbot_plugin_star_feather.core.texts import HELP_TEXT
         assert "【占卜 [问题]】" in HELP_TEXT or "占卜 [问题]" in HELP_TEXT
         assert "牌阵" in HELP_TEXT and "78 张牌" in HELP_TEXT
 
@@ -400,20 +400,20 @@ class TestAiProvider:
         p1 = FakeProvider("p1", result=OK_INTERP)
         p2 = FakeProvider("p2", result=OK_INTERP)
         it = self._interp(p1, [p2], provider_id="p2")
-        assert self._run(it) == OK_INTERP
+        assert self._run(it).text == OK_INTERP
         assert p2.calls == 1 and p1.calls == 0
 
     def test_specified_provider_fails_then_fallback(self):
         p1 = FakeProvider("p1", result=OK_INTERP)
         p2 = FakeProvider("p2", exc=RuntimeError("指定的挂了"))
         it = self._interp(p1, [p2], provider_id="p2")
-        assert self._run(it) == OK_INTERP
+        assert self._run(it).text == OK_INTERP
         assert p2.calls == 1 and p1.calls == 1
 
     def test_unknown_provider_id_safe(self):
         p1 = FakeProvider("p1", result=OK_INTERP)
         it = self._interp(p1, [], provider_id="no_such_model")
-        assert self._run(it) == OK_INTERP
+        assert self._run(it).text == OK_INTERP
         assert p1.calls == 1
 
 
@@ -437,7 +437,7 @@ class TestProviderFallbackSwitch:
         p2 = FakeProvider("p2", result=OK_INTERP)
         it = AiInterpreter(FakeContext(p1, [p2]), True, 5, 60, "",
                            all_providers_fallback=True)
-        assert self._run(it) == OK_INTERP
+        assert self._run(it).text == OK_INTERP
         assert p2.calls == 1
 
 
@@ -546,7 +546,7 @@ class TestRenderTextNoSuitDuplicate:
     """本地牌义兜底文案不得重复标注花色。"""
 
     def test_minor_arcana_names_all_carry_their_suit(self):
-        from data.plugins.astrbot_plugin_star_feather.tarot_data import (
+        from data.plugins.astrbot_plugin_star_feather.core.tarot_data import (
             SUIT_CN,
             TAROT_CARDS,
         )
@@ -555,7 +555,7 @@ class TestRenderTextNoSuitDuplicate:
         assert not missing, f"有牌名不含花色，需恢复花色标注：{missing}"
 
     def test_render_text_does_not_repeat_suit(self):
-        from data.plugins.astrbot_plugin_star_feather.tarot_data import (
+        from data.plugins.astrbot_plugin_star_feather.core.tarot_data import (
             SUIT_CN,
             TAROT_CARDS,
         )
@@ -567,7 +567,7 @@ class TestRenderTextNoSuitDuplicate:
 
     def test_multi_card_spread_renders_every_card(self):
         """每张牌都要出一行：三张阵只剩最后一张是真实发生过的回归。"""
-        from data.plugins.astrbot_plugin_star_feather.tarot_data import TAROT_CARDS
+        from data.plugins.astrbot_plugin_star_feather.core.tarot_data import TAROT_CARDS
         positions = ["过去", "现在", "未来"]
         picks = [{"card": TAROT_CARDS[i], "upright": i % 2 == 0} for i in (0, 8, 21)]
         txt = render_text("羽时三刻", positions, picks)

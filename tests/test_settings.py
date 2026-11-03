@@ -1,6 +1,6 @@
 """配置语义层单测：send_mode 三态 / 旧配置迁移 / Settings 解析。
 ——默认值都在这，别处别自作主张。"""
-from data.plugins.astrbot_plugin_star_feather.settings import (
+from data.plugins.astrbot_plugin_star_feather.core.settings import (
     DEFAULT_AI_PERSONA,
     parse,
     resolve_send_mode,
@@ -85,14 +85,14 @@ class TestParsedSettings:
 
     def test_parallel_stages_defaults_on(self):
         """两段 AI 默认并发（ai.parallel_stages=true），关掉才顺序执行。"""
-        from data.plugins.astrbot_plugin_star_feather.settings import (
+        from data.plugins.astrbot_plugin_star_feather.core.settings import (
             DEFAULT_AI_PARALLEL_STAGES,
         )
         assert parse(None).ai.parallel_stages is DEFAULT_AI_PARALLEL_STAGES
 
     def test_negative_question_max_len_falls_back_to_default(self):
         """负数不是「更不压缩」：坏值回默认，只有 0 才表示明确关闭截断。"""
-        from data.plugins.astrbot_plugin_star_feather.settings import (
+        from data.plugins.astrbot_plugin_star_feather.core.settings import (
             DEFAULT_QUESTION_MAX_LEN,
         )
         assert parse({"ai": {"question_max_len": -5}}).ai.question_max_len == DEFAULT_QUESTION_MAX_LEN
@@ -113,7 +113,9 @@ class TestParsedSettings:
 
     def test_ai_budget_only_explicit_zero_means_unlimited(self):
         """只有显式 0 = 不限制；负数/非数字回退默认值（-10 不许被夹成 0）。"""
-        from data.plugins.astrbot_plugin_star_feather.settings import DEFAULT_AI_BUDGET
+        from data.plugins.astrbot_plugin_star_feather.core.settings import (
+            DEFAULT_AI_BUDGET,
+        )
         assert parse({"ai": {"ai_budget_seconds": 0}}).ai.budget_seconds == 0
         assert parse({"ai": {"ai_budget_seconds": -10}}).ai.budget_seconds == DEFAULT_AI_BUDGET
         assert parse({"ai": {"ai_budget_seconds": "oops"}}).ai.budget_seconds == DEFAULT_AI_BUDGET
@@ -134,7 +136,7 @@ class TestParsedSettings:
         assert parse({"ai": {"ai_budget_seconds": 24 * 3600}}).ai.budget_seconds == 24 * 3600
 
     def test_ai_concurrency_and_fallback_defaults(self):
-        from data.plugins.astrbot_plugin_star_feather.settings import (
+        from data.plugins.astrbot_plugin_star_feather.core.settings import (
             DEFAULT_AI_MAX_CONCURRENCY,
             DEFAULT_ALL_PROVIDERS_FALLBACK,
         )
@@ -160,7 +162,7 @@ class TestSettingsDataclass:
         import dataclasses
 
         import pytest
-        from data.plugins.astrbot_plugin_star_feather.settings import (
+        from data.plugins.astrbot_plugin_star_feather.core.settings import (
             DEFAULT_AI_BUDGET,
             DEFAULT_AI_TIMEOUT,
             DEFAULT_DAILY_COUNT,

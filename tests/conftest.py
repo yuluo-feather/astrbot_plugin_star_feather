@@ -79,7 +79,7 @@ def _isolate_font_cache():
     _font_candidates 不清：它只依赖 bold 参数、内容是平台路径常量，
     不随用例变化（清了对结果无影响，属无意义操作）。
     """
-    from data.plugins.astrbot_plugin_star_feather import fonts
+    from data.plugins.astrbot_plugin_star_feather.render import fonts
     fonts._FONT_CACHE.clear()
     fonts._FONT_CMAP.clear()
     fonts._load_static_cmap.cache_clear()

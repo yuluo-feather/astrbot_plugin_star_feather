@@ -1,34 +1,32 @@
 """AI 解读：候选 Provider 链、超时切换、失败冷却、并发上限与总预算。
 
-输入侧安全（越狱剥除 / 截断）在 hardening.py，输出侧结构校验与解析在 ai/parse.py，
+输入侧安全（越狱剥除 / 截断）在 ai/hardening.py，输出侧结构校验与解析在 ai/parse.py，
 提示词与格式协议在 ai/prompts.py；本模块只做模型调用本身。
 
 说人话：牌抽好了，怎么让 AI 好好讲话，这里管——但它的嘴要听话，由 hardening 管。
 """
 import asyncio
 import time
-from collections import Counter
 
 from ..core.log import log as logger
-from ..hardening import (
-    clip_question,
-    normalize_injection_input,
-    strip_injection_fragments,
-)
-from ..settings import (
+from ..core.models import Interpretation
+from ..core.settings import (
     AI_BUDGET_MIN_ATTEMPT,
     DEFAULT_AI_BUDGET,
     DEFAULT_AI_PERSONA,
     DEFAULT_QUESTION_MAX_LEN,
     DEFAULT_SPIRIT_STAGE_BUDGET,
     DEFAULT_STRUCTURE_CHECK,
-    STRUCTURE_CHECK_LOOSE,
-    STRUCTURE_CHECK_SHADOW,
     STRUCTURE_CHECK_STRICT,
     _budget_seconds_float,
 )
+from .budget import UNLIMITED_TIMEOUT, AiBudget
+from .hardening import (
+    clip_question,
+    normalize_injection_input,
+    strip_injection_fragments,
+)
 from .parse import (
-    Interpretation,
     parse_interpretation,
     validate_interpret_structure,
     validate_interpret_structure_strict,
@@ -49,13 +47,6 @@ _QUOTE_CHARS = "「」『』“”" + chr(34) + chr(39)
 _STAGE_SPIRIT = "牌灵的话"
 _STAGE_INTERPRET = "AI 解读"
 
-# 单请求超时的「不限制」表示（配置 ai_timeout=0）：用 inf 而**不是** None——
-# None 在这条链上已经是另一个意思（step_timeout 的 None = 预算见底、别再发请求），
-# 两个语义挤在同一个哨兵值上，调用点的 `if timeout is None: break` 会把「不限制」
-# 误判成「停手」。见 AiBudget.step_timeout 与 _chat_once。
-UNLIMITED_TIMEOUT = float("inf")
-
-
 class _QueueTimeout:
     """并发闸排队耗尽了本次请求预算（本地原因，不是 Provider 服务失败）。"""
 
@@ -63,124 +54,6 @@ class _QueueTimeout:
 
 
 QUEUE_TIMEOUT = _QueueTimeout()
-
-
-def _rate_text(numerator: int, denominator: int) -> str:
-    """拒绝率的统一写法：`分子/分母 (xx.xx%)`；分母为 0 输出 `N/A`。
-
-    为什么分母为零不许写 0%：0/0 不是「没有被拒」，而是**还没有观测量**。写成 0%
-    会读成「样本充足、结果良好」，恰好把「没数据」错当成「好数据」——判断要不要
-    收紧时最怕这个。分母为 0 时报 N/A，读数缺失就得看起来像缺失。
-    """
-    if denominator <= 0:
-        return f"{numerator}/{denominator} (N/A)"
-    return f"{numerator}/{denominator} ({numerator / denominator * 100:.2f}%)"
-
-
-class _ShadowTally:
-    """影子口径的本次占卜计数：只存数字与原因，不存解读原文。
-
-    为什么需要它：逐条影子判定只回答「这一条会被拒」，没有分母——只有分子既算不出
-    候选拒绝率，也算不出「切 strict 之后会有多少次占卜整段降级」。而这两个数正是
-    决定要不要收紧的全部依据。原文不落盘：隐私与体积都受不了（见日志里的汇总行）。
-    """
-
-    def __init__(self):
-        self.candidates = 0        # 参与结构校验的非空候选（候选拒绝率的分母）
-        self.rejected = 0          # 会被严格口径拒掉的候选（候选拒绝率的分子）
-        self.reasons: Counter[str] = Counter()   # 拒绝原因分布（缺号 / 越界 / 重复 / …）
-        self.strict_pass_any = False   # 严格口径下本次至少有一个候选能放行
-        # 第一个放行候选的序号（从 1 起）：判决要说清「严格口径会走到第几个候选」。
-        # 只记序号、不记文本——解读原文不落盘。
-        self.strict_pass_index: int | None = None
-        # 本次是否**因宽松口径放行而收尾**。这是唯一「严格口径会走得更深」的出口，
-        # 也是判决里「未观测」那支的判据（三种出口见 _log_shadow_summary）。
-        self.closed_by_loose_return = False
-
-
-class AiBudget:
-    """一次占卜的 AI 总预算：所有 AI 阶段共用同一个截止点（硬上限）。
-
-    为什么要有：单请求超时（ai_timeout）只管一次调用，管不住「两段 × 每段多个
-    候选 × 供应商回退」的总时长——最坏情况下没有上界，用户就在那儿干等。
-    本对象只保证一件事：**该次占卜 AI 阶段的等待有上界**；它不是整条消息端到端
-    的上界（图片渲染、框架调度、平台发送各有各的耗时）。
-
-    seconds <= 0 = 不限制（limited=False）：显式的高级选项，等于关掉总预算保护
-    （AiInterpreter 构造时会就此留一条 warning）。
-
-    另可开「阶段级上限」（open_stage）：某个次要阶段（牌灵的话）不许独吞整笔预算。
-    这条上限是**阶段内累计**的——候选获取与阶段内每一次请求共用同一个截止点，
-    不会按「上限 × 候选数」翻倍；总预算关掉时它照样生效（独立第二约束）。
-
-    clock 可注入：测试用假时钟推进，不睡墙钟。
-    """
-
-    def __init__(self, seconds, clock=time.monotonic):
-        self.seconds = _budget_seconds_float(seconds)
-        self.clock = clock
-        self.limited = self.seconds > 0
-        self.deadline = clock() + self.seconds if self.limited else None
-        # 已因预算停手的阶段：同一阶段只报一次日志（多候选各自报一遍会把日志刷满）
-        self.stopped: set[str] = set()
-        # 阶段级上限（如牌灵的话的 20 秒）：{阶段名: (截止点, 上限值)}。同名阶段只开
-        # 一次，候选获取与阶段内每一次请求读的都是同一个截止点——连续失败/供应商
-        # 回退不会按「上限 × 候选数」累加（issue #21 ④ 复核：旧写法正是那样累加的）。
-        self._stages: dict[str, tuple[float, float]] = {}
-
-    def remaining(self) -> float:
-        """剩余预算（秒）；不限制时返回 inf，调用方无需分支。"""
-        if not self.limited:
-            return float("inf")
-        return self.deadline - self.clock()
-
-    def open_stage(self, stage: str, stage_cap: float) -> None:
-        """开一个阶段级上限（同名阶段幂等）。
-
-        截止点 = min(总截止点, 现在 + 阶段上限)。总预算不限（limited=False）时只受
-        阶段上限约束——阶段上限是独立的第二约束，不因 ai_budget_seconds=0 而失效。
-        """
-        if stage in self._stages:
-            return
-        cap = float(stage_cap)
-        cap_deadline = self.clock() + cap
-        deadline = min(self.deadline, cap_deadline) if self.limited else cap_deadline
-        self._stages[stage] = (deadline, cap)
-
-    def stage_left(self, stage: str) -> float | None:
-        """该阶段的剩余上限（秒）；未开过该阶段返回 None。"""
-        rec = self._stages.get(stage)
-        return None if rec is None else rec[0] - self.clock()
-
-    def stage_cap(self, stage: str) -> float | None:
-        """该阶段的上限值（秒，仅用于日志）；未开过返回 None。"""
-        rec = self._stages.get(stage)
-        return None if rec is None else rec[1]
-
-    def step_timeout(self, per_call, stage: str | None = None) -> float | None:
-        """本次请求的有效超时 = min(单次超时, 剩余总预算, 阶段剩余)。
-
-        返回 None = 不再发起新请求：预算耗尽，或剩下的不够跑一次有意义的请求
-        （低于 AI_BUDGET_MIN_ATTEMPT，硬发出去就是白等一次超时）。
-        stage：已开阶段上限的阶段名（见 open_stage）；None 表示本阶段无独立上限。
-        总预算不限时 per_call 照样生效（有阶段上限则再取 min）。
-        per_call <= 0（配置 ai_timeout=0）= 不限制单请求：返回 inf，或在有总预算 /
-        阶段上限时返回那个上限——**不**返回 None（None 只表示「别再发了」）。
-        """
-        left = self.remaining()
-        if left < AI_BUDGET_MIN_ATTEMPT:
-            return None
-        # per_call <= 0 = 这一档不设单请求上限；总预算与阶段剩余仍是硬约束
-        limit = float(per_call) if float(per_call) > 0 else UNLIMITED_TIMEOUT
-        if self.limited:
-            limit = min(limit, left)
-        if stage is not None:
-            stage_left = self.stage_left(stage)
-            if stage_left is not None:
-                if stage_left < AI_BUDGET_MIN_ATTEMPT:
-                    return None
-                limit = min(limit, stage_left)
-        return limit
 
 
 class AiInterpreter:
@@ -227,12 +100,6 @@ class AiInterpreter:
         # 是否在「指定 → 会话 → 全局默认」之后回退到全部已加载 Provider。
         # 默认关：未预期的模型不该被悄悄拉进来烧请求。
         self.all_providers_fallback = all_providers_fallback
-        # 影子读数的实例级累计：单签样本太小，判断「要不要收紧」得看长期分布，
-        # 所以每次汇总都把累计一并落进同一行（见 _log_shadow_summary）。
-        self._shadow_totals: dict[str, int] = {
-            "readings": 0, "no_degrade": 0, "degrade": 0, "unknown": 0,
-            "candidates": 0, "rejected": 0,
-        }
         # 0 = 不限制：显式的高级选项，但别让它静默生效——面板上看不出这个值的后果，
         # 日志里至少留一次（构造期一次，不往每次占卜里刷）
         if _budget_seconds_float(ai_budget) <= 0:
@@ -243,7 +110,7 @@ class AiInterpreter:
     def new_budget(self) -> AiBudget:
         """开一笔新的 AI 总预算。
 
-        入口（main._run_reading）在一次占卜开始时调**一次**，把同一个对象喂给这次
+        入口（services.reading.ReadingService.run）在一次占卜开始时调**一次**，把同一个对象喂给这次
         占卜的全部 AI 阶段（牌灵的话 + 解读，含候选重试与供应商回退）——阶段之间
         不许重置截止点，这正是本预算存在的意义。
         """
@@ -395,7 +262,7 @@ class AiInterpreter:
         except asyncio.TimeoutError:
             return _stop_here()
         except Exception as e:
-            # 出口纪律：候选收集自身的意外绝不带走整条消息（同 main._ensure_image）
+            # 出口纪律：候选收集自身的意外绝不带走整条消息（同 Renderer.ensure_image）
             logger.warning(f"候选收集失败（{e}）：本签按无候选处理，回退本地牌义")
             return []
 
@@ -546,106 +413,24 @@ class AiInterpreter:
             return await call
         return await asyncio.wait_for(call, timeout=limit)
 
-    def _accept_structure(self, text: str, n_positions: int,
-                          tally: _ShadowTally | None = None) -> bool:
+    def _accept_structure(self, text: str, n_positions: int) -> bool:
         """输出结构闸：这一份候选文本按当前口径放不放行（ai.structure_check）。
 
-        loose   —— 只走宽松口径（【第N张·位置】标记段数 ≥ 牌数），v0.7.8 之前的行为。
-        shadow  —— 默认。行为等同于 loose，但同时用严格口径判一遍，不合规就记一行
-                   info：**先量再收紧**。理由很实际——严格口径拒掉一个候选＝那次占卜
-                   整段 AI 解读降级成本地牌义，这笔代价只能用真实候选的拒绝率来估，
-                   而真实候选只有线上跑得出来。影子判定不改任何行为，所以敢默认开。
-        strict  —— 按严格口径放行：编号 1..N 各一次、总结 0/1 次、位置名非空。
-
-        三档共用同一个函数入口：收紧时改一个配置值，不用改代码，也不会出现
-        「哪儿查、哪儿不查」的两份实现慢慢走偏。
-
-        tally：影子模式的本次计数（调用方在 shadow 档才传）。它记的是**严格口径**的
-        判定，与本次实际放行与否无关——这是故意的：影子要量的就是「若按 strict 走，
-        这一条会怎样」，两种口径的判断必须落在同一批候选上才可比。本函数只管逐条
-        判定与计数；「这一次究竟会不会降级」取决于候选链从哪个出口收尾，见
-        _log_shadow_summary 的三种出口。
+        loose  —— 只要求【第N张·位置】标记段数 ≥ 牌数（旧行为，默认）。
+        strict —— 编号 1..N 各一次、【总结】0/1 次、位置名非空；不合规的候选
+                  弃用并继续尝试下一个模型。
         """
-        loose = validate_interpret_structure(text, n_positions)
-        if self.structure_check == STRUCTURE_CHECK_LOOSE:
-            if not loose:
-                logger.warning("AI 解读未按【第N张·位置】结构输出，弃用该候选，继续尝试")
-                return False
-            return True
-        ok, why = validate_interpret_structure_strict(text, n_positions)
-        if tally is not None:
-            tally.candidates += 1
-            if ok:
-                tally.strict_pass_any = True
-                if tally.strict_pass_index is None:
-                    tally.strict_pass_index = tally.candidates
-            else:
-                tally.rejected += 1
-                tally.reasons.update(why)
         if self.structure_check == STRUCTURE_CHECK_STRICT:
+            ok, why = validate_interpret_structure_strict(text, n_positions)
             if not ok:
                 logger.warning(
                     f"AI 解读结构不合规（严格口径：{'/'.join(why)}），弃用该候选，继续尝试")
                 return False
             return True
-        # shadow：判定只落日志，放行与否完全交给宽松口径
-        if loose and not ok:
-            logger.info(f"结构校验·影子：本候选会被严格口径拒绝（{'/'.join(why)}），当前仍按宽松口径放行")
-        elif not loose:
+        if not validate_interpret_structure(text, n_positions):
             logger.warning("AI 解读未按【第N张·位置】结构输出，弃用该候选，继续尝试")
-        return loose
-
-    def _log_shadow_summary(self, tally: _ShadowTally) -> None:
-        """影子口径的本次汇总：两个指标 + 一个判决，外加实例级累计读数。
-
-        两个指标的口径在这里写死（主人 2026-10-12 定的第二条约束）：
-        - **候选拒绝率** = rejected / candidates。分母是**本次真的请求到并判定过**的
-          候选，不是「完整候选链的长度」——没请求到的候选没有观测量。
-        - **降级率** = 严格口径下「整段 AI 解读回退本地牌义」的概率。它**不能**拿
-          「影子拒了多少条候选」顶替：某条候选被拒 ≠ 这次降级，因为严格口径被拒之后
-          会继续往下试后面的候选（cost 更高、但可能救回来）。所以判决按候选链的
-          **三种出口**分，只有三态才能反映完整链的最终结果：
-          ① 出现过严格通过的候选 ⇒ 严格口径也会走到它并放行 ⇒ **不降级**（确定）；
-          ② 链已走完（所有可用候选都试过，或被预算/服务失败这类**与结构无关**的原因
-             截断——那些在严格口径下同样发生）且无严格通过者 ⇒ **降级**（确定）；
-          ③ 链因宽松口径放行而提前收尾、后续候选本次没请求 ⇒ **未观测**：严格口径会
-             继续试它们，降级与否取决于它们。这一支只能报未知，不许写成「会降级」，
-             否则就是把一个我们没量过的数当成结论用。
-        逐条判定只回答「哪一条会被拒」，没有分母就没有结论——这也是这行存在的理由。
-        不含解读原文：只有数字与原因（隐私与体积都不允许把用户解读长期存盘）。
-
-        统计口径（主人 2026-10-13 第 2 条补充）：
-        - 单次与累计都写「分子/分母 (百分比)」；分母为 0 写 `N/A`，不写 0%；
-        - 累计值**只属于当前 AiInterpreter 实例**（进程重启或插件热重载即清零），
-          所以行内明确写出作用范围；观察期的总体拒绝率要用「各次观测的 Σ拒绝 ÷
-          Σ候选」——**不能**平均各行百分比，也**不能**把多代实例的累计值相加（多代
-          之间不重叠，但那不是同一窗口的样本，加起来会把「同一窗口」的口径搅乱）。
-        """
-        if self.structure_check != STRUCTURE_CHECK_SHADOW or tally.candidates == 0:
-            return
-        why = "/".join(f"{k}×{v}" for k, v in sorted(tally.reasons.items())) or "无"
-        if tally.strict_pass_index is not None:
-            verdict = (f"严格口径下本签不降级（第 {tally.strict_pass_index} 个候选即严格放行，"
-                       "尝试深度与本次一致）")
-            bucket = "no_degrade"
-        elif tally.closed_by_loose_return:
-            verdict = ("严格口径下会继续尝试本次未请求的后继候选：本签降级与否**未观测**"
-                       "（本次是宽松口径放行后收尾的）")
-            bucket = "unknown"
-        else:
-            verdict = "严格口径下本签降级为本地牌义（整条可用候选链已观测完，无候选严格通过）"
-            bucket = "degrade"
-        t = self._shadow_totals
-        t["readings"] += 1
-        t[bucket] += 1
-        t["candidates"] += tally.candidates
-        t["rejected"] += tally.rejected
-        logger.info(
-            f"结构校验·影子汇总：本次候选拒绝率 {_rate_text(tally.rejected, tally.candidates)}"
-            f"（原因：{why}）；{verdict}｜累计（本解释器实例自启动/热重载至今，非全局；"
-            f"观察期总体拒绝率请用各次观测的 Σ拒绝÷Σ候选，勿平均各行百分比、勿跨代累加）："
-            f"{t['readings']} 签——不降级 {t['no_degrade']}／降级 {t['degrade']}／"
-            f"未观测 {t['unknown']}，累计候选拒绝率 {_rate_text(t['rejected'], t['candidates'])}")
+            return False
+        return True
 
     async def interpret(self, umo: str | None, formation: str,
                         positions: list[str],
@@ -679,8 +464,6 @@ class AiInterpreter:
         system_prompt = build_system_prompt(eff)
         got_text = False  # 是否至少有一个候选产出了文本（区分“服务失败”与“结构失格”）
         tried = 0
-        # 影子计数只在 shadow 档开：其余档位没有「量」的任务，别白记
-        tally = (_ShadowTally() if self.structure_check == STRUCTURE_CHECK_SHADOW else None)
         for provider in await self._gather_candidates(umo, bd, _STAGE_INTERPRET):
             pid = self._provider_id(provider)
             if self._in_cooldown(pid):
@@ -700,20 +483,13 @@ class AiInterpreter:
                 self._mark_fail(pid)  # 服务级失败：只冷却这个 provider
                 continue
             got_text = True
-            # 结构闸：按 ai.structure_check 的口径判定（默认影子——只量不拦，
-            # 严格口径的拒绝率得先用真实候选统计出来再决定是否启用）
-            if not self._accept_structure(text, len(positions), tally):
+            # 结构闸：按 ai.structure_check 的口径判定
+            if not self._accept_structure(text, len(positions)):
                 continue
             parsed = parse_interpretation(text)
             if parsed is None:
                 continue
-            if tally is not None:
-                # 因宽松口径放行而收尾：严格口径会继续往下试，判决要落在「未观测」
-                tally.closed_by_loose_return = True
-                self._log_shadow_summary(tally)
             return parsed
-        if tally is not None:
-            self._log_shadow_summary(tally)
         if _STAGE_INTERPRET in bd.stopped:
             return None  # 预算掐掉的：原因已在 _stage_stop 里写过，别叠一条误导性的「全败」
         if tried == 0:

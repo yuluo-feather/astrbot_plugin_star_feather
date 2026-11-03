@@ -2,12 +2,12 @@
 from dataclasses import dataclass
 from typing import Literal, TypedDict
 
-KIND_SPREAD = "spread"
-KIND_DAILY = "daily"
-KIND_SINGLE = "single"
-KIND_HELP = "help"
-
 ReadingKind = Literal["spread", "daily", "single", "help"]
+
+KIND_SPREAD: ReadingKind = "spread"
+KIND_DAILY: ReadingKind = "daily"
+KIND_SINGLE: ReadingKind = "single"
+KIND_HELP: ReadingKind = "help"
 
 
 @dataclass(frozen=True)
@@ -19,6 +19,21 @@ class ReadingRequest:
     question: str      # 清洗后的问题主体（送 AI）
     topic_key: str     # 解读缓存的主题分桶键
     fixed_for_day: bool  # 是否走今日固定牌运缓存
+
+
+@dataclass(frozen=True)
+class Interpretation:
+    """一次 AI 解读：原文 + 预切分好的段落与总结。"""
+
+    text: str
+    sections: tuple[str, ...] = ()
+    summary: str = ""
+    structured: bool = False
+
+    def to_record(self) -> dict:
+        """缓存里的结构：文本 + 段落 + 总结，读取时不再重新切分。"""
+        return {"text": self.text, "sections": list(self.sections),
+                "summary": self.summary, "structured": self.structured}
 
 
 class Pick(TypedDict):
@@ -45,7 +60,7 @@ class Reading:
     positions: tuple[str, ...]
     picks: tuple[Pick, ...]
     spirit: str
-    interpretation: str | None
+    interpretation: Interpretation | None
     image: str | None
     fail_note: str = ""
     epilogue: str = ""

@@ -10,7 +10,7 @@ daily 的透传、main 的「一次占卜开一笔」。塞进 test_core 会被�
   asyncio.wait_for 上。「算法全对但没接线」是这类修复最典型的假绿。
 
 边界：不测单次 ai_timeout 的老语义（那是 test_core 的候选链用例），
-也不测端到端发送延迟上界——预算只约束 AI 阶段，见 main._ensure_image 的说明。
+也不测端到端发送延迟上界——预算只约束 AI 阶段，见 Renderer.ensure_image 的说明。
 """
 import asyncio
 import logging
@@ -19,13 +19,14 @@ import time
 import types
 
 from data.plugins.astrbot_plugin_star_feather.ai import chain as interpret_mod
-from data.plugins.astrbot_plugin_star_feather.ai.chain import AiBudget, AiInterpreter
+from data.plugins.astrbot_plugin_star_feather.ai.budget import AiBudget
+from data.plugins.astrbot_plugin_star_feather.ai.chain import AiInterpreter
 from data.plugins.astrbot_plugin_star_feather.core.draw import render_text
-from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
-from data.plugins.astrbot_plugin_star_feather.settings import (
+from data.plugins.astrbot_plugin_star_feather.core.settings import (
     DEFAULT_AI_BUDGET,
     DEFAULT_SPIRIT_STAGE_BUDGET,
 )
+from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
 from stubs import CARD, EVENT, OK_INTERP, PICK, FakeContext, FakeProvider
 
 
@@ -207,7 +208,7 @@ class TestStagesShareTheDeadline:
         assert seen == [("s", float(DEFAULT_SPIRIT_STAGE_BUDGET))]   # 先被阶段上限卡在 20 秒
         out = asyncio.run(_interp([FakeProvider("r")]).interpret(
             EVENT, "羽签", ["你的当下"], [PICK], "问感情", "详情", budget=bd))
-        assert out == OK_INTERP
+        assert out.text == OK_INTERP
         assert seen[1] == ("r", 30)            # 60 - 30 = 30：解读吃上一段剩下的
         assert bd.remaining() == 0
 
@@ -277,7 +278,7 @@ class TestSpiritStageBudgetAccumulates:
         seen = _spy_chat(monkeypatch, clk, 0, {"r": OK_INTERP})
         it2 = _interp([FakeProvider("r", result=OK_INTERP)], ai_timeout=30)
         assert asyncio.run(it2.interpret(EVENT, "羽签", ["你的当下"], [PICK], "问感情",
-                                         "详情", budget=bd)) == OK_INTERP
+                                         "详情", budget=bd)).text == OK_INTERP
         assert seen == [("r", 30.0)]
 
     def test_unlimited_budget_still_honours_the_stage_cap(self, monkeypatch):
@@ -453,16 +454,18 @@ class TestEndToEndDeliveryUnderSpentBudget:
         返回 (插件, 事件, 图片路径, 新开预算清单)。new_budget 计数钩子挂在
         AiInterpreter 上：无论谁新开一笔预算都被记下。
         """
+        from data.plugins.astrbot_plugin_star_feather.adapters.clock import (
+            Clock as RealClock,
+        )
+        from data.plugins.astrbot_plugin_star_feather.adapters.deliver import Deliverer
         from data.plugins.astrbot_plugin_star_feather.adapters.presenter import (
             Presenter,
         )
-        from data.plugins.astrbot_plugin_star_feather.clock import Clock as RealClock
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
-        from data.plugins.astrbot_plugin_star_feather.deliver import Deliverer
+        from data.plugins.astrbot_plugin_star_feather.core.settings import parse
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         from data.plugins.astrbot_plugin_star_feather.services.reading import (
             ReadingService,
         )
-        from data.plugins.astrbot_plugin_star_feather.settings import parse
 
         ctx = FakeContext(using=None, others=list(providers))
         it = AiInterpreter(ctx, ai_timeout=30, ai_budget=1.2,
@@ -623,7 +626,7 @@ class TestCandidateFetchWithinBudget:
         """
         prov = FakeProvider("p0", result=OK_INTERP)
         it = AiInterpreter(_SlowContext(using=prov, delay=1.5), ai_timeout=1, ai_budget=0)
-        assert self._run(it, AiBudget(0)) == OK_INTERP
+        assert self._run(it, AiBudget(0)).text == OK_INTERP
 
     def test_zero_budget_and_zero_timeout_stay_unbounded_by_design(self, monkeypatch):
         """两个 0 = 真的不设上限（README 的公开口径）：解读阶段不得偷偷加暗上限。
@@ -634,7 +637,7 @@ class TestCandidateFetchWithinBudget:
         clk = Clock()
         it = _interp([FakeProvider("p0", result=OK_INTERP)], ai_timeout=0, ai_budget=0)
         seen = _spy_chat(monkeypatch, clk, 0, {"p0": OK_INTERP})
-        assert self._run(it, AiBudget(0, clk)) == OK_INTERP
+        assert self._run(it, AiBudget(0, clk)).text == OK_INTERP
         assert seen == [("p0", float("inf"))]
 
     def test_candidate_fetch_timeout_does_not_freeze_the_provider(self):
@@ -651,21 +654,23 @@ class TestUnlimitedBudgetKeepsTheImagePipeline:
 
     判据选最容易被漏掉的那一处：渲染成功后、发送前图被外部删掉——只要有人在两段
     之间插一句 `if budget.limited:`，补渲染就会跟着被跳过，用户拿到一条空图消息。
-    本用例走真入口（_run_reading），只把渲染换成可控桩，AI 与预算那条链原样保留。
+    本用例走真入口（ReadingService.run），只把渲染换成可控桩，AI 与预算那条链原样保留。
     """
 
     def test_zero_budget_rerenders_a_vanished_image(self, tmp_path, monkeypatch):
+        from data.plugins.astrbot_plugin_star_feather.adapters.clock import (
+            Clock as RealClock,
+        )
+        from data.plugins.astrbot_plugin_star_feather.adapters.deliver import Deliverer
         from data.plugins.astrbot_plugin_star_feather.adapters.presenter import (
             Presenter,
         )
-        from data.plugins.astrbot_plugin_star_feather.clock import Clock as RealClock
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
-        from data.plugins.astrbot_plugin_star_feather.deliver import Deliverer
+        from data.plugins.astrbot_plugin_star_feather.core.settings import parse
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         from data.plugins.astrbot_plugin_star_feather.services.reading import (
             ReadingService,
         )
         from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
-        from data.plugins.astrbot_plugin_star_feather.settings import parse
 
         ctx = FakeContext(using=None, others=[FakeProvider("p0", result=OK_INTERP)])
         it = AiInterpreter(ctx, ai_timeout=30, ai_budget=0)   # 总预算关掉

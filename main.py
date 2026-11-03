@@ -15,20 +15,11 @@ from astrbot.api.star import Context, Star, register
 
 from .app import handlers
 from .app.container import build_container
-from .app.diagnostics import (
-    ACTIVE_INSTANCE_ATTR,
-    CFG_FIELD_NAMES,
-    image_dir_of,
-    note_entry_binding,
-)
-from .app.diagnostics import cfg_fingerprint as _cfg_fingerprint
-from .render import asset_manifest, cleanup_stale_images
+from .app.diagnostics import image_dir_of, register_instance
+from .render.assets import asset_manifest
+from .render.store import cleanup_stale_images
 
 VERSION = "0.8.3"
-
-# 兼容旧测试与诊断导入名：读数行与字段清单仍从入口可见。
-_ACTIVE_INSTANCE_ATTR = ACTIVE_INSTANCE_ATTR
-_CFG_FIELD_NAMES = CFG_FIELD_NAMES
 
 
 @register("star_feather", "羽落", "星羽塔罗：78张塔罗牌 AI 占卜与深度解读，幻星集素材渲染牌面图", VERSION)
@@ -64,20 +55,7 @@ class StarFeatherPlugin(Star):
             except Exception as e:
                 logger.warning(f"启动回收过期图片失败（不影响加载）: {e}")
         # 登记当前代并打一行 [cfg] LOAD：诊断可以失效，插件加载不能失败。
-        context = getattr(self, "context", None)
-        if context is not None:
-            try:
-                setattr(context, _ACTIVE_INSTANCE_ATTR, self)
-            except Exception as e:
-                logger.warning(f"[cfg] 实例登记失败（新鲜度自证失效）: {e}")
-        try:
-            logger.info(f"[cfg] LOAD {_cfg_fingerprint(self)}")
-        except Exception as e:
-            logger.warning(f"[cfg] LOAD 读数行不可用（诊断失效，不影响加载）: {e}")
-
-    def _note_entry_binding(self, entry: str) -> None:
-        """入口进门自报读数；跑在上一代实例上就当场 warning。契约：永不抛。"""
-        note_entry_binding(self, entry)
+        register_instance(self)
 
     def _help(self) -> str:
         return handlers.help_text(VERSION)

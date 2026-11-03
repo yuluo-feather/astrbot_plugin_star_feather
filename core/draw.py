@@ -5,10 +5,10 @@
 """
 import random as _random
 
-from ..spreads import FORMATIONS
-from ..tarot_data import TAROT_CARDS, meaning_text
 from .models import Pick
 from .ports import Rng
+from .spreads import FORMATIONS
+from .tarot_data import TAROT_CARDS, meaning_text
 
 
 def draw(formation: str, rng: Rng | None = None) -> tuple[list[str], list[Pick]]:

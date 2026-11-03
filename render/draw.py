@@ -11,9 +11,8 @@ import time
 
 from PIL import Image, ImageDraw
 
-from ..fonts import _load_font
-from ..tarot_data import meaning_text
-from ..texts import (
+from ..core.tarot_data import meaning_text
+from ..core.texts import (
     CARD_TAG_REVERSED,
     CARD_TAG_UPRIGHT,
     DAILY_SIGNATURE,
@@ -22,6 +21,7 @@ from ..texts import (
     FORMATION_TITLE,
 )
 from .assets import _asset_path, _asset_path_by_id
+from .fonts import _load_font
 from .layout import (
     BAR_TEXT,
     BAR_TITLE,
@@ -315,7 +315,7 @@ def _split_signature_lines(d, text, font, max_w) -> list[str]:
     return lines
 
 
-def _render_daily_card_img(card, upright, signature, date_text, save_dir=None) -> str:
+def render_daily_card(card, upright, signature, date_text, save_dir=None) -> str:
     """今日牌运卡海报：同款牌面素材放大做底 + 深色遮罩，竖版 680×1200。
 
     自上而下：标题胶囊「星羽塔罗·今日牌运」/ 日期（如「8月27日·周四」）/

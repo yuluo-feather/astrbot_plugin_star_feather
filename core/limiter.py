@@ -1,7 +1,7 @@
 """星羽塔罗限流：命令节流与每日次数计数的纯逻辑。
 
-设计原则（与 gating.py 一致）：
-- 判定全部为纯函数，可单测；KV 读写由 gating.py 侧 try-except 静默降级
+设计原则（与 services/gating.py 一致）：
+- 判定全部为纯函数，可单测；KV 读写由 services/gating.py 侧 try-except 静默降级
   （宁可不限流，也不能让占卜入口报错）。
 - 键按「单 key 覆盖式」设计：数据随时间/日期自然失效，零清理任务。
 - 会话级节流（sf_cmd_cd_*）与用户级每日计数（sf_cmd_cnt_*）维度不同，

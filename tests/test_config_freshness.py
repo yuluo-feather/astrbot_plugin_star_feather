@@ -21,12 +21,13 @@ import asyncio
 import logging
 import types
 
-from data.plugins.astrbot_plugin_star_feather.main import (
-    _ACTIVE_INSTANCE_ATTR,
-    _CFG_FIELD_NAMES,
-    StarFeatherPlugin,
-    _cfg_fingerprint,
+from data.plugins.astrbot_plugin_star_feather.app.diagnostics import (
+    ACTIVE_INSTANCE_ATTR,
+    CFG_FIELD_NAMES,
+    cfg_fingerprint,
+    note_entry_binding,
 )
+from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
 
 
 def _tarot(**over):
@@ -69,8 +70,8 @@ class TestFingerprint:
     """读数行：报的就是那四个「面板一改、用户侧立刻看得见」的开关。"""
 
     def test_reports_all_four_switches(self):
-        line = _cfg_fingerprint(_plugin())
-        for name in _CFG_FIELD_NAMES:
+        line = cfg_fingerprint(_plugin())
+        for name in CFG_FIELD_NAMES:
             assert name + "=" in line
         assert line.startswith("inst=")          # 身份在前，两个 id 便于跨行比对
         assert " tarot=" in line
@@ -78,13 +79,13 @@ class TestFingerprint:
         assert "ai_timeout=5" in line
 
     def test_partial_tarot_does_not_raise(self):
-        line = _cfg_fingerprint(_plugin(types.SimpleNamespace(shuffle_lines=True)))
+        line = cfg_fingerprint(_plugin(types.SimpleNamespace(shuffle_lines=True)))
         assert "shuffle_lines=True" in line
         assert "enable_ai='?'" in line           # 缺的字段留印，不当成 False
 
     def test_no_tarot_at_all(self):
         p = StarFeatherPlugin.__new__(StarFeatherPlugin)
-        assert _cfg_fingerprint(p).startswith("inst=")
+        assert cfg_fingerprint(p).startswith("inst=")
 
 
 class TestLoadRegistration:
@@ -94,7 +95,7 @@ class TestLoadRegistration:
         p = _plugin()
         with caplog.at_level(logging.INFO):
             asyncio.run(p.initialize())
-        assert getattr(p.context, _ACTIVE_INSTANCE_ATTR, None) is p
+        assert getattr(p.context, ACTIVE_INSTANCE_ATTR, None) is p
         assert "[cfg] LOAD" in _text(caplog)
 
     def test_context_less_instance_still_logs(self, caplog):
@@ -125,12 +126,12 @@ class TestLoadRegistration:
         指纹求值在 logger 之前，logging 的 handleError 兜不到这一步；它抛出去跟登记失败
         是同一个后果——框架判「插件加载失败」。降级行是给排查人的：不能让人以为没加载过。
         """
-        from data.plugins.astrbot_plugin_star_feather import main as main_mod
+        from data.plugins.astrbot_plugin_star_feather.app import diagnostics
 
         def boom(_plugin):
             raise RuntimeError("指纹算不出来")
 
-        monkeypatch.setattr(main_mod, "_cfg_fingerprint", boom)
+        monkeypatch.setattr(diagnostics, "cfg_fingerprint", boom)
         p = _plugin()
         with caplog.at_level(logging.INFO):
             asyncio.run(p.initialize())
@@ -166,9 +167,9 @@ class TestEntryBinding:
 
     def test_current_generation_only_reports(self, caplog):
         p = _plugin()
-        setattr(p.context, _ACTIVE_INSTANCE_ATTR, p)
+        setattr(p.context, ACTIVE_INSTANCE_ATTR, p)
         with caplog.at_level(logging.INFO):
-            p._note_entry_binding("tool")
+            note_entry_binding(p, "tool")
         assert "[cfg] ENTRY tool" in _text(caplog)
         assert _warnings(caplog) == []
 
@@ -176,14 +177,14 @@ class TestEntryBinding:
         """还没跑过 initialize（登记为空）不构成「旧实例」证据，不许误报。"""
         p = _plugin()
         with caplog.at_level(logging.INFO):
-            p._note_entry_binding("tool")
+            note_entry_binding(p, "tool")
         assert _warnings(caplog) == []
 
     def test_stale_instance_is_called_out(self, caplog):
         current, stale = _plugin(), _plugin()
-        setattr(stale.context, _ACTIVE_INSTANCE_ATTR, current)
+        setattr(stale.context, ACTIVE_INSTANCE_ATTR, current)
         with caplog.at_level(logging.INFO):
-            stale._note_entry_binding("command")
+            note_entry_binding(stale, "command")
         warn = _warnings(caplog)
         assert len(warn) == 1
         assert "陈旧实例" in warn[0] and "command" in warn[0]
@@ -194,19 +195,19 @@ class TestEntryBinding:
         p = _plugin()
         del p.context
         with caplog.at_level(logging.INFO):
-            p._note_entry_binding("tool")
+            note_entry_binding(p, "tool")
         assert "[cfg] ENTRY tool" in _text(caplog)
 
     def test_hostile_context_degrades_instead_of_raising(self, caplog):
         """context 读不动时也只许降级——这一句裸放在两个入口的 try 之前。
 
-        抛出去不是丢一行日志，是把那一次占卜/那条命令带走（divine_tool 与 _command_entry
+        抛出去不是丢一行日志，是把那一次占卜/那条命令带走（divine_tool 与 command_entry
         都在自己的 try 之前调它）。降级行同时保住「进门必留一行」这句承诺。
         """
         p = _plugin()
         p.context = _HostileContext()
         with caplog.at_level(logging.INFO):
-            p._note_entry_binding("tool")
+            note_entry_binding(p, "tool")
         assert "[cfg] ENTRY tool" in _text(caplog)      # 异常发生在读数行之后，那行照打
         assert any("自检失败" in w for w in _warnings(caplog))
 
@@ -214,13 +215,13 @@ class TestEntryBinding:
 class TestEntriesAreWired:
     """接线守卫：两个入口都得进门自报，否则上面那把哨兵永远不会被触发。"""
 
-    def test_command_entry_notes_binding(self):
+    def test_command_entry_notes_binding(self, monkeypatch):
         from data.plugins.astrbot_plugin_star_feather.app import handlers
-        from data.plugins.astrbot_plugin_star_feather.settings import parse
+        from data.plugins.astrbot_plugin_star_feather.core.settings import parse
 
         p = _plugin()
         seen = []
-        p._note_entry_binding = seen.append
+        monkeypatch.setattr(handlers, "note_entry_binding", lambda _p, e: seen.append(e))
 
         async def block(event, for_command):
             return "BLOCK"
@@ -236,13 +237,13 @@ class TestEntriesAreWired:
         asyncio.run(handlers.command_entry(p, ev, "", version="0", err_tpl="x"))
         assert seen == ["command"]
 
-    def test_tool_entry_notes_binding(self):
+    def test_tool_entry_notes_binding(self, monkeypatch):
         from data.plugins.astrbot_plugin_star_feather.app import handlers
-        from data.plugins.astrbot_plugin_star_feather.settings import parse
+        from data.plugins.astrbot_plugin_star_feather.core.settings import parse
 
         p = _plugin()
         seen = []
-        p._note_entry_binding = seen.append
+        monkeypatch.setattr(handlers, "note_entry_binding", lambda _p, e: seen.append(e))
         p.container = types.SimpleNamespace(
             settings=parse({"tool": {"llm_tool_enabled": False}}),
             gate=types.SimpleNamespace(),

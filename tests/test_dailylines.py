@@ -5,12 +5,12 @@ import asyncio
 import os
 import time
 
-from data.plugins.astrbot_plugin_star_feather.dailylines import (
+from data.plugins.astrbot_plugin_star_feather.core.dailylines import (
     _FALLBACK_SIGNATURE,
     SIGIL_LINES,
     pick_signature,
 )
-from data.plugins.astrbot_plugin_star_feather.tarot_data import TAROT_CARDS
+from data.plugins.astrbot_plugin_star_feather.core.tarot_data import TAROT_CARDS
 
 CARD = TAROT_CARDS[0]  # 愚者
 
@@ -46,7 +46,7 @@ class TestDailyCardOrchestration:
 
     @staticmethod
     def _renderer():
-        from data.plugins.astrbot_plugin_star_feather.clock import Clock
+        from data.plugins.astrbot_plugin_star_feather.adapters.clock import Clock
         from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
         return Renderer(image_dir="", send_mode="plain"), Clock()
 
@@ -58,7 +58,7 @@ class TestDailyCardOrchestration:
         def boom(*a, **kw):
             raise RuntimeError("render boom")
 
-        monkeypatch.setattr(render_mod, "_render_daily_card_img", boom)
+        monkeypatch.setattr(render_mod, "render_daily_card", boom)
         picks = [{"card": TAROT_CARDS[0], "upright": True}]
         r, clock = self._renderer()
         assert asyncio.run(r.daily_card(picks, "u1", clock)) is None
@@ -80,7 +80,7 @@ class TestDailyCardOrchestration:
         def fake_cleanup(img, delay=None):
             calls.append((img, delay))
 
-        monkeypatch.setattr(render_mod, "_render_daily_card_img", fake_render)
+        monkeypatch.setattr(render_mod, "render_daily_card", fake_render)
         monkeypatch.setattr(render_mod, "_schedule_image_cleanup", fake_cleanup)
         picks = [{"card": TAROT_CARDS[0], "upright": True}]
         r, clock = self._renderer()
@@ -100,7 +100,7 @@ class TestDailyCardRenderSlot:
     """
 
     def test_render_holds_the_shared_render_lock(self, monkeypatch, tmp_path):
-        from data.plugins.astrbot_plugin_star_feather.clock import Clock
+        from data.plugins.astrbot_plugin_star_feather.adapters.clock import Clock
         from data.plugins.astrbot_plugin_star_feather.services import (
             render as render_mod,
         )
@@ -118,7 +118,7 @@ class TestDailyCardRenderSlot:
             open(path, "wb").write(b"PNG")
             return path
 
-        monkeypatch.setattr(render_mod, "_render_daily_card_img", slow_render)
+        monkeypatch.setattr(render_mod, "render_daily_card", slow_render)
         monkeypatch.setattr(render_mod, "_schedule_image_cleanup", lambda img, delay=30: None)
         r = Renderer(image_dir=str(tmp_path), send_mode="plain")
         r._lock = asyncio.Semaphore(1)

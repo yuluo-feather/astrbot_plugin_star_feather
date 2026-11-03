@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 from ..ai.persona import resolve_persona
 from ..core.draw import draw, render_detail
+from ..core.intent import norm_topic
 from ..core.log import log
 from ..core.models import (
     KIND_DAILY,
@@ -22,9 +23,8 @@ from ..core.models import (
     ReadingRequest,
 )
 from ..core.ports import Messenger, Rng
-from ..intent import norm_topic
-from ..settings import Settings
-from ..texts import RESULT_EPILOGUE, SHUFFLE_LINES
+from ..core.settings import Settings
+from ..core.texts import RESULT_EPILOGUE, SHUFFLE_LINES
 
 
 @dataclass(frozen=True)

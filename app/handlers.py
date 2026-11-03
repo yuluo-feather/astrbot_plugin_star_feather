@@ -7,12 +7,12 @@
 import random
 
 from ..adapters.astrbot_io import messenger_for
+from ..core.identity import resolve_sender_uid
+from ..core.intent import build_request
 from ..core.log import log
 from ..core.models import KIND_HELP
-from ..identity import resolve_sender_uid
-from ..intent import build_request
+from ..core.texts import FAIL_NOTE_TOOL, HELP_TEXT, TOOL_EPILOGUE
 from ..services.reading import ReadingContext
-from ..texts import FAIL_NOTE_TOOL, HELP_TEXT, TOOL_EPILOGUE
 from .diagnostics import note_entry_binding
 
 EMPTY_FALLBACK = "（未提具体问题，请作一般运势解读）"
@@ -25,15 +25,6 @@ def _exc_detail(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
-def _note(plugin, entry: str) -> None:
-    """走插件上的接线点（测试可替换），没有就退回诊断模块的默认实现。"""
-    hook = getattr(plugin, "_note_entry_binding", None)
-    if callable(hook):
-        hook(entry)
-    else:
-        note_entry_binding(plugin, entry)
-
-
 def help_text(version: str) -> str:
     return f"🔮 星羽塔罗 {version}\n{HELP_TEXT}"
 
@@ -44,7 +35,7 @@ async def command_entry(plugin, event, text: str, *, version: str, err_tpl: str,
     """命令入口公共流程（/占卜、/单抽、/今日牌运 共用）。"""
     # 本次事件已由插件处理：should_call_llm(True) 的语义是「禁止默认 LLM」。
     # 不用 stop_event()：响应阶段清空 result 后会塞出空 STOP 结果。
-    _note(plugin, "command")
+    note_entry_binding(plugin, "command")
     event.should_call_llm(True)
     container = plugin.container
     messenger = messenger_for(event)
@@ -74,22 +65,22 @@ async def command_entry(plugin, event, text: str, *, version: str, err_tpl: str,
 
 async def tool_entry(plugin, event, formation: str = "", *, version: str) -> str:
     """自然语言入口：返回给 Agent Loop 的一句收尾引导。"""
-    _note(plugin, "tool")
+    note_entry_binding(plugin, "tool")
     container = plugin.container
     messenger = messenger_for(event)
     if not container.settings.tool.llm_enabled:
         await messenger.send_text("星羽塔罗的自然语言占卜未开启～ 试试 /占卜 感情 这样的命令。")
         return "已告知用户自然语言占卜未开启。请自然回应一句，不必再调用工具。"
     text = (getattr(event, "message_str", "") or "").strip()
+    if not text:
+        return ("工具收到空文本：用户没说占卜什么。请回一句，引导用户说出想占卜的内容"
+                "（如感情、事业、学业、今日运势）。")
     request = build_request(
         "auto", text, daily_enabled=container.settings.output.daily_fixed,
         source="tool", formation_hint=formation)
     if request.kind == KIND_HELP:
         await messenger.send_text(help_text(version))
         return "帮助页已发送。请自然回应一句，不必再调用工具。"
-    if not text:
-        return ("工具收到空文本：用户没说占卜什么。请回一句，引导用户说出想占卜的内容"
-                "（如感情、事业、学业、今日运势）。")
     umo = getattr(event, "unified_msg_origin", None) or "global"
     remain = await container.gate.session_throttle(
         f"sf_tool_cd_{umo}", container.settings.tool.llm_cooldown)

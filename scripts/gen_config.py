@@ -47,7 +47,7 @@ def main(argv=None) -> int:
     except ModuleNotFoundError:  # 直接 python scripts/gen_config.py 时
         config_docs = importlib.import_module("config_docs")
     _mount_plugin_package()
-    from data.plugins.astrbot_plugin_star_feather.settings import parse
+    from data.plugins.astrbot_plugin_star_feather.core.settings import parse
 
     if "--write" in args:
         changed = config_docs.write(parse, ROOT)

@@ -11,8 +11,8 @@ import pytest
 from data.plugins.astrbot_plugin_star_feather.ai.prompts import (
     build_spirit_line_prompt,
 )
-from data.plugins.astrbot_plugin_star_feather.dailylines import pick_signature
-from data.plugins.astrbot_plugin_star_feather.tarot_data import (
+from data.plugins.astrbot_plugin_star_feather.core.dailylines import pick_signature
+from data.plugins.astrbot_plugin_star_feather.core.tarot_data import (
     TAROT_CARDS,
 )
 from stubs import CARD, EVENT, PICK, FakeContext, FakeProvider
@@ -25,7 +25,7 @@ class TestSpiritCache:
 
     @staticmethod
     def _daily(kv, line="AI 说的那句"):
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         calls = []
 
         class _Ctx:
@@ -50,7 +50,7 @@ class TestSpiritCache:
         assert l1 == "AI 说的那句" and len(calls) == 1
         l2 = asyncio.run(df.spirit_cached(EVENT, "u1", [PICK], "今日运势", None))
         assert l2 == "AI 说的那句" and len(calls) == 1  # 缓存复用：不再调 AI
-        from data.plugins.astrbot_plugin_star_feather.daily import _PROMPT_V
+        from data.plugins.astrbot_plugin_star_feather.services.daily import _PROMPT_V
         cache = kv["sf_daily_u1"]
         assert cache["date"] == strftime("%Y%m%d") and cache["spirit_line"] == "AI 说的那句"
         assert cache["spirit_sign"] == f"{PICK['card']['cn']}:1"  # 牌组指纹（卡名:正逆）
@@ -58,7 +58,7 @@ class TestSpiritCache:
 
     def test_concurrent_misses_share_one_generated_line(self):
         """同一（用户, 牌组）并发 miss：只调一次 AI，等待者拿到同一句。"""
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         kv, calls = {}, []
 
         class _Ctx:
@@ -91,7 +91,7 @@ class TestSpiritCache:
         登记表若退化成实例属性，热重载期间新旧实例各问一次 AI，会给出两句
         不同的话并互相覆盖缓存。
         """
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         kv, calls = {}, []
 
         class _Ctx:
@@ -121,7 +121,7 @@ class TestSpiritCache:
     def test_cancelled_waiter_does_not_cancel_the_shared_future(self):
         """等待者被取消不能把共享 Future 一起取消：否则所有者 set_result 抛
         InvalidStateError，整条占卜一起失败。"""
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         kv, calls = {}, []
 
         class _Ctx:
@@ -154,7 +154,7 @@ class TestSpiritCache:
 
     def test_new_day_does_not_join_yesterdays_inflight(self):
         """跨午夜的生成属于昨天：新一天的请求必须重新生成，不能拿昨天的文案。"""
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         kv, calls = {}, []
 
         class _Clock:
@@ -200,15 +200,13 @@ class TestSpiritCache:
         assert (l1, l2) == ("昨天那句", "今天那句")
         assert calls == ["20261017", "20261018"]
 
-    def test_spirit_writes_back_even_on_read_failure(self):
-        """读故障仍写回——方向与 pick/interp 的 if ok 门相反，是有意的。
+    def test_first_read_failure_does_not_write_back(self):
+        """初次读故障：本次只返回生成结果，不写回；读恢复后重新生成并写回。
 
-        判据＝写回是否依赖旧数据：pick_cached / interp_cached 读旧 dict 再合并写回，读故障
-        时旧数据缺失、写回会把有效内容覆盖成空壳，所以必须门住；本函数是纯覆盖写（只写
-        v/date/sign/line，不读旧值），读故障不影响写入正确性。机械地「统一」成门住，会让
-        故障恢复前的重复查询重新生成，AI 措辞可能不同，破坏「当日同牌组同一句」的承诺。
+        单键记录里牌面、解读分桶与牌灵的话共用一个 raw：不知道旧记录时写回，
+        会把牌面与分桶一起清空。
         """
-        from data.plugins.astrbot_plugin_star_feather.daily import DailyFortune
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         kv = {}
         calls = []
 
@@ -283,6 +281,49 @@ class TestSpiritCache:
                 {"card": TAROT_CARDS[2], "upright": True}]  # 第二张正逆翻转
         l3 = asyncio.run(df.spirit_cached(EVENT, "u1", flip, "感情", None))
         assert l3 == "整签句" and len(calls) == 2  # 牌组变：重新生成
+
+    def test_second_read_failure_does_not_clobber_record(self):
+        """初次读到旧记录、生成成功、写回前二次读失败：不许写回。"""
+        import time as _time
+
+        from data.plugins.astrbot_plugin_star_feather.services.daily import (
+            _PROMPT_V,
+            DailyFortune,
+        )
+        today = _time.strftime("%Y%m%d")
+        old = {"schema": 2, "date": today, "card_id": PICK["card"]["id"],
+               "upright": True, "sign": f"{PICK['card']['id']}:1",
+               "prompt_v": _PROMPT_V, "persona": "",
+               "interps": {"旧主题": {"text": "旧解读"}},
+               "spirit_line": "旧句", "spirit_sign": "别的牌:0"}
+
+        class _Flaky:
+            def __init__(self):
+                self.reads = 0
+                self.puts = 0
+                self.data = old
+
+            async def get_kv_data(self, key, default=None):
+                self.reads += 1
+                if self.reads == 2:
+                    raise RuntimeError("kv 二次读故障")
+                return self.data
+
+            async def put_kv_data(self, key, value):
+                self.puts += 1
+                self.data = value
+
+        kv = _Flaky()
+
+        async def fake_spirit(event, cards, topic, persona_eff, budget=None):
+            return "新牌灵句"
+
+        df = DailyFortune(kv, persona="",
+                          interpreter=types.SimpleNamespace(spirit_line=fake_spirit))
+        line = asyncio.run(df.spirit_cached(EVENT, "u1", [PICK], "今日运势", None))
+        assert line == "新牌灵句"    # 本次照常交结果
+        assert kv.puts == 0          # 但不写回
+        assert kv.data is old        # 牌面与旧分桶原样保留
 
     def test_no_uid_returns_static_without_ai(self):
         from time import strftime
@@ -394,3 +435,79 @@ class TestSpiritPrompt:
         base = prompts.SPIRIT_PROMPT_V
         monkeypatch.setattr(prompts, "_SPIRIT_TEMPLATE", prompts._SPIRIT_TEMPLATE + "改一笔")
         assert prompts._spirit_prompt_fingerprint() != base
+
+# ---------- 牌灵缓存的人设隔离 ----------
+class TestSpiritPersonaIsolation:
+    """同一天、同一组牌，只换人设：必须重新生成，且不能改写每日解读的 persona。"""
+
+    @staticmethod
+    def _ctx(kv):
+        class _Ctx:
+            async def get_kv_data(self, key, default=None):
+                return kv.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                kv[key] = value
+
+        return _Ctx()
+
+    def test_persona_change_regenerates(self):
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
+        kv, calls = {}, []
+
+        async def fake_spirit(event, cards, topic, persona_eff, budget=None):
+            calls.append(persona_eff)
+            return f"句:{persona_eff}"
+
+        prov = types.SimpleNamespace(spirit_line=fake_spirit)
+        a = DailyFortune(self._ctx(kv), persona="tsundere", interpreter=prov)
+        b = DailyFortune(self._ctx(kv), persona="gentle", interpreter=prov)
+        l1 = asyncio.run(a.spirit_cached(EVENT, "u1", [PICK], "今日运势", "tsundere"))
+        l2 = asyncio.run(b.spirit_cached(EVENT, "u1", [PICK], "今日运势", "gentle"))
+        assert (l1, l2) == ("句:tsundere", "句:gentle")
+        assert calls == ["tsundere", "gentle"]
+        assert kv["sf_daily_u1"]["spirit_persona"] == "gentle"
+
+    def test_same_persona_reuses_without_calling_ai(self):
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
+        kv, calls = {}, []
+
+        async def fake_spirit(event, cards, topic, persona_eff, budget=None):
+            calls.append(persona_eff)
+            return "同一句"
+
+        prov = types.SimpleNamespace(spirit_line=fake_spirit)
+        a = DailyFortune(self._ctx(kv), persona="gentle", interpreter=prov)
+        b = DailyFortune(self._ctx(kv), persona="gentle", interpreter=prov)
+        first = asyncio.run(a.spirit_cached(EVENT, "u1", [PICK], "今日运势", "gentle"))
+        second = asyncio.run(b.spirit_cached(EVENT, "u1", [PICK], "今日运势", "gentle"))
+        assert first == second == "同一句"
+        assert len(calls) == 1
+
+    def test_spirit_write_keeps_daily_persona(self):
+        """牌灵写回只动 spirit_persona：每日解读的人设上下文不能被换掉。"""
+        from data.plugins.astrbot_plugin_star_feather.services.daily import (
+            _PROMPT_V,
+            DailyFortune,
+        )
+        from stubs import PICK as _P
+        today = __import__("time").strftime("%Y%m%d")
+        daily_sig = f"{_P['card']['id']}:1"
+        kv = {"sf_daily_u1": {
+            "schema": 2, "date": today, "card_id": _P["card"]["id"], "upright": True,
+            "sign": daily_sig, "prompt_v": _PROMPT_V, "persona": "gentle",
+            "interps": {"旧主题": {"text": "旧解读"}},
+            "spirit_line": "旧句", "spirit_sign": "别的牌:0", "spirit_persona": "gentle",
+        }}
+
+        async def fake_spirit(event, cards, topic, persona_eff, budget=None):
+            return "新句"
+
+        df = DailyFortune(self._ctx(kv), persona="tsundere",
+                          interpreter=types.SimpleNamespace(spirit_line=fake_spirit))
+        line = asyncio.run(df.spirit_cached(EVENT, "u1", [_P], "今日运势", "tsundere"))
+        assert line == "新句"
+        rec = kv["sf_daily_u1"]
+        assert rec["persona"] == "gentle"          # 每日解读上下文不动
+        assert rec["spirit_persona"] == "tsundere"  # 牌灵自己的指纹更新
+        assert rec["interps"] == {"旧主题": {"text": "旧解读"}}  # 分桶也保留

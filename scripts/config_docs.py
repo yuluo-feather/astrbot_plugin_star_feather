@@ -1,6 +1,6 @@
 """配置默认值的单一来源校验/回写：Settings → schema + 两份 README。
 
-默认值只在 settings.py 的 dataclass 字段上写一次；这里负责把 `_conf_schema.json`
+默认值只在 core/settings.py 的 dataclass 字段上写一次；这里负责把 `_conf_schema.json`
 的 default 与 README 配置表的默认值列对齐。CI 走 `check()`（tests/test_config.py），
 本地回写走 `python -m scripts.gen_config --write`。
 """
@@ -123,7 +123,8 @@ def write(parse, root: Path = PLUGIN_ROOT) -> list[str]:
                 item["default"] = defaults[full]
                 changed.append(f"_conf_schema.json {full}")
     schema_path.write_text(
-        json.dumps(schema, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        json.dumps(schema, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
+        newline="\n")
     for rel in README_PATHS:
         path = root / rel
         lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
@@ -142,5 +143,5 @@ def write(parse, root: Path = PLUGIN_ROOT) -> list[str]:
 
                 lines[i] = ROW_RE.sub(_replace_row, line, count=1)
                 changed.append(f"{rel} {key}")
-        path.write_text("".join(lines), encoding="utf-8")
+        path.write_text("".join(lines), encoding="utf-8", newline="\n")
     return changed

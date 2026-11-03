@@ -14,7 +14,7 @@ import os
 
 from PIL import ImageFont
 
-_FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
+_FONT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "fonts")
 
 _FONT_CACHE: dict[tuple[int, bool], ImageFont.ImageFont | ImageFont.FreeTypeFont] = {}
 # ↑ 值类型写 union：(size, bold) -> 字体对象（仅不带 text 的选择可入缓存）。

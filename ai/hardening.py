@@ -9,7 +9,7 @@ import re
 
 from astrbot.api import logger
 
-from .settings import DEFAULT_QUESTION_MAX_LEN
+from ..core.settings import DEFAULT_QUESTION_MAX_LEN
 
 # AI 解读的问题长度上限：防超长输入（费 token + 扩大 Prompt 注入面），
 # 超长时头尾保号压缩（见 clip_question）；默认值权威在 settings.DEFAULT_QUESTION_MAX_LEN

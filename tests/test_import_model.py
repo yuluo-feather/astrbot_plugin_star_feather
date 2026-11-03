@@ -20,12 +20,17 @@ import sys
 _TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 _PLUGIN_ROOT = os.path.dirname(_TESTS_DIR)
 _PLUGIN_PKG = "data.plugins.astrbot_plugin_star_feather"
+_SKIP_DIRS = {"tests", "scripts", "tools", "__pycache__", ".git", ".ruff_cache",
+              ".pytest_cache", ".mypy_cache"}
 
 
 def _plugin_sources():
-    for name in sorted(os.listdir(_PLUGIN_ROOT)):
-        if name.endswith(".py"):
-            yield name, os.path.join(_PLUGIN_ROOT, name)
+    for cur, dirs, files in os.walk(_PLUGIN_ROOT):
+        dirs[:] = sorted(d for d in dirs if d not in _SKIP_DIRS)
+        for name in sorted(files):
+            if name.endswith(".py"):
+                path = os.path.join(cur, name)
+                yield os.path.relpath(path, _PLUGIN_ROOT).replace(os.sep, "/"), path
 
 
 class TestOneIdentityPerFile:
@@ -37,7 +42,9 @@ class TestOneIdentityPerFile:
         offenders = []
         for name, mod in list(sys.modules.items()):
             path = getattr(mod, "__file__", None)
-            if not path or os.path.dirname(os.path.abspath(path)) != _PLUGIN_ROOT:
+            if not path or not os.path.abspath(path).startswith(_PLUGIN_ROOT + os.sep):
+                continue
+            if os.path.relpath(path, _PLUGIN_ROOT).split(os.sep)[0] in _SKIP_DIRS:
                 continue
             if name == _PLUGIN_PKG or name.startswith(_PLUGIN_PKG + "."):
                 continue
@@ -74,7 +81,7 @@ main1 = importlib.import_module(pkg + ".main")
 core1 = importlib.import_module(pkg + ".services.render")
 tracked = sorted(n for n in sys.modules if n.startswith(pkg + "."))
 assert len(tracked) >= 10, "插件模块没挂在包名下：" + repr(tracked)
-assert pkg + ".daily" in tracked and pkg + ".ai.prompts" in tracked, str(tracked)
+assert pkg + ".services.daily" in tracked and pkg + ".ai.prompts" in tracked, str(tracked)
 
 # 模拟框架的重载清理：按 data.plugins.<目录名>.* 前缀删（AstrBot 的清理就是这个口径）
 for name in tracked:

@@ -11,8 +11,8 @@ from astrbot.api.event import MessageChain
 from astrbot.api.message_components import Plain
 from data.plugins.astrbot_plugin_star_feather.app import handlers
 from data.plugins.astrbot_plugin_star_feather.core.models import Reading
+from data.plugins.astrbot_plugin_star_feather.core.settings import parse
 from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
-from data.plugins.astrbot_plugin_star_feather.settings import parse
 from stubs import PICK
 
 
