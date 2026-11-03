@@ -23,6 +23,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      release:
+        description: 发布当前 metadata.yaml 的版本（v<version>），已存在则跳过
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -241,3 +246,81 @@ jobs:
           name: astrbot_plugin_star_feather-${{ steps.version.outputs.value }}
           path: astrbot_plugin_star_feather-*.zip
           retention-days: 30
+
+  release:
+    name: 发布 Release（版本变更）
+    # 只在 metadata.yaml 的版本号相对本次推送前发生变化时发版；手动触发需显式勾选 release。
+    # 用「版本号变化」而不是提交信息前缀判断：release 提交经 PR 合并时 HEAD 是 merge commit，
+    # 按信息前缀会漏发。发布红线仍由 tests/test_release_gates.py 守。
+    needs: [test, contract, static]
+    if: >-
+      github.event_name == 'push'
+      || (github.event_name == 'workflow_dispatch' && github.event.inputs.release == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: 版本号是否变化
+        id: bumped
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          old=$(git show "$BEFORE:metadata.yaml" 2>/dev/null | awk '/^version:/{print $2; exit}' || true)
+          new=$(awk '/^version:/{print $2; exit}' metadata.yaml)
+          if [ -n "$old" ] && [ "$old" = "$new" ]; then
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: 校验版本与发布说明
+        id: version
+        if: steps.bumped.outputs.value == 'true'
+        run: |
+          set -euo pipefail
+          version=$(awk '/^version:/{print $2; exit}' metadata.yaml)
+          code=$(grep -m1 '^VERSION = "' main.py | cut -d'"' -f2)
+          test -n "$version"
+          test "$code" = "$version"
+          test -f "changelogs/v$version.md"
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+      - name: 版本已发布则跳过
+        id: exist
+        if: steps.bumped.outputs.value == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "v${{ steps.version.outputs.value }}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: 打包市场 zip
+        if: steps.bumped.outputs.value == 'true' && steps.exist.outputs.value == 'false'
+        run: |
+          set -euo pipefail
+          git archive --format=zip --prefix=astrbot_plugin_star_feather-main/ -o "astrbot_plugin_star_feather-${{ steps.version.outputs.value }}.zip" HEAD
+          ls -lh astrbot_plugin_star_feather-*.zip
+      - name: 创建 tag 与 Release
+        if: steps.bumped.outputs.value == 'true' && steps.exist.outputs.value == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "v${{ steps.version.outputs.value }}" "astrbot_plugin_star_feather-${{ steps.version.outputs.value }}.zip" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "v${{ steps.version.outputs.value }}" --notes-file "changelogs/v${{ steps.version.outputs.value }}.md"
