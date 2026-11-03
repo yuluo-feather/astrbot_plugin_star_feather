@@ -190,7 +190,7 @@ class TestConcurrentRace:
     def test_quota_exact_and_kv_window_serialized(self):
         """配额并发风暴：放行数恰好等于配额、落库计数同步、读写窗口始终只有一个人。
 
-        只量 gating.py 自己的读-判-写，三条断言钉三件事：
+        只量 services/gating.py 自己的读-判-写，三条断言钉三件事：
         1) 不超发（同时放行 30 个请求，配额 5 → 恰好 5，多了就是竞态放行）；
         2) 不少发（同样恰好 5，少了说明闸门自己把正常请求挡了）；
         3) 窗口没被闯进来（peak == 1；锁一旦没罩住读写，这里当场爆）。

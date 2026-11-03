@@ -51,7 +51,7 @@ from .store import IMAGE_DIR_ROOT
 _RNG = random.Random()
 _RESAMPLE = Image.Resampling.LANCZOS
 
-# ---------- 文字绘制（字体加载与覆盖校验在 fonts.py） ----------
+# ---------- 文字绘制（字体加载与覆盖校验在 render/fonts.py） ----------
 def _text_center(draw, cx, y, text, font, fill):
     bbox = draw.textbbox((0, 0), text, font=font)
     w = bbox[2] - bbox[0]

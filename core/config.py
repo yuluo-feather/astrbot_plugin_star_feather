@@ -55,7 +55,7 @@ def _cfg_int(config: dict[str, Any] | None, group: str, key: str, default: int, 
         value = int(raw)
     except (TypeError, ValueError, OverflowError):
         # OverflowError：YAML 的 .inf / -.inf 能过 float，却在 int() 处炸；
-        # 这里必须兜住，否则 TarotSettings 构造失败会带走整个插件加载
+        # 这里必须兜住，否则 Settings 构造失败会带走整个插件加载
         return default
     return max(floor, value) if floor is not None else value
 

@@ -152,7 +152,7 @@ def test_budget_and_structure_rows_match_schema_and_code():
         rows = _rows(rel)
         assert rows["ai.ai_budget_seconds"] == ("int", str(DEFAULT_AI_BUDGET)), rel
         assert rows["ai.structure_check"] == ("select", DEFAULT_STRUCTURE_CHECK), rel
-        # 支持的取值一个都不能少：说明里要逐个列出三档（文档缺一档＝用户看不见那个选项）
+        # 支持的取值一个都不能少：说明里要逐个列出全部取值（文档缺一个＝用户看不见那个选项）
         desc = _row_line(rel, "ai.structure_check")
         for value in STRUCTURE_CHECK_VALUES:
             assert "`" + value + "`" in desc, rel + " 的 structure_check 说明缺取值 " + value

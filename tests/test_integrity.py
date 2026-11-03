@@ -24,7 +24,7 @@ class TestTarotDataIntegrity:
         assert len(set(keys)) == 78
 
     def test_keywords_exactly_three(self):
-        # 卡面信息区两行硬截断（card_render: lines[:2]），关键词必须统一 3 个，
+        # 卡面信息区两行硬截断（render/draw.py: lines[:2]），关键词必须统一 3 个，
         # 否则第 4 个会被吞——这条假设以前只靠人工控制，现在锁进测试
         for c in TAROT_CARDS:
             for side in ("up", "down"):
@@ -109,7 +109,7 @@ class TestFontIntegrity:
 
     SUBSETS = ("StarFeather-Regular.otf", "StarFeather-Bold.otf")
 
-    # 渲染模板：标题 / 日期 / 牌名行 / 阵位 / 署名 / 水印，均取自 card_render
+    # 渲染模板：标题 / 日期 / 牌名行 / 阵位 / 署名 / 水印，均取自 render/draw.py
     # 与 daily 的真实绘制调用——逐字符必须落在子集里
     RENDER_TEMPLATES = (
         "星羽塔罗·今日牌运",

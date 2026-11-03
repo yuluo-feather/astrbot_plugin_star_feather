@@ -25,7 +25,7 @@ class LimitGate:
     """限流闸门：供命令入口与工具入口共用。
 
     kv_store 须提供 get_kv_data/put_kv_data（插件实例自身即可）；
-    cmd_rate_limit / daily_count_limit 来自 TarotSettings 解析结果；
+    cmd_rate_limit / daily_count_limit 来自 Settings 解析结果；
     clock 给日期边界（每日计数跨天重置）用，不传则跟随本地时区自建一份。
     """
 

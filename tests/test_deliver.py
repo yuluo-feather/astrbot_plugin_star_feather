@@ -183,8 +183,8 @@ class TestForwardPlatformFallback:
 
 
 def _plain_text(formation, positions, picks):
-    """仿 tarot_core._render_text 的逐牌牌义兜底文案（回归用例用）。
-    用 tarot_data.meaning_text 渲染（与生产路径同源，防两根线走偏）。"""
+    """仿 core.draw.render_text 的逐牌牌义兜底文案（回归用例用）。
+    用 core.tarot_data.meaning_text 渲染（与生产路径同源，防两根线走偏）。"""
     NL = chr(10)
     lines = [f"🔮 牌阵：{formation}"]
     for i, (pos, pick) in enumerate(zip(positions, picks), 1):

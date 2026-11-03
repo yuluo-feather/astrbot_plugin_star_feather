@@ -367,7 +367,7 @@ def test_poster_render_failure_returns_none(monkeypatch, outcome):
 
 
 def test_poster_render_success_is_scheduled_for_cleanup(monkeypatch):
-    """对照组：成功路径要真的登记清理；延迟由 card_render 的统一保险丝给。"""
+    """对照组：成功路径要真的登记清理；延迟由 render/store.py 的统一保险丝给。"""
     from data.plugins.astrbot_plugin_star_feather.adapters.clock import Clock
     from data.plugins.astrbot_plugin_star_feather.services import render as render_mod
     from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
@@ -698,7 +698,7 @@ class TestRenderAfterBothAI:
 #
 # 【这里为什么不再有「取本代模块」的机关】2026-10-12 之前，main.py 顶部会把
 # 子模块从 sys.modules 里 pop 掉再导入（重载防御），于是同一个文件在进程里可能有两份
-# 身份：「先 import tarot_core、再 import main」拿到的是旧一代副本，补丁打在旧那份上
+# 身份：「先 import 旧版平铺模块、再 import main」拿到的是旧一代副本，补丁打在旧那份上
 # ——静默打空、用例假绿（本羽第一版就栽在这里）。现在插件模块只有包名一个身份，谁先
 # 导入都是同一份，机关连同它的注释一起退役。
 
@@ -710,9 +710,9 @@ _gone_evt = _entry_evt
 
 
 def _live_modules():
-    """返回（StarFeatherPlugin, services.render, card_render, daily）——同一份模块对象。
+    """返回（StarFeatherPlugin, services.render, render.store, services.daily）——同一份模块对象。
 
-    插件内模块之间是包内相对导入，一条链上只有一个 services.render、一个 card_render，
+    插件内模块之间是包内相对导入，一条链上只有一个 services.render、一个 render.store，
     按包路径直接 import 即得。末尾留一条同源自检：补丁打空会变成永远绿的假证据。
     """
     from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
