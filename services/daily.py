@@ -6,6 +6,7 @@
   KV 缓存异常也不丢固定（缓存只做加速与解读复用）。
 - 一个用户一条 DailyRecord（schema 2），牌、解读分桶与牌灵的话共用同一个日期边界。
 - KV 读写全部 try-except 静默降级：任何存储故障不阻塞占卜主流程。
+- 缓存结构与三条写回保护的来历见 docs/design-notes/daily-cache.md。
 
 说人话：今天这张牌，本羽说了算——问一百遍也是它，别想改命。
 """
@@ -34,13 +35,9 @@ from .singleflight import SingleFlight
 _SPIRIT_FLIGHT = SingleFlight()
 _INTERP_FLIGHT = SingleFlight()
 
-# 进程级写锁：同一代模块内所有 DailyFortune 共用；热重载会重建模块，
-# 新旧两代各持一把锁、互不相识——两侧并发写同一份 KV 时并不互保。
-# 各自持锁时，两个主题的「读—合并—写」会互相覆盖；锁按事件循环隔离，
-# 避免测试里 asyncio.run 新建循环时撞上绑定旧循环的锁。
-# 键用弱引用：未争用的锁不碰循环，循环对象被回收后条目自动消失。
-# 但锁一旦因争用绑定到循环（lock → loop），弱键就回收不掉；所以取锁时再清一遍
-# 已关闭循环的条目，保证反复 asyncio.run 的争用场景也不会累积。
+# 进程级写锁：同一代模块内所有 DailyFortune 共用，保护单键记录的「读—合并—写」；
+# 热重载会重建模块，新旧两代互不共享。锁按事件循环隔离、键用弱引用，
+# 取锁时清理已关闭循环的条目。边界与来历见 docs/design-notes/concurrency-and-locks.md。
 _KV_LOCKS: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
     weakref.WeakKeyDictionary())
 _KV_LOCKS_GUARD = threading.Lock()

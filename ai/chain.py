@@ -2,6 +2,7 @@
 
 输入侧安全（越狱剥除 / 截断）在 ai/hardening.py，输出侧结构校验与解析在 ai/parse.py，
 提示词与格式协议在 ai/prompts.py；本模块只做模型调用本身。
+候选链顺序、冷却与预算的取舍见 docs/design-notes/ai-chain-and-budget.md。
 
 说人话：牌抽好了，怎么让 AI 好好讲话，这里管——但它的嘴要听话，由 hardening 管。
 """

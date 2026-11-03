@@ -17,12 +17,9 @@ MAX_QUESTION_LEN = DEFAULT_QUESTION_MAX_LEN
 
 
 # ---- 输入归一化（清洗链路第一步）----
-# 目的：让越狱句式的绕过手段（全角字符 / 零宽分隔 / bidi 控制符）在正则之前先失效，
-# 之后 _INJECTION_PATTERNS 只需写标准形即可命中，规则数不增而覆盖变宽。
-# 红线（2026-08-29 技能规范）：
-# 1) 不转全角标点——中文问题里的“，。？！”是正常标点，转了反而污染原文；
-#    只转全角字母/数字（ＡＢＣ → ABC），英文注入才吃这套。
-# 2) 保留 ZWJ/ZWNJ（U+200C/U+200D）——它们是 emoji 序列的粘合剂，剥离会拆碎正常 emoji。
+# 让全角 / 零宽 / bidi 绕过在正则之前失效，规则只需写标准形。
+# 红线：不转全角标点（中文标点是正常内容）；保留 ZWJ/ZWNJ（emoji 粘合剂）。
+# 取舍与实测见 docs/design-notes/prompt-hardening.md。
 _FULLWIDTH_ALNUM = {0xFF10 + i: chr(0x30 + i) for i in range(10)}
 _FULLWIDTH_ALNUM.update({0xFF21 + i: chr(0x41 + i) for i in range(26)})
 _FULLWIDTH_ALNUM.update({0xFF41 + i: chr(0x61 + i) for i in range(26)})

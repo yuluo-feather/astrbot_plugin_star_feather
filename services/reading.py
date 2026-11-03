@@ -7,6 +7,8 @@
 两条出口纪律原样保留：
 - 装饰性产出失败不陪葬整卦（牌灵的话坏了退池内句，解读坏了退本地牌义）；
 - 图片问题绝不带走消息（渲染失败/发送前核验失败都降级为无图）。
+
+日期为什么只取一次见 docs/design-notes/date-context.md。
 """
 import asyncio
 import random
