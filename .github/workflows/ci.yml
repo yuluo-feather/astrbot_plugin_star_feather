@@ -275,7 +275,9 @@ jobs:
     permissions:
       contents: write
     concurrency:
-      group: release
+      # 按 commit 分组：固定组只保留一个排队作业，后来的版本升级会把排队中的替换掉。
+      # 不同版本的发布互不依赖；同一版本的并发创建由发布步骤的兜底处理。
+      group: release-${{ github.sha }}
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v7
@@ -349,6 +351,9 @@ jobs:
             if [ "$RELEASE_DRAFT" = "true" ]; then
               gh release edit "v$VERSION" --repo "$GITHUB_REPOSITORY" --draft=false
             fi
-          else
-            gh release create "v$VERSION" "$zip" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "v$VERSION" --notes-file "changelogs/v$VERSION.md"
+          elif ! gh release create "v$VERSION" "$zip" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "v$VERSION" --notes-file "changelogs/v$VERSION.md"; then
+            # 两个运行可能同时看到「Release 不存在」：另一个刚建好时改为补齐资产并发布
+            echo "::warning::Release 创建失败，按并发已存在处理：补齐资产并发布"
+            gh release upload "v$VERSION" "$zip" --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "v$VERSION" --repo "$GITHUB_REPOSITORY" --draft=false
           fi
