@@ -192,10 +192,16 @@ jobs:
   smoke:
     name: 真框架启动冒烟（手动）
     # 这一格买的是单测桩买不到的东西：metadata 解析、目录扫描、真实 import、
-    # @register 与 initialize 钩子是否仍被框架调用。只在手动触发时跑，
-    # 不进 PR 的必拦路径（真装框架 + 冷启动要几分钟）。
+    # @register 与 initialize 钩子是否仍被框架调用；横幅出现后再经 WebChat
+    # 通道发一条 /占卜，验证命令链与发送。只在手动触发时跑，不进 PR 的必拦路径。
+    # Windows 是 AstrBot 的主场（冷启动与路径语义）；Linux 那格负责优雅退出：
+    # Windows 没有 SIGINT 语义，只能硬杀，core 的 terminate 钩子走不到。
     if: github.event_name == 'workflow_dispatch'
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
