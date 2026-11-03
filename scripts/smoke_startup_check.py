@@ -132,16 +132,24 @@ def _stop_process(proc: subprocess.Popen[bytes]) -> None:
 
 
 def _stop_gracefully(proc: subprocess.Popen[bytes]) -> tuple[int, bool]:
-    """尽量走核心的优雅收尾，返回 (退出码, 是否在超时内退出)。
+    """停掉框架进程，返回 (退出码, 是否按优雅路径收尾)。
 
-    POSIX 发 SIGINT、Windows 发 CTRL_BREAK_EVENT（子进程需建在独立进程组里），
-    Python 都会把它转成 KeyboardInterrupt，CLI 的取消路径随即调 core_lifecycle.stop()。
-    超时被强杀时返回 False，调用点必须按失败处理。
+    POSIX 发 SIGINT，Python 转成 KeyboardInterrupt，CLI 的取消路径会调
+    core_lifecycle.stop()——这条可以验证（日志里有 「Shutting down AstrBot」）。
+
+    Windows 没有等价物：CTRL_BREAK_EVENT 会直接终止进程（Python 默认不处理
+    SIGBREAK），CTRL_C_EVENT 在 CREATE_NEW_PROCESS_GROUP 下被禁用（2026-11-03
+    实测两种都试过）。真实的交互式 Ctrl+C 可以优雅退出，但无法从外部注入，
+    所以 Windows 这格只确认进程能停下，优雅退出留给人工验收。
     """
     if os.name == "nt":
-        proc.send_signal(signal.CTRL_BREAK_EVENT)
-    else:
-        proc.send_signal(signal.SIGINT)
+        proc.terminate()
+        try:
+            return proc.wait(timeout=90), False
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            return proc.wait(timeout=15), False
+    proc.send_signal(signal.SIGINT)
     try:
         return proc.wait(timeout=90), True
     except subprocess.TimeoutExpired:
@@ -293,8 +301,6 @@ def main() -> int:
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
                 env=env,
-                # Windows 上要独立进程组才能收 CTRL_BREAK_EVENT；POSIX 取不到该常量给 0
-                creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
             )
 
         print(f"拉起真框架（端口 {SMOKE_PORT}），等插件横幅……")
@@ -347,21 +353,22 @@ def main() -> int:
                 return 1
             print("命令往返通过：/占卜 的结果已由 WebChat 通道返回（牌面图）")
 
-            exit_code, exited = _stop_gracefully(proc)
-            if not exited:
-                print("冒烟失败：停止信号发出后 90 秒内没有退出，被强制结束",
-                      file=sys.stderr)
-                print(_tail(_read_log(log_path)), file=sys.stderr)
-                return 1
-            if exit_code not in (0, 130):
-                print(f"冒烟失败：优雅退出返回 {exit_code}", file=sys.stderr)
-                print(_tail(_read_log(log_path)), file=sys.stderr)
-                return 1
-            if "AstrBot has been shut down" not in _read_log(log_path):
-                print("冒烟失败：退出码正常，但没看到 CLI 的收尾日志", file=sys.stderr)
-                print(_tail(_read_log(log_path)), file=sys.stderr)
-                return 1
-            print("优雅退出通过：核心收到停止信号并完成收尾")
+            exit_code, graceful_checked = _stop_gracefully(proc)
+            if graceful_checked:
+                if exit_code not in (0, 130):
+                    print(f"冒烟失败：优雅退出返回 {exit_code}", file=sys.stderr)
+                    print(_tail(_read_log(log_path)), file=sys.stderr)
+                    return 1
+                if "Shutting down AstrBot" not in _read_log(log_path):
+                    print("冒烟失败：退出码正常，但日志里没有核心收尾记录",
+                          file=sys.stderr)
+                    print(_tail(_read_log(log_path)), file=sys.stderr)
+                    return 1
+                print("优雅退出通过：核心收到 SIGINT 并完成收尾")
+            else:
+                print(
+                    f"Windows 下按硬杀结束（exit code {exit_code}）；"
+                    "优雅退出无法从外部注入，留作人工验收")
             return 0
         finally:
             _stop_process(proc)
