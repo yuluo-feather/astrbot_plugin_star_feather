@@ -38,6 +38,13 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
+# Windows CI 控制台默认是 cp1252：本脚本大量 print 中文，不显式切 UTF-8 会直接
+# UnicodeEncodeError（2026-11-03 手动冒烟第一次在 GitHub 上跑就栽在这）。
+# 子进程已经由 env["PYTHONUTF8"] 统一成 UTF-8，父进程这边也要对齐。
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 # 目标插件目录名：市场装出来的名字（框架用它推导模块名），不跟着本机目录名走
 PLUGIN_DIR_NAME = "astrbot_plugin_star_feather"
 # 端口故意错开 6185：本机跑冒烟时，真人在用的那个 AstrBot 正占着默认端口
