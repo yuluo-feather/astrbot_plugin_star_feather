@@ -3,9 +3,7 @@
 登记放 context 不放模块全局：热重载会重置模块字典，旧实例读的正是旧模块那份全局，
 永远对得上、什么都报不出来。所有诊断读写都包 try：诊断可以失效，插件加载与占卜不能。
 """
-import logging
-
-log = logging.getLogger("astrbot.plugin.astrbot_plugin_star_feather")
+from ..core.log import log
 
 ACTIVE_INSTANCE_ATTR = "_sf_active_plugin_instance"
 CFG_FIELD_NAMES = ("shuffle_lines", "enable_ai", "ai_timeout", "llm_tool_enabled")
