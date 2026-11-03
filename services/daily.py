@@ -203,11 +203,17 @@ class DailyFortune:
                 hit = record.interps.get(topic)
         if hit is not None:
             cached = interpretation_from_record(hit)
-            if cached.text.strip():
+            # 有效 = 有非空文本，且结构化记录至少有一段可发送的内容。
+            # 只判文本会让「text 非空、sections/summary 全空」的记录通过，
+            # 发送层切不出段，用户依旧收不到解读，也走不到本地牌义兜底。
+            deliverable = cached.text.strip() and (
+                not cached.structured
+                or bool(cached.summary.strip())
+                or any(seg.strip() for seg in cached.sections))
+            if deliverable:
                 return cached
             # 桶内容损坏或为空：KV 是持久化边界，外层上下文合法不代表内容有效。
-            # 当未命中重新生成，写回时覆盖该桶——否则空解读会被当成命中，
-            # 连本地牌义兜底都走不到。
+            # 当未命中重新生成，写回时覆盖该桶。
             log.warning(f"每日牌运解读缓存内容无效（{uid}），按未命中重新生成")
 
         async def generate():

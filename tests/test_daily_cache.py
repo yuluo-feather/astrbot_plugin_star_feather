@@ -1050,6 +1050,9 @@ class TestInterpRebuildKeepsPickAndSpirit:
 
 
 # ---------- 主题桶内容损坏：当未命中，不静默丢解读 ----------
+_REGENERATED_TEXT = "【第1张·你的当下】新解读。"
+
+
 class TestCorruptInterpBucket:
     """KV 是持久化边界：外层上下文合法、桶内容无效时不能当成命中。"""
 
@@ -1070,7 +1073,7 @@ class TestCorruptInterpBucket:
 
             async def interpret(self, *a, **kw):
                 self.calls += 1
-                return "【第1张·你的当下】新解读。"
+                return _REGENERATED_TEXT
 
             async def spirit_line(self, *a, **kw):
                 return "牌灵的一句话"
@@ -1097,8 +1100,32 @@ class TestCorruptInterpBucket:
 
         assert spies[0].calls == 1, "损坏的桶必须当未命中，重新生成"
         text = out.text if hasattr(out, "text") else str(out)
-        assert text.strip(), "返回的解读不应为空"
-        assert kv["sf_daily_u1"]["interps"][topic]["text"].strip(), "写回应覆盖损坏的桶"
+        assert text == _REGENERATED_TEXT, "返回的应是生成器的新解读"
+        assert kv["sf_daily_u1"]["interps"][topic]["text"] == _REGENERATED_TEXT, \
+            "写回应覆盖损坏的桶"
+
+    def test_structured_without_sections_regenerates(self):
+        """text 非空、但结构化记录没有任何可发送段：同样按未命中处理。"""
+        from data.plugins.astrbot_plugin_star_feather.core.intent import norm_topic
+
+        kv = {}
+        spies = []
+        df = self._fortune(kv, spies)
+        day = "20260827"
+        picks = asyncio.run(df.pick_cached("u1", day))[2]
+        topic = norm_topic("今天运势")
+        record = kv["sf_daily_u1"]
+        record["interps"] = {topic: {"text": "只剩文本", "sections": [],
+                                     "summary": "", "structured": True}}
+        kv["sf_daily_u1"] = record
+
+        out = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], picks,
+                                           "今天运势", today=day))
+
+        assert spies[0].calls == 1, "没有可发送段的结构化记录必须当未命中"
+        text = out.text if hasattr(out, "text") else str(out)
+        assert text == _REGENERATED_TEXT
+        assert kv["sf_daily_u1"]["interps"][topic]["text"] == _REGENERATED_TEXT
 
 
 # ---------- 二次读取失败：不许用空壳覆盖已有记录 ----------
