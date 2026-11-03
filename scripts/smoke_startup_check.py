@@ -58,8 +58,6 @@ DASHBOARD_USER = "astrbot"
 # 不去解析配置文件里的哈希。
 SMOKE_PASSWORD = "StarFeather-Smoke-1"
 DASHBOARD_BASE = f"http://127.0.0.1:{SMOKE_PORT}"
-# 命令往返的断言标记：每个占卜结果末尾都会追加这句免责声明（默认文案）。
-SMOKE_MARKER = "占卜仅供娱乐参考"
 # 真框架冷启动要建配置、扫插件、拉 t2i 模板，给足时间；红了靠日志尾巴定位
 STARTUP_TIMEOUT_SECONDS = 180
 BANNER_MARK = "星羽塔罗 v"
@@ -213,6 +211,24 @@ def _run_command(opener, token: str) -> str:
         return resp.read().decode("utf-8", "replace")
 
 
+def _has_plugin_result(sse: str) -> bool:
+    """SSE 里是否出现了插件发出的牌面图。
+
+    没有 AI Provider 时插件走图片模式：只发「洗牌提示 + 牌面图」，不带文字解读，
+    所以不能用免责声明当标记——牌面图本身就是「命令被执行且结果已发送」的证据。
+    """
+    for line in sse.splitlines():
+        if not line.startswith("data: "):
+            continue
+        try:
+            event = json.loads(line[len("data: "):])
+        except ValueError:
+            continue
+        if event.get("type") == "image" and str(event.get("data", "")).startswith("[IMAGE]"):
+            return True
+    return False
+
+
 def main() -> int:
     version = _read_declared_version()
     expected = f"{BANNER_MARK}{version}"
@@ -319,15 +335,15 @@ def main() -> int:
 
             print("登录通过，经 WebChat 通道发一条 /占卜 测试……")
             sse = _run_command(opener, token)
-            if SMOKE_MARKER not in sse:
+            if not _has_plugin_result(sse):
                 print(
-                    "冒烟失败：命令往返没有收到占卜结果（缺免责声明标记）",
+                    "冒烟失败：命令往返没有收到插件产出的牌面图",
                     file=sys.stderr,
                 )
                 print(_tail(sse, 30), file=sys.stderr)
                 print(_tail(_read_log(log_path)), file=sys.stderr)
                 return 1
-            print("命令往返通过：/占卜 的结果已由 WebChat 通道返回")
+            print("命令往返通过：/占卜 的结果已由 WebChat 通道返回（牌面图）")
 
             exit_code, exited = _stop_gracefully(proc)
             if os.name != "nt":
