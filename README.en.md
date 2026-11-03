@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-<img src="https://img.shields.io/badge/version-v0.9.0-f8a5c2" alt="v0.9.0"/>
+<img src="https://img.shields.io/badge/version-v0.9.1-f8a5c2" alt="v0.9.1"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -281,6 +281,12 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 
 ## 📜 Changelog
 
+#### v0.9.1
+
+- Fixed: rebuilding the daily record after a persona change no longer drops the card fields or the spirit cache; a changed prompt version also invalidates the old spirit line (a v0.9.0 regression)
+- Fixed: an AI queue timeout on the local concurrency gate is no longer recorded as a provider failure — the log names the local cause instead
+- Changed: design rationale now lives in `docs/design-notes/` (one file per topic); code comments keep only the rules and a pointer
+
 #### v0.9.0
 
 - Added: `/单抽` is unbound from the daily fortune — every call draws a fresh Feather Sign and generates its reading live; the new `/今日牌运` (aliases `/运势`, `/每日一签`) owns the one-fixed-card-a-day role
@@ -319,11 +325,7 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 - Changed: `ai_timeout=0` now means "no cap on a single request"; the natural-language entry explains an AI failure instead of staying silent; "today" follows the framework timezone everywhere.
 - Changed: the Pillow runtime floor is now `>=12.3.0` (10.x / 11.x still carry known CVEs); rendering behaviour is unchanged.
 
-#### v0.7.5
-
-- Fixed: all logging now goes through AstrBot's own logger, and the plugin no longer keeps a second log file under `data/logs/` — the separate `star_feather.log` is gone, while troubleshooting output still reaches AstrBot's log (the console, the WebUI log view, and `logs/astrbot.log` when file logging is enabled)
-
-> Full per-version details for v0.7.4 and earlier live in [CHANGELOG.md](CHANGELOG.md) and the `changelogs/` directory — this page keeps only the six most recent releases.
+> Full per-version details for v0.7.5 and earlier live in [CHANGELOG.md](CHANGELOG.md) and the `changelogs/` directory — this page keeps only the six most recent releases.
 
 ---
 
