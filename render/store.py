@@ -33,15 +33,11 @@ async def _delayed_remove(path: str, delay: int = IMAGE_TTL_SECONDS) -> None:
     await asyncio.sleep(delay)
     try:
         os.remove(path)
-    except OSError:
+    except FileNotFoundError:
         pass  # 已被启动清理/其他路径处理，无需管
-    # 退路目录不在 IMAGE_DIR_ROOT 下，启动清理扫不到：图删完后顺手收掉空目录
-    parent = os.path.dirname(path)
-    if os.path.basename(parent).startswith("star_feather_inst_"):
-        try:
-            os.rmdir(parent)
-        except OSError:
-            pass  # 还有别的图 / 已被处理：留着
+    except OSError as e:
+        # 删不掉（例如文件被别的进程占着）就说出来：退路目录由启动清理回收
+        logger.warning(f"临时图片删除失败（{path}），留待启动清理: {e}")
 
 
 # 清理任务的强引用集合：asyncio 只对任务持弱引用，没人引用时任务可能被 GC 掉，
@@ -160,8 +156,8 @@ def _private_fallback_dir() -> str:
 
     为什么不用 `tempfile.gettempdir()` 或共享的 `IMAGE_DIR_ROOT`：那两个都是「共用
     一份」，新实例一写就把别的实例的图搅在一起（①的原始病灶）。退路也必须是每实例
-    一份，哪怕它落在根目录之外。它不在 IMAGE_DIR_ROOT 之下，启动清理扫不到，清理
-    靠 600 秒保险丝。
+    一份，哪怕它落在根目录之外。它不在 IMAGE_DIR_ROOT 之下，由启动清理单独扫
+    临时目录回收（见 _sweep_fallback_dirs）；图本身仍靠 600 秒保险丝。
 
     连这个都建不出来＝磁盘/权限已经彻底不可用，返回空串让渲染安全降级为无图
     （调用方与渲染器都容得下空路径）：此时「隔离」让位于「别再把整条消息带走」。
@@ -171,6 +167,41 @@ def _private_fallback_dir() -> str:
     except OSError as e:
         logger.warning(f"实例图片目录的临时退路也不可用（{e}）：本实例图片输出降级为无图")
         return ""
+
+
+_FALLBACK_DIR_PREFIX = "star_feather_inst_"
+
+
+def _sweep_fallback_dirs(current_dir: str | None = None) -> int:
+    """回收系统临时目录下的过期退路实例目录（不在 IMAGE_DIR_ROOT 之下）。
+
+    退路目录只在正常图片根不可用时产生，启动清理的主循环扫不到；它们同样按
+    STALE_INSTANCE_DIR_AGE 判定——三天没写过，图早过了 600 秒发送窗口，整目录回收。
+    本进程当前目录永不删；返回回收数量。
+    """
+    root = tempfile.gettempdir()
+    try:
+        names = os.listdir(root)
+    except OSError as e:
+        logger.warning(f"临时目录枚举失败，跳过退路目录清理: {e}")
+        return 0
+    reaped = 0
+    for name in names:
+        if not name.startswith(_FALLBACK_DIR_PREFIX):
+            continue
+        path = os.path.join(root, name)
+        try:
+            if not os.path.isdir(path):
+                continue
+            if current_dir and os.path.abspath(path) == os.path.abspath(current_dir):
+                continue
+            if not _is_stale(path, STALE_INSTANCE_DIR_AGE):
+                continue
+            shutil.rmtree(path, ignore_errors=True)
+            reaped += 1
+        except OSError as e:
+            logger.warning(f"退路图片目录清理失败（{path}）: {e}")
+    return reaped
 
 
 def _is_stale(path: str, max_age: int) -> bool:
@@ -206,6 +237,7 @@ def cleanup_stale_images(current_dir: str | None = None) -> None:
     契约：本函数永不抛（启动清理失败不该挡住插件加载），失败只留 warning。
     """
     if not os.path.isdir(IMAGE_DIR_ROOT):
+        _sweep_fallback_dirs(current_dir)
         return
     try:
         entries = os.listdir(IMAGE_DIR_ROOT)
@@ -245,6 +277,7 @@ def cleanup_stale_images(current_dir: str | None = None) -> None:
                     reaped += 1
         except OSError as e:
             logger.warning(f"清理残留图片/目录失败（{path}）: {e}")
+    reaped += _sweep_fallback_dirs(current_dir)
     if reaped:
         logger.info(f"启动清理：回收了 {reaped} 个过期实例图片目录")
 

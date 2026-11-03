@@ -178,16 +178,36 @@ class TestTempCleanup:
         # 文件已被处理：删除不存在的文件不抛异常
         asyncio.run(render_store._delayed_remove("C:/not/exist/tarot_x.png", 0))
 
-    def test_fallback_dir_is_removed_with_the_last_image(self):
-        """退路目录不在 IMAGE_DIR_ROOT 下，启动清理扫不到，图片删完要顺手收掉。"""
+    def test_fallback_dir_survives_file_cleanup(self):
+        """删图任务不拆目录：并发渲染时拆掉目录会让保存落到已消失的路径。
+
+        退路目录改由启动清理按年龄统一回收（见下一条）。
+        """
         import tempfile
         d = tempfile.mkdtemp(prefix=f"star_feather_inst_{os.getpid()}_")
-        p = os.path.join(d, "tarot_test.png")
-        with open(p, "wb") as f:
-            f.write(b"x")
-        asyncio.run(render_store._delayed_remove(p, 0))
-        assert not os.path.exists(p)
-        assert not os.path.isdir(d)
+        try:
+            p = os.path.join(d, "tarot_test.png")
+            with open(p, "wb") as f:
+                f.write(b"x")
+            asyncio.run(render_store._delayed_remove(p, 0))
+            assert not os.path.exists(p)
+            assert os.path.isdir(d)
+        finally:
+            os.rmdir(d)
+
+    def test_stale_fallback_dir_is_reaped_at_startup(self, tmp_path, monkeypatch):
+        """退路目录不在 IMAGE_DIR_ROOT 下：启动清理单独扫临时目录，过期才收。"""
+        old = tmp_path / "star_feather_inst_99999_old"
+        old.mkdir()
+        (old / "tarot_x.png").write_bytes(b"x")
+        stamp = time.time() - render_store.STALE_INSTANCE_DIR_AGE - 60
+        os.utime(old, (stamp, stamp))
+        fresh = tmp_path / "star_feather_inst_99999_new"
+        fresh.mkdir()
+        monkeypatch.setattr(render_store.tempfile, "gettempdir", lambda: str(tmp_path))
+        render_store.cleanup_stale_images()
+        assert not old.exists()
+        assert fresh.is_dir()
 
     def test_normal_instance_dir_is_kept(self, tmp_path):
         """普通实例目录可能还有别的图，只删文件，不删目录。"""
