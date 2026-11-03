@@ -13,6 +13,7 @@ import asyncio
 import hashlib
 import random
 import threading
+import weakref
 
 from ..adapters.clock import Clock
 from ..adapters.kv_utils import kv_delete, kv_get, kv_put
@@ -35,21 +36,21 @@ _INTERP_FLIGHT = SingleFlight()
 # 进程级写锁：同一进程内所有 DailyFortune 共用（热重载时新旧实例并存）。
 # 各自持锁时，两个主题的「读—合并—写」会互相覆盖；锁按事件循环隔离，
 # 避免测试里 asyncio.run 新建循环时撞上绑定旧循环的锁。
-_KV_LOCKS: dict[int, tuple[asyncio.AbstractEventLoop, asyncio.Lock]] = {}
+# 键用弱引用：循环对象被回收后条目自动消失，不依赖下一次取锁来清。
+# （锁若因争用绑定到循环，会与循环互相持有——那是锁自身的生命周期。）
+_KV_LOCKS: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
+    weakref.WeakKeyDictionary())
 _KV_LOCKS_GUARD = threading.Lock()
 
 
 def _shared_kv_lock() -> asyncio.Lock:
     loop = asyncio.get_running_loop()
     with _KV_LOCKS_GUARD:
-        # 顺手回收已关闭的循环：诊断脚本反复 asyncio.run 时注册表不会只增不减
-        for key in [k for k, (lp, _lock) in _KV_LOCKS.items() if lp.is_closed()]:
-            _KV_LOCKS.pop(key, None)
-        rec = _KV_LOCKS.get(id(loop))
-        if rec is None or rec[0] is not loop:
-            rec = (loop, asyncio.Lock())
-            _KV_LOCKS[id(loop)] = rec
-        return rec[1]
+        lock = _KV_LOCKS.get(loop)
+        if lock is None:
+            lock = asyncio.Lock()
+            _KV_LOCKS[loop] = lock
+        return lock
 
 # 提示词版本合成一个指纹：读数或牌灵提示词任一改版，当天缓存都失效。
 _PROMPT_V = f"{READING_PROMPT_V}/{SPIRIT_PROMPT_V}"

@@ -1131,8 +1131,10 @@ class TestLegacySpiritCleanupRetry:
 
 # ---------- 共享写锁的注册表：关闭的循环要回收 ----------
 class TestSharedKvLockRegistry:
-    def test_closed_loop_entries_are_reaped(self):
-        """诊断脚本反复 asyncio.run：上一个循环关掉后，条目不能一直留着。"""
+    def test_closed_loop_entries_are_reaped_without_another_call(self):
+        """弱引用键：循环对象被回收后条目自动消失，不依赖下一次取锁来清。"""
+        import gc
+
         from data.plugins.astrbot_plugin_star_feather.services import daily
         daily._KV_LOCKS.clear()
 
@@ -1140,15 +1142,16 @@ class TestSharedKvLockRegistry:
             return daily._shared_kv_lock()
 
         asyncio.run(go())
-        asyncio.run(go())
-        assert len(daily._KV_LOCKS) == 1
+        gc.collect()
+        assert len(daily._KV_LOCKS) == 0
 
     def test_same_loop_reuses_the_lock(self):
         from data.plugins.astrbot_plugin_star_feather.services import daily
         daily._KV_LOCKS.clear()
 
         async def go():
-            return daily._shared_kv_lock() is daily._shared_kv_lock()
+            same = daily._shared_kv_lock() is daily._shared_kv_lock()
+            return same, len(daily._KV_LOCKS)
 
-        assert asyncio.run(go()) is True
-        assert len(daily._KV_LOCKS) == 1
+        same, count = asyncio.run(go())
+        assert same is True and count == 1
