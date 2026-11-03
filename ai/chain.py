@@ -481,6 +481,7 @@ class AiInterpreter:
         system_prompt = build_system_prompt(eff)
         got_text = False  # 是否至少有一个候选产出了文本（区分“服务失败”与“结构失格”）
         tried = 0
+        queued = 0  # 因本地并发闸排队超时退出的候选数：本地资源不足，不算 Provider 失败
         for provider in await self._gather_candidates(umo, bd, _STAGE_INTERPRET):
             pid = self._provider_id(provider)
             if self._in_cooldown(pid):
@@ -495,6 +496,7 @@ class AiInterpreter:
             tried += 1
             text = await self._chat_once(provider, prompt, system_prompt, timeout)
             if text is QUEUE_TIMEOUT:
+                queued += 1
                 continue
             if not isinstance(text, str) or not text:
                 self._mark_fail(pid)  # 服务级失败：只冷却这个 provider
@@ -513,7 +515,14 @@ class AiInterpreter:
             logger.info("AI 解读没有可用候选（来源不可用或全部处于失败冷却期），直接使用本地牌义")
             return None
         if not got_text:
-            logger.warning("所有可用提供商均未产出 AI 解读（已按 provider 记录失败冷却）")
+            if queued == tried:
+                logger.warning("所有候选均因本地并发闸排队超时而未产出 AI 解读"
+                               "（本地资源不足，未记 Provider 失败冷却）")
+            elif queued:
+                logger.warning(f"所有可用提供商均未产出 AI 解读（{queued} 个候选本地排队超时、"
+                               "未记 Provider 冷却，其余已按 provider 记录失败冷却）")
+            else:
+                logger.warning("所有可用提供商均未产出 AI 解读（已按 provider 记录失败冷却）")
         else:
             logger.warning("所有候选均产出但结构失格，回退本地牌义（不进入失败冷却）")
         return None

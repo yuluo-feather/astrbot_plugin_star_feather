@@ -85,3 +85,12 @@ class Clock:
         """海报卡面上的日期文本：「8月27日·周四」（月日不补零，与旧卡面一致）。"""
         n = self.now()
         return f"{n.month}月{n.day}日·周{_WEEKDAY_CN[n.weekday()]}"
+
+    def snapshot(self) -> tuple[str, str]:
+        """同一时刻的 (日期键, 卡面日期文本)。
+
+        一次占卜只取一次时钟：分两次读的话，恰好压在零点那一刻会把日期键和卡面
+        日期分到两天去。
+        """
+        n = self.now()
+        return n.strftime("%Y%m%d"), f"{n.month}月{n.day}日·周{_WEEKDAY_CN[n.weekday()]}"

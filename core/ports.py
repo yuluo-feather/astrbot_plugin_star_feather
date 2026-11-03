@@ -8,11 +8,13 @@ from typing import Any, Protocol, runtime_checkable
 
 @runtime_checkable
 class Clock(Protocol):
-    """日期边界：today() 给键，date_text() 给海报卡面。"""
+    """日期边界：today() 给键，date_text() 给海报卡面，snapshot() 一次取两者。"""
 
     def today(self) -> str: ...
 
     def date_text(self) -> str: ...
+
+    def snapshot(self) -> tuple[str, str]: ...
 
 
 @runtime_checkable

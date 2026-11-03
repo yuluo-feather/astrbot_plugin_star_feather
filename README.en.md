@@ -20,16 +20,16 @@
 
 ## 📖 Table of Contents
 
-- 🌸 [Features](#features)
-- 🃏 [Commands](#commands)
-- 🪶 [Spreads](#spreads)
-- ⚙️ [How It Works](#how-it-works)
-- 🎛️ [Configuration](#configuration)
-- 📦 [Installation](#installation)
-- 🤍 [Technical Details](#technical-details)
-- 📜 [Changelog](#changelog)
-- 🌙 [Notes](#notes)
-- ⭐ [Support & Thanks](#support--thanks)
+- 🌸 [Features](#-features)
+- 🃏 [Commands](#-commands)
+- 🪶 [Spreads](#-spreads)
+- ⚙️ [How It Works](#️-how-it-works)
+- 🎛️ [Configuration](#️-configuration)
+- 📦 [Installation](#-installation)
+- 🤍 [Technical Details](#-technical-details)
+- 📜 [Changelog](#-changelog)
+- 🌙 [Notes](#-notes)
+- ⭐ [Support & Thanks](#-support--thanks)
 
 ---
 
@@ -54,7 +54,7 @@
 | 🎴 Reading | `/占卜 [question]` | Reads the question, picks the spread, draws the cards and sends the art. Fortune words (运势 / 运气 …) route to the fixed daily reading instead — except event-attribution asks such as "is it because my luck is bad?", which get a free draw. |
 | 🃏 Quick draw | `/单抽 [question]` | Draws one Feather Sign card, **fresh every time** — not fixed per day, and the reading is generated live with no cache. |
 | 🗓️ Daily fortune | `/今日牌运 [topic]` | Today's fixed card and reading, reset at midnight; asking again the same day changes nothing. Aliases: `/运势`, `/每日一签`. Renders the poster card (art, date, the spirit's line, sign-off). |
-| ❓ Help | `/占卜 帮助` / `/占卜 help` | Show usage. |
+| ❓ Help | `/占卜 帮助` / `/单抽 帮助` / `/今日牌运 帮助` | Show usage (`help` works too). |
 
 > 💡 **How to trigger it**: in private chat, `占卜 问题` is enough (`/占卜 问题` works as well). In a group, @ the bot. Set a wake word under WebUI → Settings → Wake Words and `wake-word 占卜 问题` will do it. In a group, bare text with neither a wake word nor an @ stays quiet — the framework owns the gate; reading the cards is my job.
 
@@ -93,15 +93,15 @@ What happens: the keyword match picks Lovers' Feather Cross → shuffle hint →
 ## ⚙️ How It Works
 
 Here is what happens between your question and the finished reading. Know the path and troubleshooting gets easy.
-> Module names in brackets point to where each step lives (see [Technical Details](#technical-details)) — this section is the flow, those are the files.
+> Module names in brackets point to where each step lives (see [Technical Details](#-technical-details)) — this section is the flow, those are the files.
 
 ```
 User request (any one of three entry points)【main.py orchestration】
    │
-   ├─ ① Command entry: 占卜 [question] or /占卜 [question]
+   ├─ Command entry: 占卜 [question] or /占卜 [question]
    │     └─ The framework owns the gate (wake word / @ the bot / private chat); the command filter must match first
    │
-   └─ ② Natural-language entry: ask in chat, e.g. "帮我算一卦" (llm_tool, switchable)
+   └─ Natural-language entry: ask in chat, e.g. "帮我算一卦" (llm_tool, switchable)
          └─ The tool description only fires on an explicit request, so complaints and small talk don't trigger it
    │
    ▼
@@ -142,7 +142,7 @@ User request (any one of three entry points)【main.py orchestration】
    │           ├─ The question is cleaned first: clipped to 200 characters (head and tail kept) + injection phrases stripped (hardening)
    │           ├─ Shares one AI budget with the spirit's line (ai_budget_seconds, 120s by default); the deadline is never reset between stages
    │           └─ All providers failed → built-in meanings (+ a 60s cooldown, so nothing waits in vain)
-   ├─ ② Render the card art (deliberately *after* both AI stages, just before sending): the 幻星集 card art, upright or
+   ├─ Render the card art (deliberately *after* both AI stages, just before sending): the 幻星集 card art, upright or
    │  reversed (thread pool; one 600s fuse recycles every temp image, and startup recycles stale instance dirs).
    │  A collage background is built from one card picked at random out of *this* reading — cover-fill plus a
    │  deep-navy overlay — and the daily reading get their own poster card (art, date, the day's line from
@@ -251,10 +251,12 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 
 ## 🤍 Technical Details
 
-- **Code structure (layered, one-way dependencies)**: entry `main.py` (≤150 lines, only registers commands/tools) → `app/` (`container.py` wiring, `handlers.py` three entries, `diagnostics.py` config freshness); orchestration `services/` (`reading.py` reading pipeline, `render.py` rendering & image lifecycle, `daily.py` daily cache, `gating.py` rate-limit gate, `daily_store.py` single-key record, `singleflight.py` same-key dedup); pure logic `core/` (`models.py` / `draw.py` / `ports.py` / `intent.py` / `identity.py` / `limiter.py` / `spreads.py` / `dailylines.py` / `tarot_data.py` / `texts.py` / `config.py` / `settings.py`, no astrbot import); adapters `adapters/` (`astrbot_io.py` KV & messages, `presenter.py` ordered delivery, `deliver.py` segmentation, `clock.py` date boundary, `kv_utils.py` KV primitives); AI layer `ai/` (`chain.py` candidate chain, `budget.py` budget, `prompts.py` / `persona.py` / `parse.py` / `hardening.py`); rendering implementation `render/` (layout / assets / draw / store / fonts) — each module has a one-line responsibility, pure logic independently testable
-- **Module layering (one-way dependencies, no cycles)**:
-  - Entry layer: `main.py` (registers commands/tools) → `app/` (wiring, three entries, diagnostics)
-  - Orchestration layer: `services/` (`reading` / `render` / `daily` / `gating`); adapters: `adapters/` (`astrbot_io` / `presenter` / `deliver` / `clock` / `kv_utils`); AI layer: `ai/` (`chain` / `budget` / `prompts` / `persona` / `parse` / `hardening`); rendering implementation: `render/` (`layout` / `assets` / `draw` / `store` / `fonts`)
+- **Code structure (layered, one-way dependencies, no cycles; one line of responsibility per module, pure logic independently testable)**:
+  - Entry layer: `main.py` (≤150 lines, only registers commands/tools) → `app/` (`container.py` wiring, `handlers.py` three entries, `diagnostics.py` config freshness)
+  - Orchestration layer: `services/` (`reading.py` reading pipeline, `render.py` rendering & image lifecycle, `daily.py` daily cache, `gating.py` rate-limit gate, `daily_store.py` single-key record, `singleflight.py` same-key dedup)
+  - Adapters: `adapters/` (`astrbot_io.py` KV & messages, `presenter.py` ordered delivery, `deliver.py` segmentation, `clock.py` date boundary, `kv_utils.py` KV primitives)
+  - AI layer: `ai/` (`chain.py` candidate chain, `budget.py` budget, `prompts.py` / `persona.py` / `parse.py` / `hardening.py`)
+  - Rendering implementation: `render/` (`layout` / `assets` / `draw` / `store` / `fonts`)
   - Pure logic layer: `core/` (`models` / `draw` / `ports` / `intent` / `identity` / `limiter` / `spreads` / `dailylines` / `tarot_data` / `texts` / `config` / `settings`, no astrbot import; the test is "can it be unit-tested")
 - **Design principles (the three rules I set for myself)**: (1) A failure anywhere — storage, rendering or model — never blocks the reading: `adapters/kv_utils` swallows the exception, rendering falls back to text, the AI falls back to the built-in meanings. (2) Deterministic by default — the same person on the same day gets the same card, the same reading and the same daily line; the surprise belongs to the persona's tone, not to the draw. (3) The reading format protocol (【第N张·位置】 markers) has one source of truth in `ai/prompts`, and `adapters/deliver` splits on exactly the regex `ai/hardening` validates.
 - The card database lives inside `core/tarot_data.py`; the art lives in `assets/` — 78 faces (plus the unused card-back asset at `Extra/背景.png`, kept in the pack), stored as WebP with a .png fallback in the loader. The renderer currently uses the reading's own card art as the background and does not read the card back.

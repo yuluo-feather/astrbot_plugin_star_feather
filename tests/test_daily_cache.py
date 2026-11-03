@@ -956,6 +956,37 @@ class TestSpiritDoesNotRewriteDailyCard:
         assert kv["sf_daily_u1"]["card_id"] == daily_card_id
 
 
+# ---------- 旧日期快照：不许把新一天的记录写回成旧日期 ----------
+class TestOlderSnapshotDoesNotRollBack:
+    """跨午夜回归：持前一天快照的请求晚到时，不得覆盖已经写入的新一天记录。"""
+
+    @staticmethod
+    def _fortune(kv):
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
+
+        class _Ctx:
+            async def get_kv_data(self, key, default=None):
+                return kv.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                kv[key] = value
+
+        return DailyFortune(_Ctx())
+
+    def test_older_snapshot_keeps_the_newer_record(self):
+        newer_card = TAROT_CARDS[0]
+        kv = {"sf_daily_u1": _rec(date="20260828", card_id=newer_card["id"],
+                                  upright=True, interps={"主题": "新一天的解读"},
+                                  spirit_line="新一天的牌灵", spirit_sign="x")}
+        before = json.loads(json.dumps(kv, ensure_ascii=False))
+
+        _f, _p, picks = asyncio.run(self._fortune(kv).pick_cached("u1", "20260827"))
+
+        card, upright = _daily_pick("u1", "20260827")
+        assert (picks[0]["card"]["id"], picks[0]["upright"]) == (card["id"], upright)
+        assert kv == before, "旧日期快照不得把新一天的牌面、解读与牌灵写回成旧日期"
+
+
 # ---------- 二次读取失败：不许用空壳覆盖已有记录 ----------
 class TestSecondReadFailureKeepsRecord:
     """初次读到旧记录、生成成功、写回前二次读失败：本次照常返回，但不写回。

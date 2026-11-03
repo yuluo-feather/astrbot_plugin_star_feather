@@ -493,7 +493,7 @@ class TestEndToEndDeliveryUnderSpentBudget:
                 open(path, "wb").write(b"PNG")
                 return path
 
-            async def daily_card(self, picks, uid, clock):
+            async def daily_card(self, picks, uid, today, date_text):
                 return None
 
             async def ensure_image(self, img, formation, positions, picks):
