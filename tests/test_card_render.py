@@ -209,6 +209,21 @@ class TestTempCleanup:
         assert not old.exists()
         assert fresh.is_dir()
 
+    def test_same_process_fallback_dirs_only_lose_empty_shells(self, tmp_path, monkeypatch):
+        """热重载时同进程旧实例可能还在发送：非空目录留着，空壳才回收。"""
+        stamp = time.time() - render_store.STALE_INSTANCE_DIR_AGE - 60
+        busy = tmp_path / f"star_feather_inst_{os.getpid()}_busy"
+        busy.mkdir()
+        (busy / "tarot_x.png").write_bytes(b"x")
+        os.utime(busy, (stamp, stamp))
+        empty = tmp_path / f"star_feather_inst_{os.getpid()}_empty"
+        empty.mkdir()
+        os.utime(empty, (stamp, stamp))
+        monkeypatch.setattr(render_store.tempfile, "gettempdir", lambda: str(tmp_path))
+        render_store.cleanup_stale_images()
+        assert busy.is_dir() and (busy / "tarot_x.png").exists()
+        assert not empty.exists()
+
     def test_normal_instance_dir_is_kept(self, tmp_path):
         """普通实例目录可能还有别的图，只删文件，不删目录。"""
         f = tmp_path / "tarot_test.png"

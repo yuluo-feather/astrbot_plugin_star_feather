@@ -170,14 +170,16 @@ def _private_fallback_dir() -> str:
 
 
 _FALLBACK_DIR_PREFIX = "star_feather_inst_"
+_FALLBACK_DIR_RE = re.compile(r"^star_feather_inst_(\d+)_")
 
 
 def _sweep_fallback_dirs(current_dir: str | None = None) -> int:
     """回收系统临时目录下的过期退路实例目录（不在 IMAGE_DIR_ROOT 之下）。
 
     退路目录只在正常图片根不可用时产生，启动清理的主循环扫不到；它们同样按
-    STALE_INSTANCE_DIR_AGE 判定——三天没写过，图早过了 600 秒发送窗口，整目录回收。
-    本进程当前目录永不删；返回回收数量。
+    STALE_INSTANCE_DIR_AGE 判定——三天没写过，图早过了 600 秒发送窗口。
+    同进程的旧实例目录只回收空壳：热重载时旧实例可能还在渲染/发送，非空就留着
+    （与 IMAGE_DIR_ROOT 下的同 pid 规则一致）。本进程当前目录永不删；返回回收数量。
     """
     root = tempfile.gettempdir()
     try:
@@ -185,9 +187,11 @@ def _sweep_fallback_dirs(current_dir: str | None = None) -> int:
     except OSError as e:
         logger.warning(f"临时目录枚举失败，跳过退路目录清理: {e}")
         return 0
+    own_pid = os.getpid()
     reaped = 0
     for name in names:
-        if not name.startswith(_FALLBACK_DIR_PREFIX):
+        m = _FALLBACK_DIR_RE.match(name)
+        if m is None:
             continue
         path = os.path.join(root, name)
         try:
@@ -197,8 +201,13 @@ def _sweep_fallback_dirs(current_dir: str | None = None) -> int:
                 continue
             if not _is_stale(path, STALE_INSTANCE_DIR_AGE):
                 continue
-            shutil.rmtree(path, ignore_errors=True)
-            reaped += 1
+            if int(m.group(1)) == own_pid:
+                # 同进程旧实例：非空可能还有图在等发送，留给保险丝；空壳才算残骸
+                os.rmdir(path)
+                reaped += 1
+            else:
+                shutil.rmtree(path, ignore_errors=True)
+                reaped += 1
         except OSError as e:
             logger.warning(f"退路图片目录清理失败（{path}）: {e}")
     return reaped
