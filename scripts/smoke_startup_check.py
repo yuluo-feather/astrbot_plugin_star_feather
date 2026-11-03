@@ -134,18 +134,18 @@ def _stop_process(proc: subprocess.Popen[bytes]) -> None:
 
 
 def _stop_gracefully(proc: subprocess.Popen[bytes]) -> tuple[int, bool]:
-    """尽量走核心的优雅收尾，返回 (退出码, 是否优雅)。
+    """尽量走核心的优雅收尾，返回 (退出码, 是否按预期退出)。
 
     POSIX 上发 SIGINT，CLI 会走 core_lifecycle.stop()（遍历插件调 terminate 钩子）；
     Windows 没有信号语义，只能硬杀——所以优雅退出只在 Linux 上校验。
+    超时被强杀时返回 False，调用点必须按失败处理，不能当成「Windows 那种情况」放过。
     """
-    graceful = os.name != "nt"
-    if graceful:
+    if os.name != "nt":
         proc.send_signal(signal.SIGINT)
     else:
         proc.terminate()
     try:
-        return proc.wait(timeout=90), graceful
+        return proc.wait(timeout=90), True
     except subprocess.TimeoutExpired:
         proc.kill()
         return proc.wait(timeout=15), False
@@ -319,8 +319,13 @@ def main() -> int:
                 return 1
             print("命令往返通过：/占卜 的结果已由 WebChat 通道返回")
 
-            exit_code, graceful = _stop_gracefully(proc)
-            if graceful:
+            exit_code, exited = _stop_gracefully(proc)
+            if os.name != "nt":
+                if not exited:
+                    print("冒烟失败：SIGINT 后 90 秒内没有退出，被强制结束",
+                          file=sys.stderr)
+                    print(_tail(_read_log(log_path)), file=sys.stderr)
+                    return 1
                 if exit_code not in (0, 130):
                     print(f"冒烟失败：优雅退出返回 {exit_code}", file=sys.stderr)
                     print(_tail(_read_log(log_path)), file=sys.stderr)
