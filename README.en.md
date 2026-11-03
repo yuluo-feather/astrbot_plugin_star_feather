@@ -284,7 +284,7 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 
 - Added: `/单抽` is unbound from the daily fortune — every call draws a fresh Feather Sign and generates its reading live; the new `/今日牌运` (aliases `/运势`, `/每日一签`) owns the one-fixed-card-a-day role
 - Refactored: entry / orchestration / pure logic / adapters / AI / rendering are separate layers, with `ReadingService` running draw → both AI stages → render → send; `sf_daily_*` is a single `DailyRecord` sharing one date boundary
-- Improved: the spirit's line and the reading share one AI budget and run under `TaskGroup`, so a failure in one cancels the other; new `ai.parallel_stages` and `ai.max_concurrency`
+- Improved: the spirit's line and the reading share one AI budget and run under `TaskGroup`, so an uncaught failure in one cancels the other while AI service failures keep their own fallbacks; new `ai.parallel_stages` and `ai.max_concurrency`
 - Fixed: a request crossing midnight no longer splits the card, cache and poster across two dates, and a late older snapshot no longer overwrites the new day's record
 - Fixed: user questions are fenced with loop-stripped markers, and the injection filter no longer mangles ordinary questions or self-descriptions
 - Fixed: the spirit-line cache is isolated per persona, a failed second read no longer wipes the record, and stale image directories are reaped only when empty
