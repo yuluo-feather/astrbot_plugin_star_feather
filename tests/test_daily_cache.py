@@ -987,6 +987,68 @@ class TestOlderSnapshotDoesNotRollBack:
         assert kv == before, "旧日期快照不得把新一天的牌面、解读与牌灵写回成旧日期"
 
 
+# ---------- 换人设重建解读上下文：牌字段与牌灵缓存不许跟着丢 ----------
+class TestInterpRebuildKeepsPickAndSpirit:
+    """same_context 失配只该作废解读分桶；牌字段与牌灵缓存不属于这个上下文。"""
+
+    @staticmethod
+    def _pair(kv):
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
+
+        class _Ctx:
+            async def get_kv_data(self, key, default=None):
+                return kv.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                kv[key] = value
+
+        class _Interp:
+            async def interpret(self, *a, **kw):
+                return "【第1张·你的当下】解读。"
+
+            async def spirit_line(self, *a, **kw):
+                return "牌灵的一句话"
+
+        return (DailyFortune(_Ctx(), persona="gentle", interpreter=_Interp()),
+                DailyFortune(_Ctx(), persona="tsundere", interpreter=_Interp()))
+
+    def test_persona_change_keeps_pick_and_spirit(self):
+        kv = {}
+        old, new = self._pair(kv)
+        day = "20260827"
+        picks = asyncio.run(old.pick_cached("u1", day))[2]
+        asyncio.run(old.spirit_cached(None, "u1", picks, "今日运势", None, today=day))
+
+        asyncio.run(new.pick_cached("u1", day))
+        asyncio.run(new.interp_cached(None, "u1", "羽签", ["你的当下"], picks,
+                                      "事业运势", today=day))
+
+        record = kv["sf_daily_u1"]
+        assert record["card_id"], "重建后牌字段丢失"
+        assert record["spirit_line"], "重建后牌灵缓存被抹掉"
+        assert record["interps"], "新主题的解读没有写入"
+
+    def test_prompt_change_clears_spirit_line(self, monkeypatch):
+        """提示词版本变了：牌字段保留，但旧提示词生成的牌灵话必须作废。"""
+        from data.plugins.astrbot_plugin_star_feather.services import daily as daily_mod
+
+        kv = {}
+        old, _new = self._pair(kv)
+        day = "20260827"
+        picks = asyncio.run(old.pick_cached("u1", day))[2]
+        asyncio.run(old.spirit_cached(None, "u1", picks, "今日运势", None, today=day))
+        assert kv["sf_daily_u1"]["spirit_line"]
+
+        monkeypatch.setattr(daily_mod, "_PROMPT_V", "v-next")
+        asyncio.run(old.interp_cached(None, "u1", "羽签", ["你的当下"], picks,
+                                      "事业运势", today=day))
+
+        record = kv["sf_daily_u1"]
+        assert record["card_id"], "牌字段不该跟着丢"
+        assert record["spirit_line"] == "", "旧提示词生成的牌灵话必须作废"
+        assert record["prompt_v"] == "v-next"
+
+
 # ---------- 二次读取失败：不许用空壳覆盖已有记录 ----------
 class TestSecondReadFailureKeepsRecord:
     """初次读到旧记录、生成成功、写回前二次读失败：本次照常返回，但不写回。
