@@ -1,7 +1,7 @@
 """素材清单：牌 id → 文件（assets/manifest.json）。
 
-不再按 .png/.webp 猜后缀：清单由 assets/manifest.json 一次写定，
-缺条目就是缺素材，直接报出来。
+清单给出文件名；加载时按同名扩展名取第一个存在的：`.png` → `.webp` → `.jpg`。
+三种都没有才报错。
 """
 import json
 import os
@@ -21,17 +21,29 @@ def _load_manifest() -> dict:
 
 _MANIFEST = _load_manifest()
 
+# 同名扩展名的取值顺序
+_EXT_PREFERENCE = (".png", ".webp", ".jpg")
+
 
 def asset_manifest() -> dict:
     return dict(_MANIFEST)
 
 
 def _asset_path_by_id(card_id: str | None) -> str:
-    """牌 id -> 素材文件绝对路径；清单里没有就报出来。"""
+    """牌 id -> 素材文件绝对路径；清单里没有就报出来。
+
+    清单给出文件名；同名的 .png / .webp / .jpg 按此顺序取第一个存在的，
+    三种都没有才抛 FileNotFoundError。
+    """
     rel = _MANIFEST.get(card_id) if isinstance(card_id, str) else None
     if not rel:
         raise FileNotFoundError(f"素材清单缺少牌 {card_id!r}（assets/manifest.json）")
-    return os.path.join(_ASSET_ROOT, rel)
+    stem = os.path.splitext(os.path.join(_ASSET_ROOT, rel))[0]
+    for ext in _EXT_PREFERENCE:
+        candidate = stem + ext
+        if os.path.isfile(candidate):
+            return candidate
+    raise FileNotFoundError(f"塔罗素材缺失: {stem}（.png / .webp / .jpg 均不存在）")
 
 
 def _asset_path(card) -> str:

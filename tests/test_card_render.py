@@ -70,6 +70,42 @@ class TestRenderSmoke:
         assert up1.tobytes() == up2.tobytes()  # 命中缓存：逐像素不变
         assert info.misses == 2 and info.hits == 1  # 正/逆各占一键，第三次命中
 
+
+# ---------- 素材清单：同名扩展名的取值顺序 ----------
+class TestAssetExtensionFallback:
+    """清单给出文件名；同名扩展名按 .png / .webp / .jpg 取第一个存在的。"""
+
+    @staticmethod
+    def _prepare(tmp_path, monkeypatch, files):
+        for name in files:
+            path = tmp_path / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"x")
+        monkeypatch.setattr(render_assets, "_ASSET_ROOT", str(tmp_path))
+        monkeypatch.setattr(render_assets, "_MANIFEST", {"c": "Cups/card.webp"})
+
+    def test_png_preferred_when_both_exist(self, tmp_path, monkeypatch):
+        self._prepare(tmp_path, monkeypatch, ["Cups/card.webp", "Cups/card.png"])
+        assert os.path.basename(render_assets._asset_path_by_id("c")) == "card.png"
+
+    def test_webp_used_when_png_absent(self, tmp_path, monkeypatch):
+        self._prepare(tmp_path, monkeypatch, ["Cups/card.webp"])
+        assert os.path.basename(render_assets._asset_path_by_id("c")) == "card.webp"
+
+    def test_png_only_still_works(self, tmp_path, monkeypatch):
+        self._prepare(tmp_path, monkeypatch, ["Cups/card.png"])
+        assert os.path.basename(render_assets._asset_path_by_id("c")) == "card.png"
+
+    def test_raises_when_no_extension_matches(self, tmp_path, monkeypatch):
+        self._prepare(tmp_path, monkeypatch, [])
+        with pytest.raises(FileNotFoundError):
+            render_assets._asset_path_by_id("c")
+
+    def test_unknown_card_still_raises(self, tmp_path, monkeypatch):
+        self._prepare(tmp_path, monkeypatch, ["Cups/card.png"])
+        with pytest.raises(FileNotFoundError):
+            render_assets._asset_path_by_id("nope")
+
     def test_render_cards_background_drawn_from_this_reading(self, tmp_path, monkeypatch):
         # 背景从本签抽出的牌里随机挑一张（3 张阵=3选1）：绝不挑到本签之外的牌
         seen = []
