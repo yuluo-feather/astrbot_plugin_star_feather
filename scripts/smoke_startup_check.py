@@ -179,27 +179,36 @@ def _wait_dashboard_ready(opener, deadline: float) -> bool:
     return False
 
 
-def _login(opener) -> bool:
+def _login(opener) -> str | None:
+    """登录并返回 JWT。cookie 带 Secure 标记，HTTP 下不会回传，所以显式用 Bearer。"""
     try:
         status, text = _post_json(
             opener, "/api/auth/login",
             {"username": DASHBOARD_USER, "password": SMOKE_PASSWORD})
     except (urllib.error.URLError, OSError) as exc:
         print(f"登录请求失败：{exc}", file=sys.stderr)
-        return False
-    if status != 200 or '"token"' not in text:
+        return None
+    if status != 200:
         print(f"登录失败（HTTP {status}）：{text[:300]}", file=sys.stderr)
-        return False
-    return True
+        return None
+    try:
+        token = (json.loads(text).get("data") or {}).get("token")
+    except (ValueError, AttributeError):
+        token = None
+    if not isinstance(token, str) or not token:
+        print(f"登录失败：响应里没有 token：{text[:300]}", file=sys.stderr)
+        return None
+    return token
 
 
-def _run_command(opener) -> str:
+def _run_command(opener, token: str) -> str:
     """经 WebChat 通道发一条 /占卜，读完整条 SSE 返回。"""
     payload = {"message": "/占卜 测试", "session_id": "smoke-session"}
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(
         f"{DASHBOARD_BASE}/api/chat/send", data=body,
-        headers={"Content-Type": "application/json"})
+        headers={"Content-Type": "application/json",
+                 "Authorization": f"Bearer {token}"})
     with opener.open(req, timeout=120) as resp:
         return resp.read().decode("utf-8", "replace")
 
@@ -303,12 +312,13 @@ def main() -> int:
                 print("冒烟失败：横幅出现后 60 秒内 dashboard 没就绪", file=sys.stderr)
                 print(_tail(_read_log(log_path)), file=sys.stderr)
                 return 1
-            if not _login(opener):
+            token = _login(opener)
+            if not token:
                 print(_tail(_read_log(log_path)), file=sys.stderr)
                 return 1
 
             print("登录通过，经 WebChat 通道发一条 /占卜 测试……")
-            sse = _run_command(opener)
+            sse = _run_command(opener, token)
             if SMOKE_MARKER not in sse:
                 print(
                     "冒烟失败：命令往返没有收到占卜结果（缺免责声明标记）",
