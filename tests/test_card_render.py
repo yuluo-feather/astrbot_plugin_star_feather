@@ -178,6 +178,84 @@ class TestTempCleanup:
         # 文件已被处理：删除不存在的文件不抛异常
         asyncio.run(render_store._delayed_remove("C:/not/exist/tarot_x.png", 0))
 
+    def test_fallback_dir_survives_file_cleanup(self):
+        """删图任务不拆目录：并发渲染时拆掉目录会让保存落到已消失的路径。
+
+        退路目录改由启动清理按年龄统一回收（见下一条）。
+        """
+        import tempfile
+        d = tempfile.mkdtemp(prefix=f"star_feather_inst_{os.getpid()}_")
+        try:
+            p = os.path.join(d, "tarot_test.png")
+            with open(p, "wb") as f:
+                f.write(b"x")
+            asyncio.run(render_store._delayed_remove(p, 0))
+            assert not os.path.exists(p)
+            assert os.path.isdir(d)
+        finally:
+            os.rmdir(d)
+
+    def test_stale_fallback_dir_is_reaped_at_startup(self, tmp_path, monkeypatch):
+        """退路目录不在 IMAGE_DIR_ROOT 下：启动清理单独扫临时目录，过期才收。"""
+        old = tmp_path / "star_feather_inst_99999_old"
+        old.mkdir()
+        (old / "tarot_x.png").write_bytes(b"x")
+        stamp = time.time() - render_store.STALE_INSTANCE_DIR_AGE - 60
+        os.utime(old, (stamp, stamp))
+        fresh = tmp_path / "star_feather_inst_99999_new"
+        fresh.mkdir()
+        monkeypatch.setattr(render_store.tempfile, "gettempdir", lambda: str(tmp_path))
+        render_store.cleanup_stale_images()
+        assert not old.exists()
+        assert fresh.is_dir()
+
+    def test_same_process_fallback_dirs_only_lose_empty_shells(self, tmp_path, monkeypatch):
+        """热重载时同进程旧实例可能还在发送：非空目录留着，空壳才回收。"""
+        stamp = time.time() - render_store.STALE_INSTANCE_DIR_AGE - 60
+        busy = tmp_path / f"star_feather_inst_{os.getpid()}_busy"
+        busy.mkdir()
+        (busy / "tarot_x.png").write_bytes(b"x")
+        os.utime(busy, (stamp, stamp))
+        empty = tmp_path / f"star_feather_inst_{os.getpid()}_empty"
+        empty.mkdir()
+        os.utime(empty, (stamp, stamp))
+        monkeypatch.setattr(render_store.tempfile, "gettempdir", lambda: str(tmp_path))
+        render_store.cleanup_stale_images()
+        assert busy.is_dir() and (busy / "tarot_x.png").exists()
+        assert not empty.exists()
+
+    def test_fallback_sweep_runs_when_image_root_cannot_be_listed(self, tmp_path, monkeypatch):
+        """根目录存在但列不出内容时，退路目录仍要回收——否则它们永无人管。"""
+        root = tmp_path / "rootdir"
+        root.mkdir()
+        temp = tmp_path / "temp"
+        temp.mkdir()
+        stale = temp / "star_feather_inst_99999_old"
+        stale.mkdir()
+        (stale / "x.png").write_bytes(b"x")
+        stamp = time.time() - render_store.STALE_INSTANCE_DIR_AGE - 60
+        os.utime(stale, (stamp, stamp))
+
+        real_listdir = os.listdir
+
+        def fake_listdir(path="."):
+            if os.path.abspath(str(path)) == os.path.abspath(str(root)):
+                raise OSError("permission denied")
+            return real_listdir(path)
+
+        monkeypatch.setattr(render_store, "IMAGE_DIR_ROOT", str(root))
+        monkeypatch.setattr(render_store.os, "listdir", fake_listdir)
+        monkeypatch.setattr(render_store.tempfile, "gettempdir", lambda: str(temp))
+        render_store.cleanup_stale_images()
+        assert not stale.exists()
+
+    def test_normal_instance_dir_is_kept(self, tmp_path):
+        """普通实例目录可能还有别的图，只删文件，不删目录。"""
+        f = tmp_path / "tarot_test.png"
+        f.write_bytes(b"x")
+        asyncio.run(render_store._delayed_remove(str(f), 0))
+        assert not f.exists() and tmp_path.is_dir()
+
     def test_schedule_cleanup_no_loop_safe(self):
         # 无事件循环环境（同步测试）：静默跳过，不抛异常
         render_store._schedule_image_cleanup("C:/not/exist/tarot_x.png")
