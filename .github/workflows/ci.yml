@@ -321,9 +321,19 @@ jobs:
           echo "release=true" >> "$GITHUB_OUTPUT"
           draft=$(gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')
           echo "draft=$draft" >> "$GITHUB_OUTPUT"
+          # tag 指向的提交与本轮不同：同一版本可能被另一个提交并发发布过，
+          # 这时不能拿当前提交的 zip 去覆盖，否则资产内容与 tag 指向的源码不一致。
+          same=false
+          if [ "$(gh api "repos/$GITHUB_REPOSITORY/commits/v$VERSION" --jq .sha)" = "$GITHUB_SHA" ]; then
+            same=true
+          fi
+          echo "same=$same" >> "$GITHUB_OUTPUT"
           # 草稿即使带着 zip 也不算完成：gh release create 的上传与发布是分开的，
           # 中途被打断会留下「有资产但未发布」的草稿，重试时必须把它发布出去。
           if [ "$draft" != "true" ] && gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -qx "$zip"; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif [ "$same" != "true" ]; then
+            echo "::notice::v$VERSION 由另一个提交发布且资产不完整，跳过（避免 zip 与 tag 不一致）"
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -343,17 +353,27 @@ jobs:
           VERSION: ${{ steps.version.outputs.value }}
           RELEASE_EXISTS: ${{ steps.state.outputs.release }}
           RELEASE_DRAFT: ${{ steps.state.outputs.draft }}
+          RELEASE_SAME: ${{ steps.state.outputs.same }}
         run: |
           set -euo pipefail
           zip="astrbot_plugin_star_feather-$VERSION.zip"
           if [ "$RELEASE_EXISTS" = "true" ]; then
+            if [ "$RELEASE_SAME" != "true" ]; then
+              echo "::notice::v$VERSION 的 tag 指向另一个提交，跳过资产覆盖"
+              exit 0
+            fi
             gh release upload "v$VERSION" "$zip" --repo "$GITHUB_REPOSITORY" --clobber
             if [ "$RELEASE_DRAFT" = "true" ]; then
               gh release edit "v$VERSION" --repo "$GITHUB_REPOSITORY" --draft=false
             fi
           elif ! gh release create "v$VERSION" "$zip" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "v$VERSION" --notes-file "changelogs/v$VERSION.md"; then
-            # 两个运行可能同时看到「Release 不存在」：另一个刚建好时改为补齐资产并发布
-            echo "::warning::Release 创建失败，按并发已存在处理：补齐资产并发布"
+            # 两个运行可能同时看到「Release 不存在」：另一个刚建好时，只有 tag 指向本轮
+            # 提交才补齐资产；指向别的提交就跳过，避免 zip 与 tag 指向的源码不一致。
+            tag_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/v$VERSION" --jq .sha)
+            if [ "$tag_sha" != "$GITHUB_SHA" ]; then
+              echo "::notice::v$VERSION 已由提交 $tag_sha 创建，本次不覆盖资产"
+              exit 0
+            fi
             gh release upload "v$VERSION" "$zip" --repo "$GITHUB_REPOSITORY" --clobber
             gh release edit "v$VERSION" --repo "$GITHUB_REPOSITORY" --draft=false
           fi
