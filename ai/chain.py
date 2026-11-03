@@ -7,6 +7,7 @@
 """
 import asyncio
 import time
+import weakref
 
 from ..core.log import log as logger
 from ..core.models import Interpretation
@@ -96,7 +97,11 @@ class AiInterpreter:
         # 同一 Provider 的并发上限：单槽本地模型 / 限流严格时，两段 AI 同时压过去会
         # 排队甚至触发限流，随后还会被误记成失败冷却。0 = 不限制。
         self.max_concurrency = max_concurrency
-        self._semaphores: dict[tuple[int, str], asyncio.Semaphore] = {}
+        # 并发闸按事件循环分开存。外层用弱引用键：未争用的闸不碰循环，循环回收后
+        # 条目自动消失；争用的闸会反向持有循环，取闸时再清一遍已关闭循环的条目。
+        self._semaphores: weakref.WeakKeyDictionary[
+            asyncio.AbstractEventLoop, dict[str, asyncio.Semaphore]] = (
+            weakref.WeakKeyDictionary())
         # 是否在「指定 → 会话 → 全局默认」之后回退到全部已加载 Provider。
         # 默认关：未预期的模型不该被悄悄拉进来烧请求。
         self.all_providers_fallback = all_providers_fallback
@@ -336,17 +341,24 @@ class AiInterpreter:
     def _semaphore_for(self, provider) -> asyncio.Semaphore | None:
         """该 Provider 的并发闸；0 = 不限制，返回 None。
 
-        键里带事件循环 id：同一解释器可能被多个 asyncio.run 依次使用（测试与
-        诊断脚本），Semaphore 绑在创建它的循环上，跨循环复用会直接报错。
+        按事件循环分开存：同一解释器可能被多个 asyncio.run 依次使用（测试与诊断
+        脚本），Semaphore 绑在创建它的循环上，跨循环复用会直接报错。
+        弱键 + 取闸时清理已关闭循环，保证登记表不会随循环更替一直增长。
         """
         if self.max_concurrency <= 0:
             return None
         loop = asyncio.get_running_loop()
-        key = (id(loop), self._provider_id(provider))
-        sem = self._semaphores.get(key)
+        for known in [lp for lp in self._semaphores if lp.is_closed()]:
+            self._semaphores.pop(known, None)
+        per_loop = self._semaphores.get(loop)
+        if per_loop is None:
+            per_loop = {}
+            self._semaphores[loop] = per_loop
+        pid = self._provider_id(provider)
+        sem = per_loop.get(pid)
         if sem is None:
             sem = asyncio.Semaphore(self.max_concurrency)
-            self._semaphores[key] = sem
+            per_loop[pid] = sem
         return sem
 
     async def _chat_once(self, provider, prompt: str, system_prompt: str,

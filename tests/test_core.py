@@ -510,6 +510,61 @@ class TestProviderConcurrencyLimit:
         assert it._fail_ts_by_provider == {}
 
 
+class TestSemaphoreRegistryLifecycle:
+    """并发闸登记表：未争用随 GC 消失，争用后绑定循环的在下次取闸时清掉。"""
+
+    @staticmethod
+    def _interp():
+        prov = FakeProvider("p0")
+        return AiInterpreter(FakeContext(prov, [prov]), True, 5, 60, "",
+                             max_concurrency=2), prov
+
+    def test_uncontended_closed_loop_entries_are_reaped(self):
+        import gc
+        it, prov = self._interp()
+
+        async def go():
+            it._semaphore_for(prov)
+
+        asyncio.run(go())
+        gc.collect()
+        assert len(it._semaphores) == 0
+
+    def test_contended_closed_loop_is_reaped_on_next_call(self):
+        # 单槽 + 两个持有者才会真正排队，Semaphore 在等待路径上绑定循环
+        prov = FakeProvider("p0")
+        it = AiInterpreter(FakeContext(prov, [prov]), True, 5, 60, "",
+                           max_concurrency=1)
+
+        async def contend():
+            sem = it._semaphore_for(prov)
+
+            async def hold():
+                async with sem:
+                    await asyncio.sleep(0.01)
+
+            await asyncio.gather(hold(), hold())
+
+        asyncio.run(contend())
+        assert len(it._semaphores) == 1
+
+        async def go():
+            it._semaphore_for(prov)
+            return len(it._semaphores)
+
+        assert asyncio.run(go()) == 1
+
+    def test_same_loop_reuses_one_semaphore(self):
+        it, prov = self._interp()
+
+        async def go():
+            same = it._semaphore_for(prov) is it._semaphore_for(prov)
+            return same, len(it._semaphores)
+
+        same, count = asyncio.run(go())
+        assert same is True and count == 1
+
+
 class _BrokenProviderContext:
     """取 provider 的三个接口全挂：候选链应照旧降级为空，但每处失败都要留痕。"""
 
