@@ -29,11 +29,13 @@ from ..core.tarot_data import TAROT_CARDS
 from .daily_store import DailyRecord
 from .singleflight import SingleFlight
 
-# 同键生成去重：模块级而非实例属性，热重载前后并存的实例也能共享同一笔生成。
+# 同键生成去重：模块级而非实例属性——同一代模块内的多个实例共享同一笔生成。
+# 热重载会重建模块字典，新旧两代各持一份，互不共享（与 _KV_LOCKS 的边界一致）。
 _SPIRIT_FLIGHT = SingleFlight()
 _INTERP_FLIGHT = SingleFlight()
 
-# 进程级写锁：同一进程内所有 DailyFortune 共用（热重载时新旧实例并存）。
+# 进程级写锁：同一代模块内所有 DailyFortune 共用；热重载会重建模块，
+# 新旧两代各持一把锁、互不相识——两侧并发写同一份 KV 时并不互保。
 # 各自持锁时，两个主题的「读—合并—写」会互相覆盖；锁按事件循环隔离，
 # 避免测试里 asyncio.run 新建循环时撞上绑定旧循环的锁。
 # 键用弱引用：未争用的锁不碰循环，循环对象被回收后条目自动消失。
@@ -227,7 +229,12 @@ class DailyFortune:
             if fresh.date > today:
                 return interp
             if not fresh.same_context(today, sig, _PROMPT_V, self.persona):
-                fresh = DailyRecord()
+                # 同一天同一牌组、只是提示词/人设变了：只作废旧主题分桶。
+                # 牌字段与牌灵缓存不属于解读上下文，不能让重建把它们一起抹掉。
+                if fresh.date == today and fresh.sign == sig:
+                    fresh.interps = {}
+                else:
+                    fresh = DailyRecord()
             parsed = interp if isinstance(interp, Interpretation) else parse_interpretation(str(interp))
             if parsed is not None:
                 fresh.put_interp(topic, parsed.to_record(), sig, today, _PROMPT_V, self.persona)

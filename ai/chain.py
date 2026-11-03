@@ -199,10 +199,12 @@ class AiInterpreter:
                         if provider.meta().id == self.ai_provider_id:
                             _add(provider)
                             break
-                    except Exception:
+                    except Exception as e:
+                        logger.warning(
+                            f"候选来源[指定模型]读取 Provider 元信息失败，跳过: {e}")
                         continue
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"候选来源[指定模型]枚举失败，本签该来源缺席: {e}")
 
         # 三个候选来源相互独立，各自吞各自的异常；但吞掉必须留痕——接口本身不抛是
         # 候选链的纪律，静默失败却会让「用户看到回退本地牌义、日志里一片安静」
