@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-<img src="https://img.shields.io/badge/version-v0.9.0-f8a5c2" alt="v0.9.0"/>
+<img src="https://img.shields.io/badge/version-v0.9.1-f8a5c2" alt="v0.9.1"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -267,6 +267,12 @@
 
 ## 📜 更新记录
 
+#### v0.9.1
+
+- 修复：换人设后重建每日记录不再丢牌字段与牌灵缓存；提示词版本变化时旧牌灵话一并作废（v0.9.0 回归）
+- 修复：AI 本地排队超时不再被记成 Provider 失败，日志按「本地资源不足」归因
+- 变更：设计取舍按主题移入 `docs/design-notes/`，代码注释只留规则与指路
+
 #### v0.9.0
 
 - 新增：`/单抽` 与今日牌运解绑——单抽每次现抽、解读现场生成不缓存；「一天一张固定牌」交给新的 `/今日牌运`（别名 `/运势`、`/每日一签`）
@@ -305,11 +311,7 @@
 - 变更：`ai_timeout=0` 表示不限制单个请求；自然语言入口在 AI 失败时会说明这次是回退结果；「今天」的日期边界统一跟随框架时区
 - 变更：Pillow 运行下限提升到 `>=12.3.0`（10.x / 11.x 仍带已知 CVE），渲染逻辑不变
 
-#### v0.7.5
-
-- 修复：日志统一走 AstrBot 自己的日志，插件不再往 `data/logs/` 里另开一份文件——从前那份自建日志文件（`star_feather.log`）删掉了，排障信息照旧一条不少地进 AstrBot 主日志（控制台、WebUI 日志台，以及开了文件日志时的 `logs/astrbot.log`）
-
-> 更早版本（v0.7.4 及以前）的逐条明细见 [CHANGELOG.md](CHANGELOG.md) 与 `changelogs/` 目录——这里只保留最近 6 个版本的摘要。
+> 更早版本（v0.7.5 及以前）的逐条明细见 [CHANGELOG.md](CHANGELOG.md) 与 `changelogs/` 目录——这里只保留最近 6 个版本的摘要。
 
 ---
 

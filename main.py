@@ -19,7 +19,7 @@ from .app.diagnostics import image_dir_of, register_instance
 from .render.assets import asset_manifest
 from .render.store import cleanup_stale_images
 
-VERSION = "0.9.0"
+VERSION = "0.9.1"
 
 
 @register("star_feather", "羽落", "星羽塔罗：78张塔罗牌 AI 占卜与深度解读，幻星集素材渲染牌面图", VERSION)
