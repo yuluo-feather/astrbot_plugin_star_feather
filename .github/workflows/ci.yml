@@ -30,9 +30,11 @@ on:
         default: false
 
 concurrency:
-  group: ci-${{ github.ref }}
-  # PR 之间可以互相取消；main 上的运行不取消。发版判定已改成「Release 不完整就补齐」，
-  # 即使运行被取消也不会漏版本；保留这条只是少产生半成品运行。
+  # PR：同一 PR 的新推送取消旧的。
+  # main / dispatch：按 commit 分组，每次推送独立运行。共享分组时 GitHub 只保留一个
+  # 排队运行，后来的推送会替换掉排队中的那次版本升级；发版作业只看得到存活提交的
+  # metadata.yaml，被替换掉的版本就永远没人检查。
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -315,7 +317,11 @@ jobs:
             exit 0
           fi
           echo "release=true" >> "$GITHUB_OUTPUT"
-          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -qx "$zip"; then
+          draft=$(gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')
+          echo "draft=$draft" >> "$GITHUB_OUTPUT"
+          # 草稿即使带着 zip 也不算完成：gh release create 的上传与发布是分开的，
+          # 中途被打断会留下「有资产但未发布」的草稿，重试时必须把它发布出去。
+          if [ "$draft" != "true" ] && gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -qx "$zip"; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -334,11 +340,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.value }}
           RELEASE_EXISTS: ${{ steps.state.outputs.release }}
+          RELEASE_DRAFT: ${{ steps.state.outputs.draft }}
         run: |
           set -euo pipefail
           zip="astrbot_plugin_star_feather-$VERSION.zip"
           if [ "$RELEASE_EXISTS" = "true" ]; then
             gh release upload "v$VERSION" "$zip" --repo "$GITHUB_REPOSITORY" --clobber
+            if [ "$RELEASE_DRAFT" = "true" ]; then
+              gh release edit "v$VERSION" --repo "$GITHUB_REPOSITORY" --draft=false
+            fi
           else
             gh release create "v$VERSION" "$zip" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "v$VERSION" --notes-file "changelogs/v$VERSION.md"
           fi
