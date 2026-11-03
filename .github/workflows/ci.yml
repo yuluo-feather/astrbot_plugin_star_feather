@@ -45,42 +45,25 @@ jobs:
     name: lint & test (${{ matrix.os }} · py${{ matrix.python }} · ${{ matrix.label }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
-    # PR 只跑 3 格：ubuntu 3.12 最新 / ubuntu 3.12 Pillow 下限 / windows 3.12 最新。
-    # 完整矩阵（含 3.13 三格）在 main 上跑。
-    if: github.event_name != 'pull_request' || !matrix.main_only
+    # PR 只跑 3 格；完整矩阵（含 3.13 三格）在 main 与手动触发时跑。
+    # 不能写在 job 级 if 里：jobs.<id>.if 求值时 matrix 上下文还不存在，条件无效。
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          # 上限侧：三个平台/解释器组合都跟着上游最新 Pillow 跑
-          - os: ubuntu-latest
-            python: "3.12"
-            pillow: ""
-            label: 最新 Pillow
-          - os: ubuntu-latest
-            python: "3.13"
-            pillow: ""
-            label: 最新 Pillow
-            main_only: true
-          - os: windows-latest
-            python: "3.12"
-            pillow: ""
-            label: 最新 Pillow
-          - os: windows-latest
-            python: "3.13"
-            pillow: ""
-            label: 最新 Pillow
-            main_only: true
-          # 安全下限侧：12.3.0 是 OSV 现查无已知条目的最低版本，精确钉住
-          - os: ubuntu-latest
-            python: "3.12"
-            pillow: "12.3.0"
-            label: Pillow 12.3.0 安全下限
-          - os: ubuntu-latest
-            python: "3.13"
-            pillow: "12.3.0"
-            label: Pillow 12.3.0 安全下限
-            main_only: true
+      matrix: >-
+        ${{ github.event_name == 'pull_request'
+        && fromJSON('{"include":[
+        {"os":"ubuntu-latest","python":"3.12","pillow":"","label":"最新 Pillow"},
+        {"os":"windows-latest","python":"3.12","pillow":"","label":"最新 Pillow"},
+        {"os":"ubuntu-latest","python":"3.12","pillow":"12.3.0","label":"Pillow 12.3.0 安全下限"}
+        ]}')
+        || fromJSON('{"include":[
+        {"os":"ubuntu-latest","python":"3.12","pillow":"","label":"最新 Pillow"},
+        {"os":"ubuntu-latest","python":"3.13","pillow":"","label":"最新 Pillow"},
+        {"os":"windows-latest","python":"3.12","pillow":"","label":"最新 Pillow"},
+        {"os":"windows-latest","python":"3.13","pillow":"","label":"最新 Pillow"},
+        {"os":"ubuntu-latest","python":"3.12","pillow":"12.3.0","label":"Pillow 12.3.0 安全下限"},
+        {"os":"ubuntu-latest","python":"3.13","pillow":"12.3.0","label":"Pillow 12.3.0 安全下限"}
+        ]}') }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -128,21 +111,20 @@ jobs:
     name: AstrBot 契约守卫 (${{ matrix.label }} · ${{ matrix.experimental && '只报不拦' || '必拦' }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # PR 上只跑必拦的「运行版本」格；两个只报不拦的实验格留到 main 与手动触发
-    if: github.event_name != 'pull_request' || !matrix.experimental
+    # PR 上只跑必拦的「运行版本」格；两个只报不拦的实验格留到 main 与手动触发。
+    # 同样不能写在 job 级 if 里（matrix 上下文不可用），改为按事件生成矩阵。
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - label: 运行版本
-            spec: "==4.29.4" # 运行目录正跑着的那一版
-            experimental: false
-          - label: 上游最新
-            spec: "" # 上游最新稳定版：先知道它动了我们哪一面
-            experimental: true
-          - label: 最低声明 4.16
-            spec: "==4.16.0" # 对用户的最低承诺：声明了支持就得有跑过的证据
-            experimental: true
+      matrix: >-
+        ${{ github.event_name == 'pull_request'
+        && fromJSON('{"include":[
+        {"label":"运行版本","spec":"==4.29.4","experimental":false}
+        ]}')
+        || fromJSON('{"include":[
+        {"label":"运行版本","spec":"==4.29.4","experimental":false},
+        {"label":"上游最新","spec":"","experimental":true},
+        {"label":"最低声明 4.16","spec":"==4.16.0","experimental":true}
+        ]}') }}
     continue-on-error: ${{ matrix.experimental }}
     steps:
       - uses: actions/checkout@v7
