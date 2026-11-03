@@ -106,7 +106,7 @@ TYPE_WHITELIST = ("int", "float", "bool", "string", "text", "list", "file",
 GROUP_TYPE_OK = ("object", "dict")
 REQUIRED_GROUP_KEYS = ("type", "description", "hint", "items")
 
-# 取键原语：settings.py 等按 (group, key) 字面量读配置
+# 取键原语：core/settings.py 等按 (group, key) 字面量读配置
 _CFG_READERS = ("_cfg_get", "_cfg_int", "_cfg_bool")
 # 唯一允许动态取键的文件：原语层本身（group / key 是它的入参，不是具体配置项）
 _PRIMITIVE_LAYER = "core/config.py"

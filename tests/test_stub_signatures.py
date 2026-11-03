@@ -13,13 +13,13 @@
 
 不管什么（本检查的边界，别指望它）：
 - **不查「打桩是否打在调用点读取的模块上」**。`from m import f` 之后调用点读的是
-  哪个绑定，AST 看不出来，只能人眼确认。真实案例（2026-09-10 修）：
+  哪个绑定，AST 看不出来，只能人眼确认。真实案例（2026-09-10 修，模块名是当时的布局）：
   test_core 曾写 monkeypatch.setattr("card_render._schedule_image_cleanup",
   lambda img: None)——被测路径 tarot_core._maybe_render_image 用的是
   tarot_core 里 `from card_render import _schedule_image_cleanup` 绑定的那份引用，
   打 card_render 的模块属性对调用点无效（真实函数照跑，还挂了延迟删除任务），
   且 fake 少了 delay 参数。签名宽度由本检查拦下；打错模块请改打在被测模块的
-  名字上（如 monkeypatch.setattr(tarot_core, "_schedule_image_cleanup", ...)）。
+  名字上（如 monkeypatch.setattr(render_service, "_schedule_image_cleanup", ...)）。
   字符串形式（"card_render.f"）自 2026-10-12 起更要避开：插件模块只有包名
   一个身份，顶层名解析会落到同名文件上（AstrBot 根目录就摆着一个 main.py），
   一律用模块对象写。
@@ -83,7 +83,7 @@ def _resolve_target(target, attr, binds):
 
     两种写法：setattr("<mod>.<name>", fake)（attr 为 None，名字在字符串里）
     与 setattr(<mod_obj>, "<name>", fake)（mod_obj 顺着本文件 import 解析成模块，
-    如 card_render.random → random.choice 那颗真实 choice）。
+    如 render.draw.random → random.choice 那颗真实 choice）。
     """
     if isinstance(target, ast.Constant) and isinstance(target.value, str):
         parts = target.value.split(".")
@@ -114,7 +114,7 @@ def _resolve_target(target, attr, binds):
         obj = getattr(obj, name, None)
         if obj is None:
             return None
-    return getattr(obj, attr, None)   # 模块或模块属性（如 card_render.random）上的被桩对象
+    return getattr(obj, attr, None)   # 模块或模块属性（如 render.draw.random）上的被桩对象
 
 
 def _func_defs(tree) -> dict:

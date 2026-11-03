@@ -7,7 +7,7 @@
 - 词表只有一份：KEYWORD_MAP 的情感 / 事业 / 时间线三组是选阵依据，
   每日牌运的 SPECIFIC_WORDS 直接由其中两组派生，不再手抄第二份；
 - 判定只有一个入口：build_request(kind, text, ...) 返回 ReadingRequest；
-- 三个入口只负责构造它，_pick_reading 不再接受 force_daily / fixed_formation 这类布尔参数。
+- 三个入口只负责构造它；抽牌分流不再接受 force_daily / fixed_formation 这类布尔参数。
 
 判定顺序（对用户可见的行为）：
 1. 帮助请求 → kind=help

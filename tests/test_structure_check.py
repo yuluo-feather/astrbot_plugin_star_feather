@@ -104,7 +104,7 @@ class TestStrictJudgement:
             assert validate_interpret_structure(text, n) is True
 
 
-# ---------- 行为层：三档在候选链上各自怎么走 ----------
+# ---------- 行为层：两档在候选链上各自怎么走 ----------
 class TestStructureCheckModes:
     def test_default_is_loose(self):
         """默认档必须是宽松：收紧会整段降级，默认值不许悄悄变成 strict。"""
