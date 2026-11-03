@@ -322,7 +322,7 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 
 - Fixed: all logging now goes through AstrBot's own logger, and the plugin no longer keeps a second log file under `data/logs/` — the separate `star_feather.log` is gone, while troubleshooting output still reaches AstrBot's log (the console, the WebUI log view, and `logs/astrbot.log` when file logging is enabled)
 
-> Full per-version details for v0.7.3 and earlier live in [CHANGELOG.md](CHANGELOG.md) and the `changelogs/` directory — this page keeps only the six most recent releases.
+> Full per-version details for v0.7.4 and earlier live in [CHANGELOG.md](CHANGELOG.md) and the `changelogs/` directory — this page keeps only the six most recent releases.
 
 ---
 

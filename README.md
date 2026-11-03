@@ -308,7 +308,7 @@
 
 - 修复：日志统一走 AstrBot 自己的日志，插件不再往 `data/logs/` 里另开一份文件——从前那份自建日志文件（`star_feather.log`）删掉了，排障信息照旧一条不少地进 AstrBot 主日志（控制台、WebUI 日志台，以及开了文件日志时的 `logs/astrbot.log`）
 
-> 更早版本（v0.7.3 及以前）的逐条明细见 [CHANGELOG.md](CHANGELOG.md) 与 `changelogs/` 目录——这里只保留最近 6 个版本的摘要。
+> 更早版本（v0.7.4 及以前）的逐条明细见 [CHANGELOG.md](CHANGELOG.md) 与 `changelogs/` 目录——这里只保留最近 6 个版本的摘要。
 
 ---
 
