@@ -45,36 +45,25 @@ jobs:
     name: lint & test (${{ matrix.os }} · py${{ matrix.python }} · ${{ matrix.label }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
+    # PR 只跑 3 格；完整矩阵（含 3.13 三格）在 main 与手动触发时跑。
+    # 不能写在 job 级 if 里：jobs.<id>.if 求值时 matrix 上下文还不存在，条件无效。
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          # 上限侧：三个平台/解释器组合都跟着上游最新 Pillow 跑
-          - os: ubuntu-latest
-            python: "3.12"
-            pillow: ""
-            label: 最新 Pillow
-          - os: ubuntu-latest
-            python: "3.13"
-            pillow: ""
-            label: 最新 Pillow
-          - os: windows-latest
-            python: "3.12"
-            pillow: ""
-            label: 最新 Pillow
-          - os: windows-latest
-            python: "3.13"
-            pillow: ""
-            label: 最新 Pillow
-      # 安全下限侧：12.3.0 是 OSV 现查无已知条目的最低版本，精确钉住
-          - os: ubuntu-latest
-            python: "3.12"
-            pillow: "12.3.0"
-            label: Pillow 12.3.0 安全下限
-          - os: ubuntu-latest
-            python: "3.13"
-            pillow: "12.3.0"
-            label: Pillow 12.3.0 安全下限
+      matrix: >-
+        ${{ github.event_name == 'pull_request'
+        && fromJSON('{"include":[
+        {"os":"ubuntu-latest","python":"3.12","pillow":"","label":"最新 Pillow"},
+        {"os":"windows-latest","python":"3.12","pillow":"","label":"最新 Pillow"},
+        {"os":"ubuntu-latest","python":"3.12","pillow":"12.3.0","label":"Pillow 12.3.0 安全下限"}
+        ]}')
+        || fromJSON('{"include":[
+        {"os":"ubuntu-latest","python":"3.12","pillow":"","label":"最新 Pillow"},
+        {"os":"ubuntu-latest","python":"3.13","pillow":"","label":"最新 Pillow"},
+        {"os":"windows-latest","python":"3.12","pillow":"","label":"最新 Pillow"},
+        {"os":"windows-latest","python":"3.13","pillow":"","label":"最新 Pillow"},
+        {"os":"ubuntu-latest","python":"3.12","pillow":"12.3.0","label":"Pillow 12.3.0 安全下限"},
+        {"os":"ubuntu-latest","python":"3.13","pillow":"12.3.0","label":"Pillow 12.3.0 安全下限"}
+        ]}') }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -87,10 +76,8 @@ jobs:
       - name: 装依赖
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
-          # 开发工具链的版本只有一处真源（requirements-dev.txt）：本地跑测试装的是
-          # 同一份文件，CI 不再自己列一遍包名
-          python -m pip install -r requirements-dev.txt
+          # 两份需求一次解析；开发工具链的版本只有一处真源（requirements-dev.txt）
+          python -m pip install -r requirements.txt -r requirements-dev.txt
       - name: 钉 Pillow 到安全下限
         if: matrix.pillow != ''
         env:
@@ -113,7 +100,7 @@ jobs:
     # 框架里还活着吗。
     #
     # 拦不拦，按「这一格丢了会不会影响用户」分：
-    #   - 运行版本（==4.28.2，运行目录正跑着的那一版）：必拦。它红了＝插件在用户手上
+    #   - 运行版本（==4.29.4，运行目录正跑着的那一版）：必拦。它红了＝插件在用户手上
     #     跑不起来，这不是「先看看」的事；
     #   - 上游最新：只报不拦。上游挪了面先让我们看见，处置权在人手上，不挡合并；
     #   - 最低声明（==4.16.0，metadata.yaml 里 astrbot_version 的下限）：只报不拦。
@@ -124,31 +111,34 @@ jobs:
     name: AstrBot 契约守卫 (${{ matrix.label }} · ${{ matrix.experimental && '只报不拦' || '必拦' }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # PR 上只跑必拦的「运行版本」格；两个只报不拦的实验格留到 main 与手动触发。
+    # 同样不能写在 job 级 if 里（matrix 上下文不可用），改为按事件生成矩阵。
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - label: 运行版本
-            spec: "==4.28.2" # 运行目录正跑着的那一版
-            experimental: false
-          - label: 上游最新
-            spec: "" # 上游最新稳定版：先知道它动了我们哪一面
-            experimental: true
-          - label: 最低声明 4.16
-            spec: "==4.16.0" # 对用户的最低承诺：声明了支持就得有跑过的证据
-            experimental: true
+      matrix: >-
+        ${{ github.event_name == 'pull_request'
+        && fromJSON('{"include":[
+        {"label":"运行版本","spec":"==4.29.4","experimental":false}
+        ]}')
+        || fromJSON('{"include":[
+        {"label":"运行版本","spec":"==4.29.4","experimental":false},
+        {"label":"上游最新","spec":"","experimental":true},
+        {"label":"最低声明 4.16","spec":"==4.16.0","experimental":true}
+        ]}') }}
     continue-on-error: ${{ matrix.experimental }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
       - name: 装插件依赖与真框架
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
-          python -m pip install -r requirements-dev.txt
-          python -m pip install "astrbot${{ matrix.spec }}"
+          python -m pip install -r requirements.txt -r requirements-dev.txt "astrbot${{ matrix.spec }}"
       - name: 框架自报版本
         run: python -c "import astrbot; print('astrbot', getattr(astrbot, '__version__', '?'))"
       - name: 契约检查
@@ -221,7 +211,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           python -m pip install -r requirements-dev.txt
-          python -m pip install "astrbot==4.28.2"
+          python -m pip install "astrbot==4.29.4"
       - name: 真框架启动冒烟
         run: python scripts/smoke_startup_check.py
 
