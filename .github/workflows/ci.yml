@@ -304,15 +304,28 @@ jobs:
           fi
           echo "allow=true" >> "$GITHUB_OUTPUT"
           echo "value=$version" >> "$GITHUB_OUTPUT"
-      - name: 检查 Release 是否完整
+      - name: 检查 Release 与 tag 状态
         id: state
         if: steps.version.outputs.allow == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.value }}
+          SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           zip="astrbot_plugin_star_feather-$VERSION.zip"
+          tag=false
+          tag_sha=""
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v$VERSION" >/dev/null 2>&1; then
+            tag=true
+            tag_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/v$VERSION" --jq .sha)
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "tag_sha=$tag_sha" >> "$GITHUB_OUTPUT"
+          # 产物必须来自 tag 指向的提交；没有 tag 时才用本轮 SHA（发布时由我们打 tag）。
+          source=$SHA
+          if [ "$tag" = "true" ]; then source=$tag_sha; fi
+          echo "source_sha=$source" >> "$GITHUB_OUTPUT"
           if ! gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "release=false" >> "$GITHUB_OUTPUT"
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -321,30 +334,31 @@ jobs:
           echo "release=true" >> "$GITHUB_OUTPUT"
           draft=$(gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')
           echo "draft=$draft" >> "$GITHUB_OUTPUT"
-          # tag 指向的提交与本轮不同：同一版本可能被另一个提交并发发布过，
-          # 这时不能拿当前提交的 zip 去覆盖，否则资产内容与 tag 指向的源码不一致。
-          same=false
-          if [ "$(gh api "repos/$GITHUB_REPOSITORY/commits/v$VERSION" --jq .sha)" = "$GITHUB_SHA" ]; then
-            same=true
+          asset=false
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -qx "$zip"; then
+            asset=true
           fi
-          echo "same=$same" >> "$GITHUB_OUTPUT"
-          # 草稿即使带着 zip 也不算完成：gh release create 的上传与发布是分开的，
-          # 中途被打断会留下「有资产但未发布」的草稿，重试时必须把它发布出去。
-          if [ "$draft" != "true" ] && gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -qx "$zip"; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          elif [ "$same" != "true" ]; then
-            echo "::notice::v$VERSION 由另一个提交发布且资产不完整，跳过（避免 zip 与 tag 不一致）"
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
+          # 只有「已发布且带 zip」才算完整；草稿或缺资产都要继续修复。
+          if [ "$draft" != "true" ] && [ "$asset" = "true" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
       - name: 打包市场 zip
-        if: steps.state.outputs.skip == 'false'
+        if: steps.state.outputs.skip == 'false' && (steps.state.outputs.release != 'true' || steps.state.outputs.asset != 'true')
         env:
           VERSION: ${{ steps.version.outputs.value }}
+          TAG: ${{ steps.state.outputs.tag }}
+          SOURCE_SHA: ${{ steps.state.outputs.source_sha }}
         run: |
           set -euo pipefail
-          git archive --format=zip --prefix=astrbot_plugin_star_feather-main/ -o "astrbot_plugin_star_feather-$VERSION.zip" HEAD
+          if [ "$TAG" = "true" ]; then
+            git fetch --depth=1 origin "refs/tags/v$VERSION:refs/tags/v$VERSION"
+            git archive --format=zip --prefix=astrbot_plugin_star_feather-main/ -o "astrbot_plugin_star_feather-$VERSION.zip" "v$VERSION"
+          else
+            git archive --format=zip --prefix=astrbot_plugin_star_feather-main/ -o "astrbot_plugin_star_feather-$VERSION.zip" "$SOURCE_SHA"
+          fi
           ls -lh astrbot_plugin_star_feather-*.zip
       - name: 创建或补齐 Release
         if: steps.state.outputs.skip == 'false'
@@ -353,27 +367,36 @@ jobs:
           VERSION: ${{ steps.version.outputs.value }}
           RELEASE_EXISTS: ${{ steps.state.outputs.release }}
           RELEASE_DRAFT: ${{ steps.state.outputs.draft }}
-          RELEASE_SAME: ${{ steps.state.outputs.same }}
+          RELEASE_ASSET: ${{ steps.state.outputs.asset }}
+          TAG: ${{ steps.state.outputs.tag }}
+          SOURCE_SHA: ${{ steps.state.outputs.source_sha }}
         run: |
           set -euo pipefail
           zip="astrbot_plugin_star_feather-$VERSION.zip"
           if [ "$RELEASE_EXISTS" = "true" ]; then
-            if [ "$RELEASE_SAME" != "true" ]; then
-              echo "::notice::v$VERSION 的 tag 指向另一个提交，跳过资产覆盖"
-              exit 0
+            # 资产已存在（草稿）：只发布，不重新上传；资产缺失：用 tag 指向的提交重建后补上。
+            if [ "$RELEASE_ASSET" != "true" ]; then
+              gh release upload "v$VERSION" "$zip" --repo "$GITHUB_REPOSITORY" --clobber
             fi
-            gh release upload "v$VERSION" "$zip" --repo "$GITHUB_REPOSITORY" --clobber
             if [ "$RELEASE_DRAFT" = "true" ]; then
               gh release edit "v$VERSION" --repo "$GITHUB_REPOSITORY" --draft=false
             fi
-          elif ! gh release create "v$VERSION" "$zip" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "v$VERSION" --notes-file "changelogs/v$VERSION.md"; then
-            # 两个运行可能同时看到「Release 不存在」：另一个刚建好时，只有 tag 指向本轮
-            # 提交才补齐资产；指向别的提交就跳过，避免 zip 与 tag 指向的源码不一致。
-            tag_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/v$VERSION" --jq .sha)
-            if [ "$tag_sha" != "$GITHUB_SHA" ]; then
-              echo "::notice::v$VERSION 已由提交 $tag_sha 创建，本次不覆盖资产"
+            exit 0
+          fi
+          if [ "$TAG" = "true" ]; then
+            if gh release create "v$VERSION" "$zip" --repo "$GITHUB_REPOSITORY" --verify-tag --title "v$VERSION" --notes-file "changelogs/v$VERSION.md"; then
               exit 0
             fi
-            gh release upload "v$VERSION" "$zip" --repo "$GITHUB_REPOSITORY" --clobber
-            gh release edit "v$VERSION" --repo "$GITHUB_REPOSITORY" --draft=false
+          else
+            if gh release create "v$VERSION" "$zip" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "v$VERSION" --notes-file "changelogs/v$VERSION.md"; then
+              exit 0
+            fi
           fi
+          # 并发：另一个运行刚建好 Release。只有 tag 指向本轮打包的提交才补资产。
+          tag_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/v$VERSION" --jq .sha)
+          if [ "$tag_sha" != "$SOURCE_SHA" ]; then
+            echo "::notice::v$VERSION 已由提交 $tag_sha 创建，本次不覆盖资产"
+            exit 0
+          fi
+          gh release upload "v$VERSION" "$zip" --repo "$GITHUB_REPOSITORY" --clobber
+          gh release edit "v$VERSION" --repo "$GITHUB_REPOSITORY" --draft=false
