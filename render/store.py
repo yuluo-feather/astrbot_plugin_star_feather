@@ -12,19 +12,11 @@ from astrbot.api import logger
 
 # ---------- 产物生命周期：渲染出的临时图片由本模块统一管理 ----------
 IMAGE_TTL_SECONDS = 600
-"""临时图存活上限（秒）。定位是**防堆积的保险丝**，不是正确性机制。
+"""临时图存活上限（秒）：防堆积的保险丝，不是正确性机制。
 
-判据从来不是「渲染后过了几秒」，而是**发送那一刻文件还在不在**——平台是在发送
-那一刻才读文件的（2026-09-29 实机日志里 WebChat 就在那一步 convert_to_base64），
-而渲染曾经发生在两次 AI 调用之前（牌灵的话 + 解读），那时的窗口由 ai_timeout ×
-候选数 × 2 段决定，没有上界：那次一句「牌灵的话」的 AI 请求实测跑了 63 秒，图早就
-被删掉了，平台读到空，整条消息链（图 + 解读 + 牌灵的话）一起被打回（Issue #2）。
-那之后窗口收窄了两轮：AI 阶段有了总预算（ai.ai_budget_seconds）、② 图片后置渲染把
-渲染点搬到两段 AI 之后（2026-10-12），距离平台读文件只剩毫秒级。
-
-所以本常量只管「最坏情况下临时目录里堆多少」——一次占卜一张 2~3MB、600 秒的量级
-在容器里无压力，插件启动时还会回收过期实例目录；真正的兜底在发送前：services.render.Renderer.ensure_image。
-别把它调小去省磁盘，省下的那点空间换不来一次丢消息。
+正确性由「发送那一刻文件还在不在」保证（发送前有 Renderer.ensure_image）；
+本常量只管最坏情况下临时目录里堆多少。别调小去省磁盘——省下的空间换不来一次丢消息。
+背景与 Issue #2 的经过见 docs/design-notes/image-lifecycle.md。
 """
 
 
@@ -46,22 +38,11 @@ _CLEANUP_TASKS: set = set()
 
 
 def _schedule_image_cleanup(img: str | None, delay: int = IMAGE_TTL_SECONDS) -> None:
-    """图片产生点即绑定清理（而不是绑定发送出口）：无论后续走 AI 成功、
-    文字兜底还是异常中断，任务都已在渲染成功后注册完毕；
-    不在事件循环（如测试）或进程被杀时，由启动清理兜底。
+    """图片产生点即绑定清理，契约是**永不抛**。
 
-    delay 统一用 IMAGE_TTL_SECONDS：普通牌面图与今日牌运海报卡曾各写一个
-    （30 / 300 秒），其实是同一件事——内容在发送那一刻就被平台取走了，本地
-    文件之后活多久与用户无关，两个数字只会多一个会过时的点。
-
-    契约：本函数永不抛。它只是保险丝，代价必须比它保的东西便宜——登记失败最多
-    留一张临时图（启动清理兜底，见 cleanup_stale_images），而抛出去会顺着调用点
-    一路顶到入口，把整条卦带走（Renderer.card 的调用点就裸在
-    渲染兜底之外）。
-
-    入参允许 None / 空串并原地返回：渲染失败的返回值就是 None（Renderer._render_sync），
-    调用点不必自己先判一遍——判在这儿，一个判据、一个地方。签名不写窄，才敢让
-    None 一路传进来。
+    产生点绑定保证 AI 成功、文字兜底、异常中断都被同一条保险丝覆盖；登记失败或
+    没有事件循环时只留一张临时图，交给启动清理。入参允许 None / 空串并原地返回。
+    背景见 docs/design-notes/image-lifecycle.md。
     """
     if not isinstance(img, str) or not img:
         return
@@ -152,15 +133,10 @@ def new_instance_image_dir() -> str:
 
 
 def _private_fallback_dir() -> str:
-    """根目录不可用时的退路：在系统临时目录下开一个**唯一**目录（mkdtemp 保证不撞名）。
+    """根目录不可用时的退路：系统临时目录下的唯一目录（仍然每实例一份）。
 
-    为什么不用 `tempfile.gettempdir()` 或共享的 `IMAGE_DIR_ROOT`：那两个都是「共用
-    一份」，新实例一写就把别的实例的图搅在一起（①的原始病灶）。退路也必须是每实例
-    一份，哪怕它落在根目录之外。它不在 IMAGE_DIR_ROOT 之下，由启动清理单独扫
-    临时目录回收（见 _sweep_fallback_dirs）；图本身仍靠 600 秒保险丝。
-
-    连这个都建不出来＝磁盘/权限已经彻底不可用，返回空串让渲染安全降级为无图
-    （调用方与渲染器都容得下空路径）：此时「隔离」让位于「别再把整条消息带走」。
+    连它都建不出来＝磁盘/权限彻底不可用，返回空串让渲染降级为无图。
+    见 docs/design-notes/image-lifecycle.md。
     """
     try:
         return tempfile.mkdtemp(prefix=f"star_feather_inst_{os.getpid()}_")
@@ -176,10 +152,8 @@ _FALLBACK_DIR_RE = re.compile(r"^star_feather_inst_(\d+)_")
 def _sweep_fallback_dirs(current_dir: str | None = None) -> int:
     """回收系统临时目录下的过期退路实例目录（不在 IMAGE_DIR_ROOT 之下）。
 
-    退路目录只在正常图片根不可用时产生，启动清理的主循环扫不到；它们同样按
-    STALE_INSTANCE_DIR_AGE 判定——三天没写过，图早过了 600 秒发送窗口。
-    同进程的旧实例目录只回收空壳：热重载时旧实例可能还在渲染/发送，非空就留着
-    （与 IMAGE_DIR_ROOT 下的同 pid 规则一致）。本进程当前目录永不删；返回回收数量。
+    同样按 STALE_INSTANCE_DIR_AGE 判定；同进程旧目录只收空壳，当前目录永不删。
+    返回回收数量。见 docs/design-notes/image-lifecycle.md。
     """
     root = tempfile.gettempdir()
     try:

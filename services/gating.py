@@ -34,19 +34,9 @@ class LimitGate:
         self.cmd_rate_limit = cmd_rate_limit
         self.daily_count_limit = daily_count_limit
         self.clock = clock or Clock()
-        # 读-判-写原子化（2026-09-06 渗透实测）：真实 KV 每次 IO 都有事件循环让出点，
-        # 并发请求会全部读到旧值 → 每日计数与会话节流被整体绕过（带 IO 延迟桩实测
-        # 30 并发/配额5 全部放行、20 并发/冷却10s 全绕过）。实例级 asyncio.Lock
-        # 串行化「读→判→写」窗口：单进程内原子（AstrBot 单体运行）；多进程部署
-        # 需框架侧分布式锁，此锁不覆盖。
-        # 【保护范围，2026-10-12 复核后写实】这把锁属于实例：同一实例内的并发请求互保，
-        # 但热重载前后两代实例各持一把锁，互不相识——两侧并发操作同一份 KV 时并不互保
-        # （宿主侧能力已核，2026-10-12：astrbot/core/utils/plugin_kv_store.py 的
-        # PluginKVStoreMixin 只有 put_kv_data / get_kv_data / delete_kv_data 三个方法，
-        # 没有事务、也没有 compare-and-swap 一类的原子「读—判—写」⇒ 没有更细的锁可换）。
-        # 实际影响有限：热重载那几秒里两侧各跑一次计数，最坏是配额少算一两次——
-        # 比它严重的共享资源是图片目录，那已在 render.store 按实例隔离。
-        # 若将来要多进程部署，这里是必须改的入口，别指望现有实现顺手兜住。
+        # 读-判-写原子化：KV 没有事务/CAS，并发请求会读到旧值、整体绕过限流
+        #（2026-09-06 渗透实测）。锁只覆盖同一实例；热重载两代与多进程都不互保，
+        # 边界与取舍见 docs/design-notes/concurrency-and-locks.md。
         self._kv_lock = asyncio.Lock()
 
     async def session_throttle(self, key: str, cooldown: int) -> int:
