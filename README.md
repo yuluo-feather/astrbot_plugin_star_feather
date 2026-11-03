@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-<img src="https://img.shields.io/badge/version-v0.8.3-f8a5c2" alt="v0.8.3"/>
+<img src="https://img.shields.io/badge/version-v0.9.0-f8a5c2" alt="v0.9.0"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -266,6 +266,16 @@
 
 ## 📜 更新记录
 
+#### v0.9.0
+
+- 新增：`/单抽` 与今日牌运解绑——单抽每次现抽、解读现场生成不缓存；「一天一张固定牌」交给新的 `/今日牌运`（别名 `/运势`、`/每日一签`）
+- 重构：入口 / 编排 / 纯逻辑 / 适配 / AI / 渲染分层收口，`ReadingService` 串起抽牌、两段 AI、渲染与发送；`sf_daily_*` 收敛为单键 `DailyRecord`，牌、解读与牌灵的话共用日期边界
+- 优化：牌灵的话与解读共用一笔 AI 总预算，改用 `TaskGroup` 并发——任一段抛出未兜底异常会取消另一段，AI 服务失败仍各自降级；新增 `ai.parallel_stages` 与 `ai.max_concurrency`
+- 修复：请求跨过午夜时牌面、缓存与海报日期各算各的；旧日期快照晚到不再覆盖新一天的缓存
+- 修复：用户问题改用分隔标签包裹，标签关键词循环剥除到不动点；注入过滤不再误伤正常问句与自述
+- 修复：牌灵缓存按人设隔离，缓存二次读失败不再清空记录；图片退路目录只回收空壳
+- 变更：日志统一走框架 logger；帮助行补上 `/单抽 帮助` 与 `/今日牌运 帮助`
+
 #### v0.8.3
 
 - 修复：注入过滤不再误伤正常问句（口语前缀、常见职业词、英文技术词原样通过）；用户问题改用分隔标签包裹，引号与标签关键词先行剥除——问题里写出结束标记也闭合不了数据块
@@ -298,11 +308,7 @@
 
 - 修复：日志统一走 AstrBot 自己的日志，插件不再往 `data/logs/` 里另开一份文件——从前那份自建日志文件（`star_feather.log`）删掉了，排障信息照旧一条不少地进 AstrBot 主日志（控制台、WebUI 日志台，以及开了文件日志时的 `logs/astrbot.log`）
 
-#### v0.7.4
-
-- 修复：「最近其他事情怎么样」「今天弹吉他怎么样」这类问法，不再被当成有具体主题——句子里带一个「他」，从前就被看作是在为某件具体事发问，于是这类问法错过当天的固定牌、每问一次重新抽；现在它们跟「最近怎么样」一样，按泛问处理，给你当天那一张
-
-> 更早版本（v0.7.3 及以前）的逐条明细见 [CHANGELOG.md](CHANGELOG.md) 与 `changelogs/` 目录——这里只保留最近 6 个版本的摘要。
+> 更早版本（v0.7.4 及以前）的逐条明细见 [CHANGELOG.md](CHANGELOG.md) 与 `changelogs/` 目录——这里只保留最近 6 个版本的摘要。
 
 ---
 
