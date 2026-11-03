@@ -252,6 +252,8 @@ def cleanup_stale_images(current_dir: str | None = None) -> None:
         entries = os.listdir(IMAGE_DIR_ROOT)
     except OSError as e:
         logger.warning(f"图片目录枚举失败，跳过启动清理: {e}")
+        # 根目录列不出内容，但退路目录仍在系统临时目录里：照样扫一遍
+        _sweep_fallback_dirs(current_dir)
         return
 
     own_pid = os.getpid()

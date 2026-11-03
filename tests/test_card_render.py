@@ -224,6 +224,31 @@ class TestTempCleanup:
         assert busy.is_dir() and (busy / "tarot_x.png").exists()
         assert not empty.exists()
 
+    def test_fallback_sweep_runs_when_image_root_cannot_be_listed(self, tmp_path, monkeypatch):
+        """根目录存在但列不出内容时，退路目录仍要回收——否则它们永无人管。"""
+        root = tmp_path / "rootdir"
+        root.mkdir()
+        temp = tmp_path / "temp"
+        temp.mkdir()
+        stale = temp / "star_feather_inst_99999_old"
+        stale.mkdir()
+        (stale / "x.png").write_bytes(b"x")
+        stamp = time.time() - render_store.STALE_INSTANCE_DIR_AGE - 60
+        os.utime(stale, (stamp, stamp))
+
+        real_listdir = os.listdir
+
+        def fake_listdir(path="."):
+            if os.path.abspath(str(path)) == os.path.abspath(str(root)):
+                raise OSError("permission denied")
+            return real_listdir(path)
+
+        monkeypatch.setattr(render_store, "IMAGE_DIR_ROOT", str(root))
+        monkeypatch.setattr(render_store.os, "listdir", fake_listdir)
+        monkeypatch.setattr(render_store.tempfile, "gettempdir", lambda: str(temp))
+        render_store.cleanup_stale_images()
+        assert not stale.exists()
+
     def test_normal_instance_dir_is_kept(self, tmp_path):
         """普通实例目录可能还有别的图，只删文件，不删目录。"""
         f = tmp_path / "tarot_test.png"
