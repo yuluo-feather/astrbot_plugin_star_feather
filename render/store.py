@@ -153,7 +153,7 @@ def _sweep_fallback_dirs(current_dir: str | None = None) -> int:
     """回收系统临时目录下的过期退路实例目录（不在 IMAGE_DIR_ROOT 之下）。
 
     同样按 STALE_INSTANCE_DIR_AGE 判定；同进程旧目录只收空壳，当前目录永不删。
-    见 docs/design-notes/image-lifecycle.md。
+    返回回收数量。见 docs/design-notes/image-lifecycle.md。
     """
     root = tempfile.gettempdir()
     try:
