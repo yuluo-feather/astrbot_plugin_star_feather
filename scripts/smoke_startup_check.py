@@ -56,7 +56,7 @@ SMOKE_PORT = "6199"
 DASHBOARD_USER = "astrbot"
 # dashboard 初始密码：init 认这个环境变量并写进临时配置，后面登录靠它，
 # 不去解析配置文件里的哈希。
-SMOKE_PASSWORD = "star-feather-smoke-pass"
+SMOKE_PASSWORD = "StarFeather-Smoke-1"
 DASHBOARD_BASE = f"http://127.0.0.1:{SMOKE_PORT}"
 # 命令往返的断言标记：每个占卜结果末尾都会追加这句免责声明（默认文案）。
 SMOKE_MARKER = "占卜仅供娱乐参考"
