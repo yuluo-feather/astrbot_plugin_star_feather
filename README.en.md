@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-<img src="https://img.shields.io/badge/version-v0.8.3-f8a5c2" alt="v0.8.3"/>
+<img src="https://img.shields.io/badge/version-v0.9.0-f8a5c2" alt="v0.9.0"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -280,6 +280,16 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 
 ## 📜 Changelog
 
+#### v0.9.0
+
+- Added: `/单抽` is unbound from the daily fortune — every call draws a fresh Feather Sign and generates its reading live; the new `/今日牌运` (aliases `/运势`, `/每日一签`) owns the one-fixed-card-a-day role
+- Refactored: entry / orchestration / pure logic / adapters / AI / rendering are separate layers, with `ReadingService` running draw → both AI stages → render → send; `sf_daily_*` is a single `DailyRecord` sharing one date boundary
+- Improved: the spirit's line and the reading share one AI budget and run under `TaskGroup`, so a failure in one cancels the other; new `ai.parallel_stages` and `ai.max_concurrency`
+- Fixed: a request crossing midnight no longer splits the card, cache and poster across two dates, and a late older snapshot no longer overwrites the new day's record
+- Fixed: user questions are fenced with loop-stripped markers, and the injection filter no longer mangles ordinary questions or self-descriptions
+- Fixed: the spirit-line cache is isolated per persona, a failed second read no longer wipes the record, and stale image directories are reaped only when empty
+- Changed: logging goes through the framework logger; the help row lists `/单抽 帮助` and `/今日牌运 帮助`
+
 #### v0.8.3
 
 - Fixed: the injection filter no longer mangles ordinary questions (colloquial prefixes, common professions and English technical terms pass through); user questions are fenced and stripped of quotes and fence keywords, so writing a closing marker in the question cannot end the data block early
@@ -311,10 +321,6 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 #### v0.7.5
 
 - Fixed: all logging now goes through AstrBot's own logger, and the plugin no longer keeps a second log file under `data/logs/` — the separate `star_feather.log` is gone, while troubleshooting output still reaches AstrBot's log (the console, the WebUI log view, and `logs/astrbot.log` when file logging is enabled)
-
-#### v0.7.4
-
-- Fixed: a question that merely contains the character 他 is no longer read as being about one specific matter — it used to miss the card of the day and get a fresh draw on every ask; now such a question counts as a general one and hands you today's card the same way a plain how-have-you-been does
 
 > Full per-version details for v0.7.3 and earlier live in [CHANGELOG.md](CHANGELOG.md) and the `changelogs/` directory — this page keeps only the six most recent releases.
 
