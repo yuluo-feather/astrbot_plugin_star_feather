@@ -124,11 +124,14 @@ class DailyFortune:
         return f"sf_daily_{uid}"
 
     async def _cleanup_legacy_spirit(self, uid: str) -> None:
-        """删掉旧版独立的 sf_spirit_* 键（每个用户一次）。"""
+        """删掉旧版独立的 sf_spirit_* 键（每个用户一次，删除成功后才记账）。
+
+        先记账再删会让一次瞬时故障变成「永远不再尝试」；失败时下次调用再试即可。
+        """
         if not uid or uid in self._legacy_cleaned:
             return
-        self._legacy_cleaned.add(uid)
-        await kv_delete(self.kv_store, f"sf_spirit_{uid}", "旧牌灵缓存")
+        if await kv_delete(self.kv_store, f"sf_spirit_{uid}", "旧牌灵缓存"):
+            self._legacy_cleaned.add(uid)
 
     async def pick_cached(self, uid: str) -> tuple | None:
         """今日固定抽牌：一个用户一条记录，按日期判失效。
@@ -206,10 +209,11 @@ class DailyFortune:
                 return interp
             if not fresh.same_context(today, sig, _PROMPT_V, self.persona):
                 fresh = DailyRecord()
-            fresh.put_context(today, sig, _PROMPT_V, self.persona)
             parsed = interp if isinstance(interp, Interpretation) else parse_interpretation(str(interp))
             if parsed is not None:
-                fresh.interps[topic] = parsed.to_record()
+                fresh.put_interp(topic, parsed.to_record(), sig, today, _PROMPT_V, self.persona)
+            else:
+                fresh.put_context(today, sig, _PROMPT_V, self.persona)
             _trim_interp_slots(fresh.interps)
             await kv_put(self.kv_store, key, fresh.to_raw(), "每日牌运解读缓存")
         return interp

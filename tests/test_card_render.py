@@ -178,6 +178,24 @@ class TestTempCleanup:
         # 文件已被处理：删除不存在的文件不抛异常
         asyncio.run(render_store._delayed_remove("C:/not/exist/tarot_x.png", 0))
 
+    def test_fallback_dir_is_removed_with_the_last_image(self):
+        """退路目录不在 IMAGE_DIR_ROOT 下，启动清理扫不到，图片删完要顺手收掉。"""
+        import tempfile
+        d = tempfile.mkdtemp(prefix=f"star_feather_inst_{os.getpid()}_")
+        p = os.path.join(d, "tarot_test.png")
+        with open(p, "wb") as f:
+            f.write(b"x")
+        asyncio.run(render_store._delayed_remove(p, 0))
+        assert not os.path.exists(p)
+        assert not os.path.isdir(d)
+
+    def test_normal_instance_dir_is_kept(self, tmp_path):
+        """普通实例目录可能还有别的图，只删文件，不删目录。"""
+        f = tmp_path / "tarot_test.png"
+        f.write_bytes(b"x")
+        asyncio.run(render_store._delayed_remove(str(f), 0))
+        assert not f.exists() and tmp_path.is_dir()
+
     def test_schedule_cleanup_no_loop_safe(self):
         # 无事件循环环境（同步测试）：静默跳过，不抛异常
         render_store._schedule_image_cleanup("C:/not/exist/tarot_x.png")

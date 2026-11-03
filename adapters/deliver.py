@@ -46,7 +46,7 @@ def supports_forward(event) -> bool:
 
 
 def split_text(text: str, size: int) -> list[str]:
-    """无标记文本按长度切分：优先在换行处断开，拼接可还原原文。"""
+    """无标记文本按长度切分：先清理首尾空白，再优先在换行处断开；拼接可还原清理后的文本。"""
     text = (text or "").strip()
     if not text:
         return []

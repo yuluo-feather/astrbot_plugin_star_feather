@@ -1096,3 +1096,34 @@ class TestNormalSpiritThenDailyPick:
         asyncio.run(df.pick_cached("u1"))
         rec = kv["sf_daily_u1"]
         assert rec["card_id"] and rec["spirit_line"] == ""
+
+
+# ---------- 旧牌灵键清理：失败要能重试 ----------
+class TestLegacySpiritCleanupRetry:
+    def test_failed_delete_is_retried_on_the_next_call(self):
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
+        kv = {"sf_spirit_u1": {"old": True}}
+
+        class _FlakyDelete:
+            def __init__(self):
+                self.deletes = 0
+
+            async def get_kv_data(self, key, default=None):
+                return kv.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                kv[key] = value
+
+            async def delete_kv_data(self, key):
+                self.deletes += 1
+                if self.deletes == 1:
+                    raise RuntimeError("kv 临时故障")
+                kv.pop(key, None)
+
+        store = _FlakyDelete()
+        df = DailyFortune(store)
+        asyncio.run(df.pick_cached("u1"))
+        assert store.deletes == 1 and "sf_spirit_u1" in kv
+
+        asyncio.run(df.pick_cached("u1"))
+        assert store.deletes == 2 and "sf_spirit_u1" not in kv

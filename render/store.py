@@ -35,6 +35,13 @@ async def _delayed_remove(path: str, delay: int = IMAGE_TTL_SECONDS) -> None:
         os.remove(path)
     except OSError:
         pass  # 已被启动清理/其他路径处理，无需管
+    # 退路目录不在 IMAGE_DIR_ROOT 下，启动清理扫不到：图删完后顺手收掉空目录
+    parent = os.path.dirname(path)
+    if os.path.basename(parent).startswith("star_feather_inst_"):
+        try:
+            os.rmdir(parent)
+        except OSError:
+            pass  # 还有别的图 / 已被处理：留着
 
 
 # 清理任务的强引用集合：asyncio 只对任务持弱引用，没人引用时任务可能被 GC 掉，
