@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-<img src="https://img.shields.io/badge/version-v0.9.1-f8a5c2" alt="v0.9.1"/>
+<img src="https://img.shields.io/badge/version-v0.9.2-f8a5c2" alt="v0.9.2"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -267,6 +267,10 @@
 
 ## 📜 更新记录
 
+#### v0.9.2
+
+- 修复：损坏的解读缓存不再被当成命中——内容为空或结构无效时按未命中重新生成并覆盖，避免用户收不到解读
+
 #### v0.9.1
 
 - 修复：换人设后重建每日记录不再丢牌字段与牌灵缓存；提示词版本变化时旧牌灵话一并作废（v0.9.0 回归）
@@ -301,17 +305,7 @@
 - 修复：升级用户的旧解读缓存超过 20 条主题时，现在会在下一次命中就把多余的最早分桶裁掉并写回——写回放在缓存锁外、最长等 2 秒，KV 挂住也不会拖住这次命中，本次命中的解读照旧返回
 - 说明：`ai_budget_seconds=0` 与 `ai_timeout=0` 同时出现时，AI 阶段就是没有上界（README 一直这么写）——v0.8.0 里「两个上界都还在」只适用于总预算非 0 或单请求超时非 0 的常规配置；要给 AI 留保护，把任意一项设成非 0 即可
 
-#### v0.8.0
-
-- 新增：单次占卜的 AI 总预算（`ai.ai_budget_seconds`，默认 120 秒）——候选重试、换供应商、结构修复共用一个截止点，见底就回退本地牌义；写 `0` 可关闭保护（日志会留一行提示）
-- 新增：解读结构校验强度可选（`ai.structure_check`，默认 `shadow` 影子档）——解读照常发出，另外记一行「严格口径会不会拒」与累计拒绝率，攒够样本再决定要不要切 `strict`
-- 修复：AI 卡住不再无限等；「牌灵的话」另受 20 秒阶段上限，不会独吞整笔预算
-- 修复：热重载不再删掉旧实例正要发的图——每个实例一份图片目录，同一进程的任何实例目录一律不动
-- 修复：命令入口的收尾句不再抢在结果前面——只在合并转发时等一个短窗口，纯文字 / 纯图模式即发即到
-- 变更：`ai_timeout=0` 表示不限制单个请求；自然语言入口在 AI 失败时会说明这次是回退结果；「今天」的日期边界统一跟随框架时区
-- 变更：Pillow 运行下限提升到 `>=12.3.0`（10.x / 11.x 仍带已知 CVE），渲染逻辑不变
-
-> 更早版本（v0.7.5 及以前）的逐条明细见 [CHANGELOG.md](CHANGELOG.md) 与 `changelogs/` 目录——这里只保留最近 6 个版本的摘要。
+> 更早版本（v0.8.0 及以前）的逐条明细见 [CHANGELOG.md](CHANGELOG.md) 与 `changelogs/` 目录——这里只保留最近 6 个版本的摘要。
 
 ---
 
