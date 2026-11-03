@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-<img src="https://img.shields.io/badge/version-v0.9.2-f8a5c2" alt="v0.9.2"/>
+<img src="https://img.shields.io/badge/version-v0.9.3-f8a5c2" alt="v0.9.3"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -281,6 +281,10 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 
 ## 📜 Changelog
 
+#### v0.9.3
+
+- Changed: card art resolves by trying the same file name with .png, .webp and .jpg in that order; PNG art dropped in place works without editing the manifest
+
 #### v0.9.2
 
 - Fixed: a corrupt daily-reading cache bucket is no longer treated as a hit — empty or structurally invalid content is regenerated and overwritten instead of silently delivering nothing
@@ -314,12 +318,7 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 
 - Fixed: a cache hit no longer writes anything back — on a KV store without compare-and-swap, the read-modify-write trim could overwrite a concurrently generated topic and could also pin the cache lock; hits are now read-only, and an oversized legacy bucket bag is trimmed to 20 on the next new topic (a real write)
 
-#### v0.8.1
-
-- Fixed: an upgraded user's topic cache that already holds more than 20 entries is now trimmed on the next cache hit and written back — the write happens outside the cache lock with a 2-second bound, so a stalled KV store cannot strand the hit, and the reading the user is waiting for is still returned.
-- Clarified: with both `ai_budget_seconds=0` and `ai_timeout=0`, the AI stage really has no ceiling (as the README has always said). The v0.8.0 note that both ceilings are still there only describes the normal setup with a non-zero total budget or a non-zero per-request timeout; leave either one non-zero to keep protection.
-
-> Full per-version details for v0.8.0 and earlier live in [CHANGELOG.md](CHANGELOG.md) and the `changelogs/` directory — this page keeps only the six most recent releases.
+> Full per-version details for v0.8.1 and earlier live in [CHANGELOG.md](CHANGELOG.md) and the `changelogs/` directory — this page keeps only the six most recent releases.
 
 ---
 

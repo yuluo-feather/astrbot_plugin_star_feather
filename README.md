@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-<img src="https://img.shields.io/badge/version-v0.9.2-f8a5c2" alt="v0.9.2"/>
+<img src="https://img.shields.io/badge/version-v0.9.3-f8a5c2" alt="v0.9.3"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -267,6 +267,10 @@
 
 ## 📜 更新记录
 
+#### v0.9.3
+
+- 变更：素材加载按同名扩展名取第一个存在的（`.png` → `.webp` → `.jpg`），自备 PNG 素材无需改清单即可生效
+
 #### v0.9.2
 
 - 修复：损坏的解读缓存不再被当成命中——内容为空或结构无效时按未命中重新生成并覆盖，避免用户收不到解读
@@ -300,12 +304,7 @@
 
 - 修复：命中缓存时不再做任何写回——无 CAS 的 KV 上「读-改-写」维护可能覆盖并发生成的新主题，也会占住缓存锁；现在命中只读，超限的旧分桶在下一次问新主题（真正写入）时收口到 20 条
 
-#### v0.8.1
-
-- 修复：升级用户的旧解读缓存超过 20 条主题时，现在会在下一次命中就把多余的最早分桶裁掉并写回——写回放在缓存锁外、最长等 2 秒，KV 挂住也不会拖住这次命中，本次命中的解读照旧返回
-- 说明：`ai_budget_seconds=0` 与 `ai_timeout=0` 同时出现时，AI 阶段就是没有上界（README 一直这么写）——v0.8.0 里「两个上界都还在」只适用于总预算非 0 或单请求超时非 0 的常规配置；要给 AI 留保护，把任意一项设成非 0 即可
-
-> 更早版本（v0.8.0 及以前）的逐条明细见 [CHANGELOG.md](CHANGELOG.md) 与 `changelogs/` 目录——这里只保留最近 6 个版本的摘要。
+> 更早版本（v0.8.1 及以前）的逐条明细见 [CHANGELOG.md](CHANGELOG.md) 与 `changelogs/` 目录——这里只保留最近 6 个版本的摘要。
 
 ---
 
