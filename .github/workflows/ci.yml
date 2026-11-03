@@ -31,8 +31,8 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  # PR 之间可以互相取消；main 上的运行不取消——否则后一次 push 会打断正在发版的
-  # 前一次运行，而新运行又因版本已提升而跳过发布，那个版本就永远不会发出去。
+  # PR 之间可以互相取消；main 上的运行不取消。发版判定已改成「Release 不完整就补齐」，
+  # 即使运行被取消也不会漏版本；保留这条只是少产生半成品运行。
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -258,10 +258,10 @@ jobs:
           retention-days: 30
 
   release:
-    name: 发布 Release（版本变更）
-    # 只在 main 上、metadata.yaml 版本相对推送前发生变化时发版；手动触发需勾选 release 且在 main。
-    # 用「版本号变化」而不是提交信息前缀判断：release 提交经 PR 合并时 HEAD 是 merge commit，
-    # 按信息前缀会漏发。发布红线仍由 tests/test_release_gates.py 守。
+    name: 发布 Release（版本未发布时）
+    # 该版本的 Release 不存在或缺 zip 时补齐，已完整则跳过——幂等，不依赖「本次推送是否
+    # 改了版本号」。GitHub 并发组会替换排队中的运行，按推送区间判断会漏掉被替换的那次
+    # 版本升级；按 Release 状态判断则任何一次后续运行都能补上。手动触发需勾选 release 且在 main。
     needs: [test, contract, static]
     if: >-
       github.event_name == 'push'
@@ -277,48 +277,13 @@ jobs:
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - name: 版本号是否变化
-        id: bumped
-        env:
-          EVENT: ${{ github.event_name }}
-          BEFORE: ${{ github.event.before }}
-        run: |
-          set -euo pipefail
-          if [ "$EVENT" = "workflow_dispatch" ]; then
-            echo "value=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
-            echo "value=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::推送前提交不可用，跳过自动发布（需要时手动触发）"
-            exit 0
-          fi
-          if ! old=$(git show "$BEFORE:metadata.yaml" 2>/dev/null | awk '/^version:/{print $2; exit}'); then
-            echo "value=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::读不到推送前的 metadata.yaml，跳过自动发布（需要时手动触发）"
-            exit 0
-          fi
-          if [ -z "$old" ]; then
-            echo "value=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::推送前的 metadata.yaml 没有版本号，跳过自动发布（需要时手动触发）"
-            exit 0
-          fi
-          new=$(awk '/^version:/{print $2; exit}' metadata.yaml)
-          if [ "$old" = "$new" ]; then
-            echo "value=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "value=true" >> "$GITHUB_OUTPUT"
-          fi
       - name: 校验版本与发布说明
         id: version
-        if: steps.bumped.outputs.value == 'true'
         run: |
           set -euo pipefail
           version=$(awk '/^version:/{print $2; exit}' metadata.yaml)
           code=$(grep -m1 '^VERSION = "' main.py | cut -d'"' -f2)
-          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+[.][0-9]+[.][0-9]+$'; then
             echo "::error::metadata.yaml 的 version 不是 X.Y.Z：$version"
             exit 1
           fi
@@ -327,7 +292,6 @@ jobs:
           echo "value=$version" >> "$GITHUB_OUTPUT"
       - name: 检查 Release 是否完整
         id: state
-        if: steps.bumped.outputs.value == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.value }}
@@ -346,7 +310,7 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
       - name: 打包市场 zip
-        if: steps.bumped.outputs.value == 'true' && steps.state.outputs.skip == 'false'
+        if: steps.state.outputs.skip == 'false'
         env:
           VERSION: ${{ steps.version.outputs.value }}
         run: |
@@ -354,7 +318,7 @@ jobs:
           git archive --format=zip --prefix=astrbot_plugin_star_feather-main/ -o "astrbot_plugin_star_feather-$VERSION.zip" HEAD
           ls -lh astrbot_plugin_star_feather-*.zip
       - name: 创建或补齐 Release
-        if: steps.bumped.outputs.value == 'true' && steps.state.outputs.skip == 'false'
+        if: steps.state.outputs.skip == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.value }}
