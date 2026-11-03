@@ -247,13 +247,66 @@ class TestDailyDateContext:
         reading = asyncio.run(svc.run(prepared, ReadingContext("u1", "umo", FakeMessenger()),
                                       question="今日运势"))
 
-        assert prepared.today == "20260827"
-        assert Clock(now_fn=now_fn).today() == "20260828"  # prepare 之后时钟已跨天
+        assert (prepared.today, prepared.date_text) == ("20260827", "8月27日·周四")
+        assert len(calls) == 1, "一次占卜只许读一次时钟（snapshot 取一次，后续不再读）"
         assert seen == {"pick": prepared.today, "spirit": prepared.today,
                         "interp": prepared.today}
         _picks, _uid, today, date_text = renderer.daily_cards[0]
         assert (today, date_text) == (prepared.today, prepared.date_text)
         assert reading.image == "poster.jpg"
+
+    def test_real_daily_cache_stores_the_prepared_date(self):
+        """真实缓存方法也吃 prepared 的日期：不是只把参数转发给替身。
+
+        替身只能证明 ReadingService 转发了日期；这里的 KV + 走动的时钟才能证明
+        DailyFortune 三个入口没有各自回头再读一次时钟。
+        """
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
+
+        calls = []
+
+        def now_fn():
+            calls.append(1)
+            # 第一次（prepare 快照）还是 27 日，之后一律是 28 日
+            return (datetime.datetime(2026, 8, 27, 23, 59, 59) if len(calls) <= 1
+                    else datetime.datetime(2026, 8, 28, 0, 0, 1))
+
+        class KV:
+            def __init__(self):
+                self.store = {}
+
+            async def get_kv_data(self, key, default=None):
+                return self.store.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                self.store[key] = value
+
+        class Interp:
+            def new_budget(self):
+                return None
+
+            async def spirit_line(self, *a, **kw):
+                return "牌灵的一句话"
+
+            async def interpret(self, *a, **kw):
+                return "【第1张·你的当下】一段解读。"
+
+        kv = KV()
+        clock = Clock(now_fn=now_fn)
+        svc = ReadingService(settings=_settings(), clock=clock,
+                             daily=DailyFortune(kv, clock=clock, interpreter=Interp()),
+                             interpreter=Interp(),
+                             renderer=FakeRenderer(daily_image="poster.jpg"))
+        prepared = asyncio.run(svc.prepare(build_request("daily", "今日运势"), "u1"))
+        asyncio.run(svc.run(prepared, ReadingContext("u1", "umo", FakeMessenger()),
+                            question="今日运势"))
+
+        assert prepared.today == "20260827"
+        record = kv.store["sf_daily_u1"]
+        assert record["date"] == prepared.today
+        card, upright = _daily_pick("u1", prepared.today)
+        assert (record["card_id"], record["upright"]) == (card["id"], upright)
+        assert len(calls) == 1, "缓存方法回头再读时钟会在这里露馅"
 
 
 # ---------- 占卜流程 run ----------

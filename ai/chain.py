@@ -518,6 +518,9 @@ class AiInterpreter:
             if queued == tried:
                 logger.warning("所有候选均因本地并发闸排队超时而未产出 AI 解读"
                                "（本地资源不足，未记 Provider 失败冷却）")
+            elif queued:
+                logger.warning(f"所有可用提供商均未产出 AI 解读（{queued} 个候选本地排队超时、"
+                               "未记 Provider 冷却，其余已按 provider 记录失败冷却）")
             else:
                 logger.warning("所有可用提供商均未产出 AI 解读（已按 provider 记录失败冷却）")
         else:

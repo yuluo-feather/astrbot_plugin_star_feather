@@ -163,7 +163,11 @@ class DailyFortune:
                     return _daily_result(card, record.upright)
             # 缓存坏掉不丢固定：_daily_pick 是确定性纯函数，同（用户,日期）必然同牌
             card, upright = _daily_pick(uid, today)
-            if ok:
+            if ok and record.date > today:
+                # 记录已被另一个请求推进到更晚的一天：本次仍按自己的日期出牌，
+                # 但不能拿旧日期回写——那会抹掉新一天的牌面、解读与牌灵缓存。
+                log.warning("每日牌运缓存已是更晚一天的记录，本次不回写")
+            elif ok:
                 picks = [{"card": card, "upright": upright}]
                 sig = _reading_sign(picks)
                 keep = record.same_context(today, sig, _PROMPT_V, self.persona)
