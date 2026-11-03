@@ -26,22 +26,38 @@ wheel 的 CLI 是 `astrbot init` / `astrbot run`。另一条实测：wheel 自�
 
 from __future__ import annotations
 
+import http.cookiejar
 import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# Windows CI 控制台默认是 cp1252：本脚本大量 print 中文，不显式切 UTF-8 会直接
+# UnicodeEncodeError（2026-11-03 手动冒烟第一次在 GitHub 上跑就栽在这）。
+# 子进程已经由 env["PYTHONUTF8"] 统一成 UTF-8，父进程这边也要对齐。
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 
 # 目标插件目录名：市场装出来的名字（框架用它推导模块名），不跟着本机目录名走
 PLUGIN_DIR_NAME = "astrbot_plugin_star_feather"
 # 端口故意错开 6185：本机跑冒烟时，真人在用的那个 AstrBot 正占着默认端口
 SMOKE_PORT = "6199"
+DASHBOARD_USER = "astrbot"
+# dashboard 初始密码：init 认这个环境变量并写进临时配置，后面登录靠它，
+# 不去解析配置文件里的哈希。
+SMOKE_PASSWORD = "StarFeather-Smoke-1"
+DASHBOARD_BASE = f"http://127.0.0.1:{SMOKE_PORT}"
 # 真框架冷启动要建配置、扫插件、拉 t2i 模板，给足时间；红了靠日志尾巴定位
 STARTUP_TIMEOUT_SECONDS = 180
 BANNER_MARK = "星羽塔罗 v"
@@ -115,6 +131,112 @@ def _stop_process(proc: subprocess.Popen[bytes]) -> None:
         proc.wait(timeout=15)
 
 
+def _stop_gracefully(proc: subprocess.Popen[bytes]) -> tuple[int, bool]:
+    """停掉框架进程，返回 (退出码, 是否按优雅路径收尾)。
+
+    POSIX 发 SIGINT，Python 转成 KeyboardInterrupt，CLI 的取消路径会调
+    core_lifecycle.stop()——这条可以验证（日志里有 「Shutting down AstrBot」）。
+
+    Windows 没有等价物：CTRL_BREAK_EVENT 会直接终止进程（Python 默认不处理
+    SIGBREAK），CTRL_C_EVENT 在 CREATE_NEW_PROCESS_GROUP 下被禁用（2026-11-03
+    实测两种都试过）。真实的交互式 Ctrl+C 可以优雅退出，但无法从外部注入，
+    所以 Windows 这格只确认进程能停下，优雅退出留给人工验收。
+    """
+    if os.name == "nt":
+        proc.terminate()
+        try:
+            return proc.wait(timeout=90), False
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            return proc.wait(timeout=15), False
+    proc.send_signal(signal.SIGINT)
+    try:
+        return proc.wait(timeout=90), True
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        return proc.wait(timeout=15), False
+
+
+def _http_opener() -> urllib.request.OpenerDirector:
+    """带 cookie 的 HTTP 客户端：登录签发的 JWT 存在 cookie 里，后续请求自动带上。"""
+    jar = http.cookiejar.CookieJar()
+    return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+
+
+def _post_json(opener, path: str, payload: dict, timeout: float = 30) -> tuple[int, str]:
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        f"{DASHBOARD_BASE}{path}", data=body,
+        headers={"Content-Type": "application/json"})
+    with opener.open(req, timeout=timeout) as resp:
+        return resp.status, resp.read().decode("utf-8", "replace")
+
+
+def _wait_dashboard_ready(opener, deadline: float) -> bool:
+    """横幅出现不等于 HTTP 就绪：轮询公开的 setup-status 直到连得上。"""
+    while time.monotonic() < deadline:
+        try:
+            with opener.open(f"{DASHBOARD_BASE}/api/auth/setup-status", timeout=5) as resp:
+                if resp.status == 200:
+                    return True
+        except (urllib.error.URLError, OSError):
+            pass
+        time.sleep(1)
+    return False
+
+
+def _login(opener) -> str | None:
+    """登录并返回 JWT。cookie 带 Secure 标记，HTTP 下不会回传，所以显式用 Bearer。"""
+    try:
+        status, text = _post_json(
+            opener, "/api/auth/login",
+            {"username": DASHBOARD_USER, "password": SMOKE_PASSWORD})
+    except (urllib.error.URLError, OSError) as exc:
+        print(f"登录请求失败：{exc}", file=sys.stderr)
+        return None
+    if status != 200:
+        print(f"登录失败（HTTP {status}）：{text[:300]}", file=sys.stderr)
+        return None
+    try:
+        token = (json.loads(text).get("data") or {}).get("token")
+    except (ValueError, AttributeError):
+        token = None
+    if not isinstance(token, str) or not token:
+        print(f"登录失败：响应里没有 token：{text[:300]}", file=sys.stderr)
+        return None
+    return token
+
+
+def _run_command(opener, token: str) -> str:
+    """经 WebChat 通道发一条 /占卜，读完整条 SSE 返回。"""
+    payload = {"message": "/占卜 测试", "session_id": "smoke-session"}
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        f"{DASHBOARD_BASE}/api/chat/send", data=body,
+        headers={"Content-Type": "application/json",
+                 "Authorization": f"Bearer {token}"})
+    with opener.open(req, timeout=120) as resp:
+        return resp.read().decode("utf-8", "replace")
+
+
+def _has_plugin_result(sse: str) -> bool:
+    """SSE 里是否出现了插件发出的牌面图。
+
+    没有 AI Provider 时插件走图片模式：只发「洗牌提示 + 牌面图」，不带文字解读，
+    所以不能用免责声明当标记——牌面图本身就是「命令被执行且结果已发送」的证据。
+    """
+    for line in sse.splitlines():
+        if not line.startswith("data: "):
+            continue
+        try:
+            event = json.loads(line[len("data: "):])
+        except ValueError:
+            continue
+        if event.get("type") == "image" and str(event.get("data", "")).startswith("[IMAGE]"):
+            return True
+    return False
+
+
 def main() -> int:
     version = _read_declared_version()
     expected = f"{BANNER_MARK}{version}"
@@ -122,6 +244,8 @@ def main() -> int:
 
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
+    # init 认这个环境变量生成 dashboard 初始密码；后面登录与命令往返都靠它
+    env["ASTRBOT_DASHBOARD_INITIAL_PASSWORD"] = SMOKE_PASSWORD
     # Windows 上 httpx 只认 NO_PROXY 环境变量：不设的话连 127.0.0.1 也走系统代理
     env["NO_PROXY"] = "127.0.0.1,localhost,::1"
     env.pop("HTTP_PROXY", None)
@@ -182,11 +306,11 @@ def main() -> int:
         print(f"拉起真框架（端口 {SMOKE_PORT}），等插件横幅……")
         deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
         try:
-            while time.monotonic() < deadline:
+            while True:
                 text = _read_log(log_path)
                 if expected in text:
-                    print(f"冒烟通过：真框架里加载出了插件横幅「{expected}」")
-                    return 0
+                    print(f"启动通过：真框架里加载出了插件横幅「{expected}」")
+                    break
 
                 return_code = proc.poll()
                 if return_code is not None:
@@ -197,14 +321,55 @@ def main() -> int:
                     print(_tail(text), file=sys.stderr)
                     return 1
 
+                if time.monotonic() >= deadline:
+                    print(
+                        f"冒烟失败：{STARTUP_TIMEOUT_SECONDS} 秒内没等到「{expected}」",
+                        file=sys.stderr,
+                    )
+                    print(_tail(_read_log(log_path)), file=sys.stderr)
+                    return 1
+
                 time.sleep(2)
 
-            print(
-                f"冒烟失败：{STARTUP_TIMEOUT_SECONDS} 秒内没等到「{expected}」",
-                file=sys.stderr,
-            )
-            print(_tail(_read_log(log_path)), file=sys.stderr)
-            return 1
+            opener = _http_opener()
+            if not _wait_dashboard_ready(opener, time.monotonic() + 60):
+                print("冒烟失败：横幅出现后 60 秒内 dashboard 没就绪", file=sys.stderr)
+                print(_tail(_read_log(log_path)), file=sys.stderr)
+                return 1
+            token = _login(opener)
+            if not token:
+                print(_tail(_read_log(log_path)), file=sys.stderr)
+                return 1
+
+            print("登录通过，经 WebChat 通道发一条 /占卜 测试……")
+            sse = _run_command(opener, token)
+            if not _has_plugin_result(sse):
+                print(
+                    "冒烟失败：命令往返没有收到插件产出的牌面图",
+                    file=sys.stderr,
+                )
+                print(_tail(sse, 30), file=sys.stderr)
+                print(_tail(_read_log(log_path)), file=sys.stderr)
+                return 1
+            print("命令往返通过：/占卜 的结果已由 WebChat 通道返回（牌面图）")
+
+            exit_code, graceful_checked = _stop_gracefully(proc)
+            if graceful_checked:
+                if exit_code not in (0, 130):
+                    print(f"冒烟失败：优雅退出返回 {exit_code}", file=sys.stderr)
+                    print(_tail(_read_log(log_path)), file=sys.stderr)
+                    return 1
+                if "Shutting down AstrBot" not in _read_log(log_path):
+                    print("冒烟失败：退出码正常，但日志里没有核心收尾记录",
+                          file=sys.stderr)
+                    print(_tail(_read_log(log_path)), file=sys.stderr)
+                    return 1
+                print("优雅退出通过：核心收到 SIGINT 并完成收尾")
+            else:
+                print(
+                    f"Windows 下按硬杀结束（exit code {exit_code}）；"
+                    "优雅退出无法从外部注入，留作人工验收")
+            return 0
         finally:
             _stop_process(proc)
     finally:

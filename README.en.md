@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-<img src="https://img.shields.io/badge/version-v0.9.1-f8a5c2" alt="v0.9.1"/>
+<img src="https://img.shields.io/badge/version-v0.9.2-f8a5c2" alt="v0.9.2"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -281,6 +281,10 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 
 ## 📜 Changelog
 
+#### v0.9.2
+
+- Fixed: a corrupt daily-reading cache bucket is no longer treated as a hit — empty or structurally invalid content is regenerated and overwritten instead of silently delivering nothing
+
 #### v0.9.1
 
 - Fixed: rebuilding the daily record after a persona change no longer drops the card fields or the spirit cache; a changed prompt version also invalidates the old spirit line (a v0.9.0 regression)
@@ -315,17 +319,7 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 - Fixed: an upgraded user's topic cache that already holds more than 20 entries is now trimmed on the next cache hit and written back — the write happens outside the cache lock with a 2-second bound, so a stalled KV store cannot strand the hit, and the reading the user is waiting for is still returned.
 - Clarified: with both `ai_budget_seconds=0` and `ai_timeout=0`, the AI stage really has no ceiling (as the README has always said). The v0.8.0 note that both ceilings are still there only describes the normal setup with a non-zero total budget or a non-zero per-request timeout; leave either one non-zero to keep protection.
 
-#### v0.8.0
-
-- Added: a per-reading AI time budget (`ai.ai_budget_seconds`, default 120 seconds) — candidate retries, provider fallbacks and structure repairs all draw on one deadline; when it is spent the reading falls back to the built-in meanings. Set it to `0` to turn the guard off (the log will say so).
-- Added: configurable strictness for the structure check (`ai.structure_check`, default `shadow`) — readings go out exactly as before, while one more line records whether the strict rules would have rejected the candidate and what the running rejection rate looks like, so you can decide when to switch to `strict`.
-- Fixed: a stuck AI no longer keeps a reading waiting, and the spirit's line has its own 20-second stage cap so it cannot spend the whole budget.
-- Fixed: a hot reload no longer deletes images the previous instance was about to send — every instance gets its own image directory, and no directory owned by the running process is touched.
-- Fixed: the closing line no longer jumps ahead of the result on the command path — it waits a short moment only for forwarded cards, while text-only and image-only modes send straight away.
-- Changed: `ai_timeout=0` now means "no cap on a single request"; the natural-language entry explains an AI failure instead of staying silent; "today" follows the framework timezone everywhere.
-- Changed: the Pillow runtime floor is now `>=12.3.0` (10.x / 11.x still carry known CVEs); rendering behaviour is unchanged.
-
-> Full per-version details for v0.7.5 and earlier live in [CHANGELOG.md](CHANGELOG.md) and the `changelogs/` directory — this page keeps only the six most recent releases.
+> Full per-version details for v0.8.0 and earlier live in [CHANGELOG.md](CHANGELOG.md) and the `changelogs/` directory — this page keeps only the six most recent releases.
 
 ---
 
