@@ -1145,6 +1145,29 @@ class TestSharedKvLockRegistry:
         gc.collect()
         assert len(daily._KV_LOCKS) == 0
 
+    def test_contended_closed_loop_is_reaped_on_next_call(self):
+        """争用会让锁绑定到循环（lock → loop），弱键回收不掉；下一次取锁清掉它。"""
+        from data.plugins.astrbot_plugin_star_feather.services import daily
+        daily._KV_LOCKS.clear()
+
+        async def contend():
+            lock = daily._shared_kv_lock()
+
+            async def hold():
+                async with lock:
+                    await asyncio.sleep(0.01)
+
+            await asyncio.gather(hold(), hold())
+
+        asyncio.run(contend())
+        assert len(daily._KV_LOCKS) == 1   # 锁仍持有已关闭的循环
+
+        async def go():
+            daily._shared_kv_lock()
+            return len(daily._KV_LOCKS)
+
+        assert asyncio.run(go()) == 1
+
     def test_same_loop_reuses_the_lock(self):
         from data.plugins.astrbot_plugin_star_feather.services import daily
         daily._KV_LOCKS.clear()

@@ -36,8 +36,9 @@ _INTERP_FLIGHT = SingleFlight()
 # 进程级写锁：同一进程内所有 DailyFortune 共用（热重载时新旧实例并存）。
 # 各自持锁时，两个主题的「读—合并—写」会互相覆盖；锁按事件循环隔离，
 # 避免测试里 asyncio.run 新建循环时撞上绑定旧循环的锁。
-# 键用弱引用：循环对象被回收后条目自动消失，不依赖下一次取锁来清。
-# （锁若因争用绑定到循环，会与循环互相持有——那是锁自身的生命周期。）
+# 键用弱引用：未争用的锁不碰循环，循环对象被回收后条目自动消失。
+# 但锁一旦因争用绑定到循环（lock → loop），弱键就回收不掉；所以取锁时再清一遍
+# 已关闭循环的条目，保证反复 asyncio.run 的争用场景也不会累积。
 _KV_LOCKS: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
     weakref.WeakKeyDictionary())
 _KV_LOCKS_GUARD = threading.Lock()
@@ -46,6 +47,8 @@ _KV_LOCKS_GUARD = threading.Lock()
 def _shared_kv_lock() -> asyncio.Lock:
     loop = asyncio.get_running_loop()
     with _KV_LOCKS_GUARD:
+        for known in [lp for lp in _KV_LOCKS if lp.is_closed()]:
+            _KV_LOCKS.pop(known, None)
         lock = _KV_LOCKS.get(loop)
         if lock is None:
             lock = asyncio.Lock()
