@@ -31,7 +31,9 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # PR 之间可以互相取消；main 上的运行不取消——否则后一次 push 会打断正在发版的
+  # 前一次运行，而新运行又因版本已提升而跳过发布，那个版本就永远不会发出去。
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -232,14 +234,22 @@ jobs:
       - name: 读版本号
         id: version
         run: |
-          echo "value=$(sed -n 's/^version: *//p' metadata.yaml | head -1)" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          version=$(awk '/^version:/{print $2; exit}' metadata.yaml)
+          printf '%s' "$version" | grep -Eq '^[0-9]+[.][0-9]+[.][0-9]+$' || {
+            echo "::error::metadata.yaml 的 version 不是 X.Y.Z：$version"
+            exit 1
+          }
+          echo "value=$version" >> "$GITHUB_OUTPUT"
       # 布局对齐 AstrBot 安装器真正拉的那份：core/repository.py 拼的
       # https://github.com/<owner>/<name>/archive/refs/heads/<branch>.zip → 顶层目录
       # astrbot_plugin_star_feather-main/。产物仅供人工下载/留档，不是市场投递物。
       - name: 打包（只含仓库已跟踪文件，等价市场拉取的 zip）
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
         run: |
-          git archive --format=zip --prefix=astrbot_plugin_star_feather-main/ \
-            -o "astrbot_plugin_star_feather-${{ steps.version.outputs.value }}.zip" HEAD
+          set -euo pipefail
+          git archive --format=zip --prefix=astrbot_plugin_star_feather-main/ -o "astrbot_plugin_star_feather-$VERSION.zip" HEAD
           ls -lh astrbot_plugin_star_feather-*.zip
       - uses: actions/upload-artifact@v7
         with:
@@ -249,13 +259,15 @@ jobs:
 
   release:
     name: 发布 Release（版本变更）
-    # 只在 metadata.yaml 的版本号相对本次推送前发生变化时发版；手动触发需显式勾选 release。
+    # 只在 main 上、metadata.yaml 版本相对推送前发生变化时发版；手动触发需勾选 release 且在 main。
     # 用「版本号变化」而不是提交信息前缀判断：release 提交经 PR 合并时 HEAD 是 merge commit，
     # 按信息前缀会漏发。发布红线仍由 tests/test_release_gates.py 守。
     needs: [test, contract, static]
     if: >-
       github.event_name == 'push'
-      || (github.event_name == 'workflow_dispatch' && github.event.inputs.release == 'true')
+      || (github.event_name == 'workflow_dispatch'
+          && github.event.inputs.release == 'true'
+          && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -270,20 +282,31 @@ jobs:
       - name: 版本号是否变化
         id: bumped
         env:
+          EVENT: ${{ github.event_name }}
           BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ "$EVENT" = "workflow_dispatch" ]; then
             echo "value=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
-            echo "value=true" >> "$GITHUB_OUTPUT"
+            echo "value=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::推送前提交不可用，跳过自动发布（需要时手动触发）"
             exit 0
           fi
-          old=$(git show "$BEFORE:metadata.yaml" 2>/dev/null | awk '/^version:/{print $2; exit}' || true)
+          if ! old=$(git show "$BEFORE:metadata.yaml" 2>/dev/null | awk '/^version:/{print $2; exit}'); then
+            echo "value=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::读不到推送前的 metadata.yaml，跳过自动发布（需要时手动触发）"
+            exit 0
+          fi
+          if [ -z "$old" ]; then
+            echo "value=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::推送前的 metadata.yaml 没有版本号，跳过自动发布（需要时手动触发）"
+            exit 0
+          fi
           new=$(awk '/^version:/{print $2; exit}' metadata.yaml)
-          if [ -n "$old" ] && [ "$old" = "$new" ]; then
+          if [ "$old" = "$new" ]; then
             echo "value=false" >> "$GITHUB_OUTPUT"
           else
             echo "value=true" >> "$GITHUB_OUTPUT"
@@ -295,32 +318,52 @@ jobs:
           set -euo pipefail
           version=$(awk '/^version:/{print $2; exit}' metadata.yaml)
           code=$(grep -m1 '^VERSION = "' main.py | cut -d'"' -f2)
-          test -n "$version"
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::metadata.yaml 的 version 不是 X.Y.Z：$version"
+            exit 1
+          fi
           test "$code" = "$version"
           test -f "changelogs/v$version.md"
           echo "value=$version" >> "$GITHUB_OUTPUT"
-      - name: 版本已发布则跳过
-        id: exist
+      - name: 检查 Release 是否完整
+        id: state
         if: steps.bumped.outputs.value == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.value }}
         run: |
           set -euo pipefail
-          if gh release view "v${{ steps.version.outputs.value }}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "value=true" >> "$GITHUB_OUTPUT"
+          zip="astrbot_plugin_star_feather-$VERSION.zip"
+          if ! gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "release=true" >> "$GITHUB_OUTPUT"
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -qx "$zip"; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
           else
-            echo "value=false" >> "$GITHUB_OUTPUT"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
       - name: 打包市场 zip
-        if: steps.bumped.outputs.value == 'true' && steps.exist.outputs.value == 'false'
+        if: steps.bumped.outputs.value == 'true' && steps.state.outputs.skip == 'false'
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
         run: |
           set -euo pipefail
-          git archive --format=zip --prefix=astrbot_plugin_star_feather-main/ -o "astrbot_plugin_star_feather-${{ steps.version.outputs.value }}.zip" HEAD
+          git archive --format=zip --prefix=astrbot_plugin_star_feather-main/ -o "astrbot_plugin_star_feather-$VERSION.zip" HEAD
           ls -lh astrbot_plugin_star_feather-*.zip
-      - name: 创建 tag 与 Release
-        if: steps.bumped.outputs.value == 'true' && steps.exist.outputs.value == 'false'
+      - name: 创建或补齐 Release
+        if: steps.bumped.outputs.value == 'true' && steps.state.outputs.skip == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.value }}
+          RELEASE_EXISTS: ${{ steps.state.outputs.release }}
         run: |
           set -euo pipefail
-          gh release create "v${{ steps.version.outputs.value }}" "astrbot_plugin_star_feather-${{ steps.version.outputs.value }}.zip" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "v${{ steps.version.outputs.value }}" --notes-file "changelogs/v${{ steps.version.outputs.value }}.md"
+          zip="astrbot_plugin_star_feather-$VERSION.zip"
+          if [ "$RELEASE_EXISTS" = "true" ]; then
+            gh release upload "v$VERSION" "$zip" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "v$VERSION" "$zip" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "v$VERSION" --notes-file "changelogs/v$VERSION.md"
+          fi

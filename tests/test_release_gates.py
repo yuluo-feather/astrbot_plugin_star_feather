@@ -64,7 +64,7 @@ def _version_carriers():
 
     return {
         "main.VERSION": first("main.py", r'VERSION\s*=\s*"([^"]+)"'),
-        "metadata.version": first("metadata.yaml", r"(?m)^version:\s*([\d.]+)"),
+        "metadata.version": first("metadata.yaml", r"(?m)^version:\s*(\d+\.\d+\.\d+)\s*$"),
         "README.md 徽章": first("README.md", r"version-v([\d.]+)-"),
         "README.en.md 徽章": first("README.en.md", r"version-v([\d.]+)-"),
         "README.md alt": first("README.md", r'alt="v([\d.]+)"'),
