@@ -61,7 +61,7 @@ class TestDailyCardOrchestration:
         monkeypatch.setattr(render_mod, "render_daily_card", boom)
         picks = [{"card": TAROT_CARDS[0], "upright": True}]
         r, clock = self._renderer()
-        assert asyncio.run(r.daily_card(picks, "u1", clock)) is None
+        assert asyncio.run(r.daily_card(picks, "u1", clock.today(), clock.date_text())) is None
 
     def test_render_success_returns_path_and_schedules_cleanup(self, monkeypatch, tmp_path):
         from data.plugins.astrbot_plugin_star_feather.services import (
@@ -84,13 +84,13 @@ class TestDailyCardOrchestration:
         monkeypatch.setattr(render_mod, "_schedule_image_cleanup", fake_cleanup)
         picks = [{"card": TAROT_CARDS[0], "upright": True}]
         r, clock = self._renderer()
-        out = asyncio.run(r.daily_card(picks, "u1", clock))
+        out = asyncio.run(r.daily_card(picks, "u1", clock.today(), clock.date_text()))
         assert out.endswith(".jpg")
         assert calls and calls[0][0] == out
 
     def test_empty_picks_returns_none(self):
         r, clock = self._renderer()
-        assert asyncio.run(r.daily_card([], "u1", clock)) is None
+        assert asyncio.run(r.daily_card([], "u1", clock.today(), clock.date_text())) is None
 
 
 class TestDailyCardRenderSlot:
@@ -127,8 +127,8 @@ class TestDailyCardRenderSlot:
 
         async def twice():
             return await asyncio.gather(
-                r.daily_card(picks, "u1", clock),
-                r.daily_card(picks, "u2", clock))
+                r.daily_card(picks, "u1", clock.today(), clock.date_text()),
+                r.daily_card(picks, "u2", clock.today(), clock.date_text()))
 
         outs = asyncio.run(twice())
         assert all(o and o.endswith(".jpg") for o in outs)

@@ -38,7 +38,11 @@ class ReadingContext:
 
 @dataclass(frozen=True)
 class PreparedReading:
-    """抽牌结果：确定性抽牌已完成，后续 AI/渲染/发送只读它。"""
+    """抽牌结果：确定性抽牌已完成，后续 AI/渲染/发送只读它。
+
+    today / date_text 是本次占卜的日期上下文，由 prepare 取一次后全程沿用：
+    抽牌、两个缓存与海报都用同一个日期，请求跨过午夜也不会各算各的。
+    """
 
     request: ReadingRequest
     uid: str
@@ -46,6 +50,8 @@ class PreparedReading:
     positions: list[str]
     picks: list[Pick]
     is_daily: bool
+    today: str
+    date_text: str
 
 
 class ReadingService:
@@ -61,16 +67,22 @@ class ReadingService:
         self.rng = rng
 
     async def prepare(self, request: ReadingRequest, uid: str) -> PreparedReading:
-        """按意图抽牌：今日固定走缓存，其余自由随机。"""
+        """按意图抽牌：今日固定走缓存，其余自由随机。
+
+        日期在这里取一次并随 PreparedReading 传下去：抽牌、牌灵缓存、解读缓存与
+        海报共用同一个日期，避免请求恰好跨过午夜时牌面与日期各算各的。
+        """
+        today, date_text = self.clock.snapshot()
         if request.kind == KIND_DAILY and request.fixed_for_day:
-            picked = await self.daily.pick_cached(uid)
+            picked = await self.daily.pick_cached(uid, today)
             if picked:
                 formation, positions, picks = picked
                 return PreparedReading(request, uid, formation, list(positions),
-                                       list(picks), True)
+                                       list(picks), True, today, date_text)
             log.warning("每日牌运不可用（无用户标识），回退自由随机")
         positions, picks = draw(request.spread, self.rng)
-        return PreparedReading(request, uid, request.spread, positions, picks, False)
+        return PreparedReading(request, uid, request.spread, positions, picks, False,
+                               today, date_text)
 
     async def run(self, prepared: PreparedReading, ctx: ReadingContext, *,
                   question: str, fail_note: str = "",
@@ -86,16 +98,17 @@ class ReadingService:
         clean = (question or "").strip()
         topic = prepared.request.topic_key or norm_topic(clean)
         persona_eff = resolve_persona(
-            self.settings.ai.persona, seed=self._persona_seed(prepared.uid))
+            self.settings.ai.persona, seed=self._persona_seed(prepared.uid, prepared.today))
         budget = self.interpreter.new_budget()
 
         spirit_call = (self.daily.spirit_cached(ctx.umo, prepared.uid, picks, topic,
-                                                persona_eff, budget)
+                                                persona_eff, budget,
+                                                today=prepared.today)
                        if picks else None)
         if prepared.is_daily and prepared.uid:
             interp_call = self.daily.interp_cached(
                 ctx.umo, prepared.uid, prepared.formation, positions, picks, clean,
-                persona_eff, budget)
+                persona_eff, budget, today=prepared.today)
         else:
             interp_call = self.interpret(
                 ctx.umo, prepared.formation, positions, picks,
@@ -125,7 +138,8 @@ class ReadingService:
         if (prepared.is_daily and prepared.uid and picks
                 and self.settings.output.daily_card
                 and self.settings.output.send_mode != "text_only"):
-            image = await self.renderer.daily_card(picks, prepared.uid, self.clock)
+            image = await self.renderer.daily_card(picks, prepared.uid,
+                                                   prepared.today, prepared.date_text)
         if not image:
             image = await self.renderer.card(prepared.formation, positions, picks)
         image = await self.renderer.ensure_image(
@@ -158,6 +172,6 @@ class ReadingService:
             return None
         return random.choice(SHUFFLE_LINES)
 
-    def _persona_seed(self, uid: str) -> str | None:
+    def _persona_seed(self, uid: str, today: str) -> str | None:
         """random 人设按（用户, 日期）固定：同一天换主题也是同一副腔调。"""
-        return f"{uid}|{self.clock.today()}" if uid else None
+        return f"{uid}|{today}" if uid else None

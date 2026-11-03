@@ -4,6 +4,7 @@
 命令入口的帮助/限流/异常分支，以及结果先于收尾句的确定顺序。
 """
 import asyncio
+import datetime
 import types
 
 import pytest
@@ -53,14 +54,15 @@ class FakeDaily:
         self.spirit = spirit
         self.interp = interp
 
-    async def pick_cached(self, uid):
+    async def pick_cached(self, uid, today=None):
         return self.cached
 
-    async def spirit_cached(self, umo, uid, picks, topic, persona_eff, budget=None):
+    async def spirit_cached(self, umo, uid, picks, topic, persona_eff, budget=None,
+                            *, today=None):
         return self.spirit
 
     async def interp_cached(self, umo, uid, formation, positions, picks, clean,
-                            persona_eff=None, budget=None):
+                            persona_eff=None, budget=None, *, today=None):
         return self.interp if self.interp is not None else f"DAILY:{clean}"
 
 
@@ -92,8 +94,8 @@ class FakeRenderer:
         self.cards.append((formation, positions, picks))
         return self.image
 
-    async def daily_card(self, picks, uid, clock):
-        self.daily_cards.append((picks, uid))
+    async def daily_card(self, picks, uid, today, date_text):
+        self.daily_cards.append((picks, uid, today, date_text))
         return self.daily_image
 
     async def ensure_image(self, img, formation, positions, picks):
@@ -203,6 +205,57 @@ class TestPrepare:
         assert prepared.formation == "羽镜"
 
 
+# ---------- 一次占卜的日期上下文 ----------
+class TestDailyDateContext:
+    """请求跨过午夜时，抽牌、两个缓存与海报仍用同一个日期。
+
+    prepare 之后时钟再被读到的都会是新一天：任何一处重新取日期，都会在这里露馅。
+    """
+
+    def test_date_captured_at_prepare_is_used_by_every_stage(self):
+        calls = []
+
+        def now_fn():
+            calls.append(1)
+            # 第一次（prepare 取日期快照）还在 27 日，之后一律跨到 28 日
+            return (datetime.datetime(2026, 8, 27, 23, 59, 59) if len(calls) <= 1
+                    else datetime.datetime(2026, 8, 28, 0, 0, 1))
+
+        seen = {}
+
+        class Daily(FakeDaily):
+            async def pick_cached(self, uid, today=None):
+                seen["pick"] = today
+                return ("羽签", ["你的当下"], [PICK])
+
+            async def spirit_cached(self, umo, uid, picks, topic, persona_eff, budget=None,
+                                    *, today=None):
+                seen["spirit"] = today
+                return "sig"
+
+            async def interp_cached(self, umo, uid, formation, positions, picks, clean,
+                                    persona_eff=None, budget=None, *, today=None):
+                seen["interp"] = today
+                return "DAILY"
+
+        renderer = FakeRenderer(daily_image="poster.jpg")
+        svc = ReadingService(settings=_settings(), clock=Clock(now_fn=now_fn),
+                             daily=Daily(), interpreter=FakeInterpreter(),
+                             renderer=renderer)
+
+        prepared = asyncio.run(svc.prepare(build_request("daily", "今日运势"), "u1"))
+        reading = asyncio.run(svc.run(prepared, ReadingContext("u1", "umo", FakeMessenger()),
+                                      question="今日运势"))
+
+        assert prepared.today == "20260827"
+        assert Clock(now_fn=now_fn).today() == "20260828"  # prepare 之后时钟已跨天
+        assert seen == {"pick": prepared.today, "spirit": prepared.today,
+                        "interp": prepared.today}
+        _picks, _uid, today, date_text = renderer.daily_cards[0]
+        assert (today, date_text) == (prepared.today, prepared.date_text)
+        assert reading.image == "poster.jpg"
+
+
 # ---------- 占卜流程 run ----------
 class TestRunReading:
     def _run(self, svc, *, question="问感情", epilogue=False, request=None):
@@ -219,7 +272,8 @@ class TestRunReading:
         seen = {}
 
         class Daily(FakeDaily):
-            async def spirit_cached(self, umo, uid, picks, topic, persona_eff, budget=None):
+            async def spirit_cached(self, umo, uid, picks, topic, persona_eff, budget=None,
+                                    *, today=None):
                 seen["spirit"] = budget
                 return "sig"
 
@@ -240,7 +294,8 @@ class TestRunReading:
         interpret_started = asyncio.Event()
 
         class Daily(FakeDaily):
-            async def spirit_cached(self, umo, uid, picks, topic, persona_eff, budget=None):
+            async def spirit_cached(self, umo, uid, picks, topic, persona_eff, budget=None,
+                                    *, today=None):
                 spirit_started.set()
                 await asyncio.wait_for(interpret_started.wait(), timeout=1)
                 return "sig"
@@ -260,7 +315,8 @@ class TestRunReading:
         order = []
 
         class Daily(FakeDaily):
-            async def spirit_cached(self, umo, uid, picks, topic, persona_eff, budget=None):
+            async def spirit_cached(self, umo, uid, picks, topic, persona_eff, budget=None,
+                                    *, today=None):
                 order.append("spirit-start")
                 await asyncio.sleep(0)
                 order.append("spirit-end")
@@ -283,7 +339,8 @@ class TestRunReading:
         cancelled = asyncio.Event()
 
         class Daily(FakeDaily):
-            async def spirit_cached(self, umo, uid, picks, topic, persona_eff, budget=None):
+            async def spirit_cached(self, umo, uid, picks, topic, persona_eff, budget=None,
+                                    *, today=None):
                 spirit_started.set()
                 try:
                     await asyncio.sleep(3600)
@@ -331,7 +388,8 @@ class TestRunReading:
         monkeypatch.setattr(reading_mod, "resolve_persona", counting_resolve)
 
         class Daily(FakeDaily):
-            async def spirit_cached(self, umo, uid, picks, topic, persona_eff, budget=None):
+            async def spirit_cached(self, umo, uid, picks, topic, persona_eff, budget=None,
+                                    *, today=None):
                 seen["spirit"] = persona_eff
                 return "sig"
 

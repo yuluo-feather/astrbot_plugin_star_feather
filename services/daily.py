@@ -140,8 +140,11 @@ class DailyFortune:
         if await kv_delete(self.kv_store, f"sf_spirit_{uid}", "旧牌灵缓存"):
             self._legacy_cleaned.add(uid)
 
-    async def pick_cached(self, uid: str) -> tuple | None:
+    async def pick_cached(self, uid: str, today: str | None = None) -> tuple | None:
         """今日固定抽牌：一个用户一条记录，按日期判失效。
+
+        today 是本次占卜的日期上下文（由 ReadingService.prepare 固定一次）；
+        不传时按自身时钟取当前日期。
 
         返回 (formation, positions, picks)；uid 为空时返回 None，
         由调用方统一回退自由随机（确定性函数保证 KV 异常也不丢固定）。
@@ -149,7 +152,8 @@ class DailyFortune:
         if not uid:
             return None
         await self._cleanup_legacy_spirit(uid)
-        key, today = self._key(uid), self.clock.today()
+        today = today or self.clock.today()
+        key = self._key(uid)
         async with _shared_kv_lock():
             raw, ok = await kv_get(self.kv_store, key, None, "每日牌运缓存")
             record = DailyRecord.from_raw(raw)
@@ -174,14 +178,18 @@ class DailyFortune:
 
     async def interp_cached(self, umo: str | None, uid: str, formation: str,
                             positions: list[str], picks: list[dict], clean: str,
-                            persona_eff=None, budget=None) -> Interpretation | None:
+                            persona_eff=None, budget=None, *,
+                            today: str | None = None) -> Interpretation | None:
         """今日牌运的解读缓存：按主题指纹（norm_topic）分桶。
 
         命中要求 date + 牌组指纹 + prompt 指纹 + 人设配置一致；同一主题的并发 miss
         由 SingleFlight 去重，等待者拿同一段话。缓存命中只读不写。
+        today 由调用方传入本次占卜固定的日期（不传则取当前日期），
+        写回端的跨天判定也用它，整条流水线不会各算各的日期。
         """
         topic = norm_topic(clean)
-        key, today = self._key(uid), self.clock.today()
+        today = today or self.clock.today()
+        key = self._key(uid)
         sig = _reading_sign(picks)
         reg_key = (key, sig, topic, today, _PROMPT_V, self.persona)
         hit = None
@@ -226,13 +234,15 @@ class DailyFortune:
         return interp
 
     async def spirit_cached(self, umo: str | None, uid: str, picks: list, topic: str,
-                            persona_eff, budget=None) -> str:
+                            persona_eff, budget=None, *,
+                            today: str | None = None) -> str:
         """牌灵的话：AI 按人设生成，当日同牌组缓存同一句；失败回退池内当日签文。
 
         与解读共用 `sf_daily_*` 一条记录：同一天同一牌组只有一句；读故障时不写回，
         避免在不知道旧记录的情况下把已写好的解读分桶覆盖成空壳。
+        today 由调用方传入本次占卜固定的日期（不传则取当前日期）。
         """
-        today = self.clock.today()
+        today = today or self.clock.today()
         if not picks:
             return ""
         card, upright = picks[0]["card"], picks[0]["upright"]

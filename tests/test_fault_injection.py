@@ -351,7 +351,6 @@ def test_gate_cooldown_write_failure_passes():
 @pytest.mark.parametrize("outcome", ["raise", None, "", "   ", 123])
 def test_poster_render_failure_returns_none(monkeypatch, outcome):
     """海报渲染任何失败形态一律返回 None，调用方回退普通牌面图。"""
-    from data.plugins.astrbot_plugin_star_feather.adapters.clock import Clock
     from data.plugins.astrbot_plugin_star_feather.services import render as render_mod
     from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
 
@@ -362,13 +361,12 @@ def test_poster_render_failure_returns_none(monkeypatch, outcome):
 
     monkeypatch.setattr(render_mod, "render_daily_card", fake_render)
     monkeypatch.setattr(render_mod, "_schedule_image_cleanup", lambda img, delay=30: None)
-    got = _run(Renderer("", "plain").daily_card([PICK], UID, Clock()))
+    got = _run(Renderer("", "plain").daily_card([PICK], UID, "20260827", "8月27日·周四"))
     assert got is None
 
 
 def test_poster_render_success_is_scheduled_for_cleanup(monkeypatch):
     """对照组：成功路径要真的登记清理；延迟由 render/store.py 的统一保险丝给。"""
-    from data.plugins.astrbot_plugin_star_feather.adapters.clock import Clock
     from data.plugins.astrbot_plugin_star_feather.services import render as render_mod
     from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
 
@@ -377,7 +375,7 @@ def test_poster_render_success_is_scheduled_for_cleanup(monkeypatch):
                         lambda card, upright, sig, date_text, save_dir=None: "C:/tmp/x.png")
     monkeypatch.setattr(render_mod, "_schedule_image_cleanup",
                         lambda img, delay=None: seen.update(img=img, delay=delay))
-    got = _run(Renderer("", "plain").daily_card([PICK], UID, Clock()))
+    got = _run(Renderer("", "plain").daily_card([PICK], UID, "20260827", "8月27日·周四"))
     assert got == "C:/tmp/x.png"
     assert seen == {"img": "C:/tmp/x.png", "delay": None}
 
@@ -644,10 +642,11 @@ class TestRenderAfterBothAI:
         seen = []
 
         class Daily:
-            async def pick_cached(self, uid):
+            async def pick_cached(self, uid, today=None):
                 return None
 
-            async def spirit_cached(self, umo, uid, picks, topic, persona_eff, budget=None):
+            async def spirit_cached(self, umo, uid, picks, topic, persona_eff, budget=None,
+                                    *, today=None):
                 seen.append("spirit")
                 return "牌灵今天懒得开口"
 
@@ -669,7 +668,7 @@ class TestRenderAfterBothAI:
                 seen.append("render")
                 return None
 
-            async def daily_card(self, picks, uid, clock):
+            async def daily_card(self, picks, uid, today, date_text):
                 return None
 
             async def ensure_image(self, img, formation, positions, picks):
@@ -796,7 +795,6 @@ class TestCleanupFuseNeverCarriesTheReading:
 
     def test_poster_survives_when_fuse_cannot_register(self, monkeypatch, tmp_path):
         """同一注入、同一条保险丝，走海报卡：登记失败不该把海报降级成普通牌面图。"""
-        from data.plugins.astrbot_plugin_star_feather.adapters.clock import Clock
         from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
         _Plugin, render_service, _cr, _daily = _live_modules()
         path = str(tmp_path / "fuse_poster.png")
@@ -808,7 +806,7 @@ class TestCleanupFuseNeverCarriesTheReading:
         monkeypatch.setattr(render_service, "render_daily_card", fake_poster)
         _loop_shutting_down(monkeypatch, render_service)
         renderer = Renderer(image_dir=str(tmp_path), send_mode="plain")
-        got = _run(renderer.daily_card([PICK], UID, Clock()))
+        got = _run(renderer.daily_card([PICK], UID, "20260827", "8月27日·周四"))
         assert got == path
 
     def test_fuse_swallows_and_leaves_no_dangling_coroutine(self, monkeypatch):
