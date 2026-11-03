@@ -202,7 +202,13 @@ class DailyFortune:
             if ok and record.same_context(today, sig, _PROMPT_V, self.persona):
                 hit = record.interps.get(topic)
         if hit is not None:
-            return interpretation_from_record(hit)
+            cached = interpretation_from_record(hit)
+            if cached.text.strip():
+                return cached
+            # 桶内容损坏或为空：KV 是持久化边界，外层上下文合法不代表内容有效。
+            # 当未命中重新生成，写回时覆盖该桶——否则空解读会被当成命中，
+            # 连本地牌义兜底都走不到。
+            log.warning(f"每日牌运解读缓存内容无效（{uid}），按未命中重新生成")
 
         async def generate():
             return await _ai_output(

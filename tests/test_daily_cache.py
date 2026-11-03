@@ -1049,6 +1049,58 @@ class TestInterpRebuildKeepsPickAndSpirit:
         assert record["prompt_v"] == "v-next"
 
 
+# ---------- 主题桶内容损坏：当未命中，不静默丢解读 ----------
+class TestCorruptInterpBucket:
+    """KV 是持久化边界：外层上下文合法、桶内容无效时不能当成命中。"""
+
+    @staticmethod
+    def _fortune(kv, spies):
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
+
+        class _Ctx:
+            async def get_kv_data(self, key, default=None):
+                return kv.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                kv[key] = value
+
+        class _Interp:
+            def __init__(self):
+                self.calls = 0
+
+            async def interpret(self, *a, **kw):
+                self.calls += 1
+                return "【第1张·你的当下】新解读。"
+
+            async def spirit_line(self, *a, **kw):
+                return "牌灵的一句话"
+
+        it = _Interp()
+        spies.append(it)
+        return DailyFortune(_Ctx(), persona="gentle", interpreter=it)
+
+    def test_corrupt_bucket_regenerates(self):
+        from data.plugins.astrbot_plugin_star_feather.core.intent import norm_topic
+
+        kv = {}
+        spies = []
+        df = self._fortune(kv, spies)
+        day = "20260827"
+        picks = asyncio.run(df.pick_cached("u1", day))[2]
+        topic = norm_topic("今天运势")
+        record = kv["sf_daily_u1"]
+        record["interps"] = {topic: {"broken": True}}
+        kv["sf_daily_u1"] = record
+
+        out = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], picks,
+                                           "今天运势", today=day))
+
+        assert spies[0].calls == 1, "损坏的桶必须当未命中，重新生成"
+        text = out.text if hasattr(out, "text") else str(out)
+        assert text.strip(), "返回的解读不应为空"
+        assert kv["sf_daily_u1"]["interps"][topic]["text"].strip(), "写回应覆盖损坏的桶"
+
+
 # ---------- 二次读取失败：不许用空壳覆盖已有记录 ----------
 class TestSecondReadFailureKeepsRecord:
     """初次读到旧记录、生成成功、写回前二次读失败：本次照常返回，但不写回。
