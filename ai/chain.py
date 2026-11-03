@@ -6,6 +6,7 @@
 说人话：牌抽好了，怎么让 AI 好好讲话，这里管——但它的嘴要听话，由 hardening 管。
 """
 import asyncio
+import threading
 import time
 import weakref
 
@@ -102,6 +103,9 @@ class AiInterpreter:
         self._semaphores: weakref.WeakKeyDictionary[
             asyncio.AbstractEventLoop, dict[str, asyncio.Semaphore]] = (
             weakref.WeakKeyDictionary())
+        # 同一解释器可能被多个线程（各自跑一个事件循环）同时使用：
+        # 清理/查找/插入必须串行，否则迭代中改字典会抛 RuntimeError
+        self._semaphores_guard = threading.Lock()
         # 是否在「指定 → 会话 → 全局默认」之后回退到全部已加载 Provider。
         # 默认关：未预期的模型不该被悄悄拉进来烧请求。
         self.all_providers_fallback = all_providers_fallback
@@ -348,18 +352,19 @@ class AiInterpreter:
         if self.max_concurrency <= 0:
             return None
         loop = asyncio.get_running_loop()
-        for known in [lp for lp in self._semaphores if lp.is_closed()]:
-            self._semaphores.pop(known, None)
-        per_loop = self._semaphores.get(loop)
-        if per_loop is None:
-            per_loop = {}
-            self._semaphores[loop] = per_loop
-        pid = self._provider_id(provider)
-        sem = per_loop.get(pid)
-        if sem is None:
-            sem = asyncio.Semaphore(self.max_concurrency)
-            per_loop[pid] = sem
-        return sem
+        with self._semaphores_guard:
+            for known in [lp for lp in self._semaphores if lp.is_closed()]:
+                self._semaphores.pop(known, None)
+            per_loop = self._semaphores.get(loop)
+            if per_loop is None:
+                per_loop = {}
+                self._semaphores[loop] = per_loop
+            pid = self._provider_id(provider)
+            sem = per_loop.get(pid)
+            if sem is None:
+                sem = asyncio.Semaphore(self.max_concurrency)
+                per_loop[pid] = sem
+            return sem
 
     async def _chat_once(self, provider, prompt: str, system_prompt: str,
                          timeout: float | None = None) -> str | None | _QueueTimeout:

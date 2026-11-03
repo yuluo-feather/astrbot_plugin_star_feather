@@ -564,6 +564,30 @@ class TestSemaphoreRegistryLifecycle:
         same, count = asyncio.run(go())
         assert same is True and count == 1
 
+    def test_concurrent_threads_do_not_break_the_registry(self):
+        """多个线程各跑一个事件循环时，清理/查找/插入必须串行。"""
+        import threading
+        it, prov = self._interp()
+        errors = []
+
+        def worker():
+            async def go():
+                for _ in range(100):
+                    it._semaphore_for(prov)
+
+            try:
+                for _ in range(20):
+                    asyncio.run(go())
+            except BaseException as e:   # noqa: BLE001 记录后由主线程断言
+                errors.append(e)
+
+        threads = [threading.Thread(target=worker) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert not errors, errors
+
 
 class _BrokenProviderContext:
     """取 provider 的三个接口全挂：候选链应照旧降级为空，但每处失败都要留痕。"""
