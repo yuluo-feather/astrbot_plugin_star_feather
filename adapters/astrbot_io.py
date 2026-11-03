@@ -1,6 +1,7 @@
 """AstrBot 适配：KV 与消息出口。
 
-纯逻辑与编排层不 import astrbot；需要框架能力时从这里取实现。
+编排层不 import astrbot，纯逻辑层只有日志出口 core/log.py 例外；
+需要框架能力时从这里取实现。
 """
 from astrbot.api import logger
 from astrbot.api.event import MessageChain

@@ -3,7 +3,7 @@
 模块说明：
 - 装配：app/container.py（唯一装配处）
 - 入口：app/handlers.py（命令 / 工具）
-- 纯逻辑：core/（不 import astrbot）
+- 纯逻辑：core/（除日志出口 core/log.py 外不 import astrbot）
 - 编排：services/（占卜流水线、渲染）
 - 适配：adapters/（KV、消息、呈现）
 """
