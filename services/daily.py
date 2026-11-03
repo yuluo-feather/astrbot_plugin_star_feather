@@ -233,6 +233,11 @@ class DailyFortune:
                 # 牌字段与牌灵缓存不属于解读上下文，不能让重建把它们一起抹掉。
                 if fresh.date == today and fresh.sign == sig:
                     fresh.interps = {}
+                    if fresh.prompt_v != _PROMPT_V:
+                        # 提示词版本变了：牌灵那句是同一条记录里的旧产物，跟着作废。
+                        # 否则 put_context 刷新 prompt_v 后，它会被当成新版本的缓存。
+                        fresh.spirit_line, fresh.spirit_sign = "", ""
+                        fresh.spirit_persona = ""
                 else:
                     fresh = DailyRecord()
             parsed = interp if isinstance(interp, Interpretation) else parse_interpretation(str(interp))
