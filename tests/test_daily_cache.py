@@ -1127,3 +1127,28 @@ class TestLegacySpiritCleanupRetry:
 
         asyncio.run(df.pick_cached("u1"))
         assert store.deletes == 2 and "sf_spirit_u1" not in kv
+
+
+# ---------- 共享写锁的注册表：关闭的循环要回收 ----------
+class TestSharedKvLockRegistry:
+    def test_closed_loop_entries_are_reaped(self):
+        """诊断脚本反复 asyncio.run：上一个循环关掉后，条目不能一直留着。"""
+        from data.plugins.astrbot_plugin_star_feather.services import daily
+        daily._KV_LOCKS.clear()
+
+        async def go():
+            return daily._shared_kv_lock()
+
+        asyncio.run(go())
+        asyncio.run(go())
+        assert len(daily._KV_LOCKS) == 1
+
+    def test_same_loop_reuses_the_lock(self):
+        from data.plugins.astrbot_plugin_star_feather.services import daily
+        daily._KV_LOCKS.clear()
+
+        async def go():
+            return daily._shared_kv_lock() is daily._shared_kv_lock()
+
+        assert asyncio.run(go()) is True
+        assert len(daily._KV_LOCKS) == 1
