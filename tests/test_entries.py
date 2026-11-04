@@ -647,41 +647,71 @@ class TestSingleCommand:
 
 
 class TestPresenterFallback:
-    """结果发送失败时降级纯文字，不能只剩一句收尾。"""
+    """结果发送失败时降级纯文字；成功与否必须回传，失败时不发收尾句。"""
 
-    def test_failed_result_falls_back_to_text(self):
-        from data.plugins.astrbot_plugin_star_feather.adapters.deliver import Deliverer
-        from data.plugins.astrbot_plugin_star_feather.adapters.presenter import (
-            Presenter,
-        )
+    class Messenger:
+        def __init__(self, result_ok=False, text_ok=True):
+            self.result_ok = result_ok
+            self.text_ok = text_ok
+            self.texts = []
+            self.results = []
+
+        async def send_result(self, result):
+            self.results.append(result)
+            return self.result_ok
+
+        async def send_text(self, text):
+            self.texts.append(text)
+            return self.text_ok
+
+    @staticmethod
+    def _reading(epilogue=""):
         from data.plugins.astrbot_plugin_star_feather.core.models import (
             Interpretation,
             Reading,
             ReadingRequest,
         )
-
-        class Messenger:
-            def __init__(self):
-                self.texts = []
-                self.results = []
-
-            async def send_result(self, result):
-                self.results.append(result)
-                return False
-
-            async def send_text(self, text):
-                self.texts.append(text)
-                return True
-
         evt = types.SimpleNamespace(get_self_id=lambda: "0",
                                     chain_result=lambda chain: chain)
         reading = Reading(ReadingRequest("spread", "羽签", "问题", "问题", False),
-                          "u1", "羽签", ("你的当下",), (PICK,), "sig", Interpretation(text="AI"), None)
-        messenger = Messenger()
-        asyncio.run(Presenter(Deliverer(300, "", False)).present(
+                          "u1", "羽签", ("你的当下",), (PICK,), "sig",
+                          Interpretation(text="AI"), None, epilogue=epilogue)
+        return reading, evt
+
+    @staticmethod
+    def _present(messenger, reading, evt, disclaimer=""):
+        from data.plugins.astrbot_plugin_star_feather.adapters.deliver import Deliverer
+        from data.plugins.astrbot_plugin_star_feather.adapters.presenter import (
+            Presenter,
+        )
+        return asyncio.run(Presenter(Deliverer(300, disclaimer, False)).present(
             reading, messenger, evt))
+
+    def test_failed_result_falls_back_to_text(self):
+        messenger = self.Messenger()
+        reading, evt = self._reading()
+        assert self._present(messenger, reading, evt) is True
         assert messenger.results
         assert any("AI" in text for text in messenger.texts)
+
+    def test_fallback_text_keeps_disclaimer(self):
+        messenger = self.Messenger()
+        reading, evt = self._reading()
+        assert self._present(messenger, reading, evt, disclaimer="【免责声明】") is True
+        assert any("【免责声明】" in text for text in messenger.texts)
+
+    def test_both_sends_fail_reports_undelivered_and_skips_epilogue(self):
+        messenger = self.Messenger(text_ok=False)
+        reading, evt = self._reading(epilogue="收尾句")
+        assert self._present(messenger, reading, evt) is False
+        assert messenger.texts  # 补发尝试过
+        assert "收尾句" not in messenger.texts
+
+    def test_epilogue_sent_only_after_delivery(self):
+        messenger = self.Messenger()
+        reading, evt = self._reading(epilogue="收尾句")
+        assert self._present(messenger, reading, evt) is True
+        assert messenger.texts[-1] == "收尾句"
 
 
 class TestExceptionDetail:

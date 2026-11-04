@@ -12,6 +12,10 @@ from astrbot.api.message_components import Plain
 from data.plugins.astrbot_plugin_star_feather.app import handlers
 from data.plugins.astrbot_plugin_star_feather.core.models import Reading
 from data.plugins.astrbot_plugin_star_feather.core.settings import parse
+from data.plugins.astrbot_plugin_star_feather.core.texts import (
+    TOOL_FAILED_SENT,
+    TOOL_SEND_FAILED,
+)
 from data.plugins.astrbot_plugin_star_feather.main import StarFeatherPlugin
 from stubs import PICK
 
@@ -43,8 +47,9 @@ class FakeReading:
 
 
 class FakePresenter:
-    def __init__(self, result=None):
+    def __init__(self, result=None, delivered=True):
         self.result = result
+        self.delivered = delivered
         self.used = []
 
     async def present(self, reading, messenger, event):
@@ -52,6 +57,7 @@ class FakePresenter:
         result = self.result if self.result is not None else event.chain_result(
             [Plain("按规矩洗牌")])
         await messenger.send_result(result)
+        return self.delivered
 
 
 def _plugin(*, throttle_remain=0, limit_block=None, settings=None, reading=None,
@@ -77,14 +83,18 @@ def _plugin(*, throttle_remain=0, limit_block=None, settings=None, reading=None,
     return p
 
 
-def _evt(text="帮我算一卦", umo="g1"):
+def _evt(text="帮我算一卦", umo="g1", fail_sends=0):
     e = types.SimpleNamespace(message_str=text)
     if umo is not None:
         e.unified_msg_origin = umo
     e.get_sender_id = lambda: "u1"
     e.sent = []
+    remaining = {"n": fail_sends}
 
     async def send(chain):
+        if remaining["n"] > 0:
+            remaining["n"] -= 1
+            raise RuntimeError("send down")
         e.sent.append(chain)
     e.send = send
     e.chain_result = lambda chain: MessageChain(chain=chain)
@@ -211,3 +221,48 @@ class TestToolEntry:
         _tool(p, evt)
         assert p._throttle.key == "sf_tool_cd_global"
         assert len(evt.sent) == 1
+
+
+class TestSendStatus:
+    """发送结果必须传回入口：失败时不能再返回「已发送」收尾。"""
+
+    def test_prepare_failure_does_not_claim_sent(self):
+        class BrokenReading(FakeReading):
+            async def prepare(self, request, uid):
+                raise RuntimeError("prepare down")
+
+        out = _tool(_plugin(reading=BrokenReading()), _evt())
+        assert out == TOOL_FAILED_SENT
+        assert "占卜结果已发送" not in out
+
+    def test_run_failure_does_not_claim_sent(self):
+        class BrokenReading(FakeReading):
+            async def run(self, prepared, ctx, **kw):
+                raise RuntimeError("run down")
+
+        evt = _evt()
+        out = _tool(_plugin(reading=BrokenReading()), evt)
+        assert out == TOOL_FAILED_SENT
+        assert "占卜结果已发送" not in out
+        assert any("牌灵需要缓缓" in chain.chain[0].text for chain in evt.sent)
+
+    def test_failure_hint_send_failure_reports_not_sent(self):
+        class BrokenReading(FakeReading):
+            async def run(self, prepared, ctx, **kw):
+                raise RuntimeError("run down")
+
+        out = _tool(_plugin(reading=BrokenReading()), _evt(fail_sends=1))
+        assert out == TOOL_SEND_FAILED
+
+    def test_result_and_fallback_failure_returns_failure_note(self):
+        out = _tool(_plugin(presenter=FakePresenter(delivered=False)), _evt())
+        assert out == TOOL_SEND_FAILED
+        assert "占卜结果已发送" not in out
+
+    def test_delivered_result_returns_epilogue(self):
+        out = _tool(_plugin(), _evt())
+        assert out.startswith("占卜结果已发送给用户")
+
+    def test_help_send_failure_does_not_claim_sent(self):
+        out = _tool(_plugin(), _evt(text="帮助", fail_sends=1))
+        assert out == TOOL_SEND_FAILED

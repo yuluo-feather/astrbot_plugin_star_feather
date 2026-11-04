@@ -12,8 +12,7 @@ class Presenter:
     def __init__(self, deliverer: Deliverer):
         self.deliverer = deliverer
 
-    @staticmethod
-    def _fallback_text(reading: Reading) -> str:
+    def _fallback_text(self, reading: Reading) -> str:
         """结果发送失败时的纯文字兜底：不带图、不带合并转发。"""
         parts = []
         if reading.spirit:
@@ -25,21 +24,36 @@ class Presenter:
                                      list(reading.picks)))
         if reading.fail_note:
             parts.append(reading.fail_note)
+        if self.deliverer.disclaimer:
+            parts.append(self.deliverer.disclaimer)
         return "\n\n".join(part for part in parts if part)
 
-    async def present(self, reading: Reading, messenger, event) -> None:
+    async def present(self, reading: Reading, messenger, event) -> bool:
         """把一次占卜的结果发出去；收尾句排在结果之后。
 
         合并转发 / 图文链发送失败时降级为纯文字重发：用户至少能拿到解读，
-        不会只剩一句收尾。
+        不会只剩一句收尾。收尾句只在结果确认送达后发送。
+
+        Args:
+            reading: 本次占卜结果。
+            messenger: 消息端口，发送失败时返回 False。
+            event: 触发本次占卜的事件。
+
+        Returns:
+            至少一次结果发送未报错（主结果或纯文字补发之一）。收尾句不计入：
+            它不能反过来证明结果已经送达。
         """
+        delivered = False
         async for result in self.deliverer.deliver(
                 event, reading.interpretation, reading.image, reading.formation,
                 list(reading.positions), list(reading.picks), render_text,
                 fail_note=reading.fail_note, preface=reading.spirit):
-            if not await messenger.send_result(result):
-                fallback = self._fallback_text(reading)
-                if fallback:
-                    await messenger.send_text(fallback)
-        if reading.epilogue:
+            if await messenger.send_result(result):
+                delivered = True
+                continue
+            fallback = self._fallback_text(reading)
+            if fallback and await messenger.send_text(fallback):
+                delivered = True
+        if reading.epilogue and delivered:
             await messenger.send_text(reading.epilogue)
+        return delivered

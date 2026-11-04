@@ -129,6 +129,8 @@ class Deliverer:
                 chain.append(Plain(plain_text(formation, positions, picks)))
             if fail_note:
                 chain.append(Plain(fail_note))
+            if self.disclaimer:
+                chain.append(Plain(self.disclaimer))
             if chain:
                 yield event.chain_result(chain)
             return

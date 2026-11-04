@@ -117,6 +117,23 @@ class TestDeliverEpilogue:
         assert "免责声明" in nodes[-1].content[0].text
 
 
+class TestNoAiFallback:
+    """没有 AI 解读时也走同一套末尾规则：本地牌义之后追加免责声明。"""
+
+    def test_no_ai_fallback_appends_disclaimer(self):
+        evt = TestDeliverEpilogue._evt()
+        d = Deliverer(300, "【免责声明】", False)
+
+        async def collect():
+            return [x async for x in d.deliver(
+                evt, None, None, "羽签", ["当下"], [PICK],
+                lambda *a: "本地牌义", fail_note="失败说明")]
+
+        chain = asyncio.run(collect())[0]
+        texts = [getattr(c, "text", "") for c in chain]
+        assert texts == ["本地牌义", "失败说明", "【免责声明】"]
+
+
 class TestForwardPlatformFallback:
     """平台收不下 Nodes 时要自动回退普通链消息，不能静默把结果丢掉。"""
 
