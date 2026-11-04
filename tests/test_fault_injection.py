@@ -392,7 +392,8 @@ def _entry_evt():
     evt.should_call_llm = lambda v: None
 
     def chain_result(chain):
-        evt.result = chain
+        if evt.result is None:
+            evt.result = chain
         return chain
     evt.chain_result = chain_result
 

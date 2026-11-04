@@ -47,16 +47,22 @@ class Presenter:
             它不能反过来证明结果已经送达。
         """
         delivered = False
+        first_result = True
         async for result in self.deliverer.deliver(
                 messenger, caps, reading.interpretation, reading.image, reading.formation,
                 list(reading.positions), list(reading.picks), render_text,
                 fail_note=reading.fail_note, preface=reading.spirit):
             if await messenger.send_result(result):
                 delivered = True
+                first_result = False
                 continue
+            if not first_result:
+                continue  # 免责声明等辅助消息失败：主结果已处理，不再重发整段
+            first_result = False
             fallback = self._fallback_text(reading)
             if fallback and await messenger.send_text(fallback):
                 delivered = True
+                break  # 整段兜底已含免责声明，后续辅助消息跳过
         if reading.epilogue and delivered:
             await messenger.send_text(reading.epilogue)
         return delivered

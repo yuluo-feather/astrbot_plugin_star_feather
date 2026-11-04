@@ -152,11 +152,11 @@ User request (any one of three entry points)【main.py orchestration】
    │
    ▼
 ⑤ Send it (Presenter.present)【adapters/deliver.py orchestrates the send · core/settings.py decides what takes effect】
-   ├─ Order: card art → the spirit's line → the reading paragraphs → disclaimer (the merged forward keeps that order)
+   ├─ Order: card art → the spirit's line → the reading paragraphs → disclaimer (a separate message; its own last node in a merged forward)
    ├─ Split by structure: one paragraph per card plus a summary (the prompt asks for 80–140 characters each;
    │  overlong ones get cut down to `segment_size`)
    ├─ send_mode decides the shape: forward merged message (default) / plain single chain / text_only
-   └─ The disclaimer goes last (disclaimer; may be empty)
+   └─ The disclaimer is sent as its own message after the reading (empty means nothing is sent)
    │
    ▼
 ⑥ Wrap up【ai/prompts.py holds the copy · Presenter sends it directly】
@@ -210,7 +210,7 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 | `output.daily_fixed` | bool | `true` | Fixed daily reading. When on, `/今日牌运` and fortune-word requests return the same card all day per user (refreshed at midnight); turn off for free random draws (`/单抽` is unaffected — it always draws fresh). |
 | `output.daily_card` | bool | `true` | Daily fortune poster card. When on, `/今日牌运` renders a vertical poster (card art + date + the spirit's words + sign-off); turn off to fall back to the normal card image while the spirit's words still follow the reading. |
 | `output.shuffle_lines` | bool | `true` | Show shuffle hint messages. Fires only for multi-card spreads (single-card draws like 羽签 stay quiet); disable to skip the extra "shuffling…" line. |
-| `output.disclaimer` | string | `✨ 占卜仅供娱乐参考，选择权永远在你手里。` | Disclaimer appended to every reading; set empty string to hide. |
+| `output.disclaimer` | string | `✨ 占卜仅供娱乐参考，选择权永远在你手里。` | Disclaimer sent as a separate message after every reading; empty string sends nothing. |
 
 ## 📦 Installation
 

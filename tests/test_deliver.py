@@ -105,16 +105,17 @@ class TestDeliverEpilogue:
 
 
     def test_message_order_image_then_preface_then_sections(self):
-        """呈现顺序契约：牌面 → 牌灵的话(preface 裸句无前缀无引号) → 解读段 → 总结 → 免责。"""
+        """呈现顺序契约：牌面 → 牌灵的话(preface 裸句无前缀无引号) → 解读段 → 总结；免责单独一条。"""
         evt = self._evt()
         d = Deliverer(300, "免责声明")
-        self._collect(d.deliver(_msg(evt), _caps(evt), "【第1张·过去】一【总结】二", "img.png",
-                                "羽时三刻", ["过去"], [PICK], lambda *a: "兜底",
-                                preface="今天安心"))
-        kinds = [type(c).__name__ for c in evt.result]
-        assert kinds == ["Image", "Plain", "Plain", "Plain", "Plain"]
-        assert evt.result[1].text == "今天安心\n"  # chain 模式 preface 带尾随换行
-        assert "免责声明" in evt.result[-1].text
+        out = self._collect(d.deliver(_msg(evt), _caps(evt), "【第1张·过去】一【总结】二", "img.png",
+                                      "羽时三刻", ["过去"], [PICK], lambda *a: "兜底",
+                                      preface="今天安心"))
+        assert len(out) == 2
+        kinds = [type(c).__name__ for c in out[0]]
+        assert kinds == ["Image", "Plain", "Plain", "Plain"]
+        assert out[0][1].text == "今天安心\n"  # chain 模式 preface 带尾随换行
+        assert out[1][0].text == "免责声明"
 
     def test_message_order_image_then_preface_forward(self):
         """合并转发模式同序：牌面节点在前，牌灵的话次之，最后免责。"""
@@ -141,9 +142,25 @@ class TestNoAiFallback:
                 _msg(evt), _caps(evt), None, None, "羽签", ["当下"], [PICK],
                 lambda *a: "本地牌义", fail_note="失败说明")]
 
-        chain = asyncio.run(collect())[0]
-        texts = [getattr(c, "text", "") for c in chain]
-        assert texts == ["本地牌义", "失败说明", "【免责声明】"]
+        out = asyncio.run(collect())
+        assert len(out) == 2
+        assert [getattr(c, "text", "") for c in out[0]] == ["本地牌义", "失败说明"]
+        assert [getattr(c, "text", "") for c in out[1]] == ["【免责声明】"]
+
+    def test_no_ai_fallback_plain_image_then_disclaimer(self):
+        """plain 图文模式：结果一条，免责声明单独一条。"""
+        evt = TestDeliverEpilogue._evt()
+        d = Deliverer(300, "【免责声明】")
+
+        async def collect():
+            return [x async for x in d.deliver(
+                _msg(evt), _caps(evt), None, "img.png", "羽签", ["当下"], [PICK],
+                lambda *a: "本地牌义")]
+
+        out = asyncio.run(collect())
+        assert len(out) == 2
+        assert type(out[0][0]).__name__ == "Image"
+        assert [getattr(c, "text", "") for c in out[1]] == ["【免责声明】"]
 
     def test_no_ai_fallback_honors_forward(self):
         """回退也遵循投递能力：forward + 白名单平台 → 逐段节点，与正常结果同构。"""

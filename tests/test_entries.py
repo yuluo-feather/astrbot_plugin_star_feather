@@ -635,9 +635,10 @@ class TestCommandEntry:
         p.container.reading.run = run
         ev = _event()
         self._run(p, ev)
-        assert len(ev.sent) == 2
+        assert len(ev.sent) == 3
         assert not isinstance(ev.sent[0], str)   # 结果链
-        assert ev.sent[1].chain[0].text == "收尾"
+        assert "仅供娱乐" in ev.sent[1][0].text  # 免责声明单独一条
+        assert ev.sent[2].chain[0].text == "收尾"
 
 
 # ---------- 单抽命令 ----------
@@ -727,6 +728,41 @@ class TestPresenterFallback:
         reading = self._reading(epilogue="收尾句")
         assert self._present(messenger, reading) is True
         assert messenger.texts[-1] == "收尾句"
+
+    def test_auxiliary_result_failure_does_not_resend_full_text(self):
+        """免责声明单独一条时发送失败：主结果已送达，不再整段重发。"""
+        from data.plugins.astrbot_plugin_star_feather.adapters.deliver import Deliverer
+        from data.plugins.astrbot_plugin_star_feather.adapters.presenter import (
+            Presenter,
+        )
+
+        class TwoResultDeliverer(Deliverer):
+            async def deliver(self, *args, **kwargs):
+                yield ["RESULT"]
+                yield ["DISCLAIMER"]
+
+        class Messenger:
+            def __init__(self):
+                self.results = []
+                self.texts = []
+
+            async def send_result(self, result):
+                self.results.append(result)
+                return len(self.results) == 1  # 第二条（免责声明）失败
+
+            async def send_text(self, text):
+                self.texts.append(text)
+                return True
+
+            def chain_result(self, chain):
+                return chain
+
+        presenter = Presenter(TwoResultDeliverer(300, ""))
+        messenger = Messenger()
+        assert asyncio.run(presenter.present(
+            self._reading(), messenger, DeliveryCapabilities(False, "0"))) is True
+        assert len(messenger.results) == 2
+        assert messenger.texts == []  # 没有整段重发
 
 
 class TestExceptionDetail:

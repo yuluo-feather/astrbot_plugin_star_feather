@@ -128,13 +128,13 @@ class Deliverer:
                 groups.append((False, [Plain(plain_text(formation, positions, picks))]))
             if fail_note:
                 groups.append((False, [Plain(fail_note)]))
-            if self.disclaimer:
-                groups.append((False, [Plain(self.disclaimer)]))
-            if not groups:
+            if not groups and not self.disclaimer:
                 return
             # 回退也遵循本次投递能力：forward + 平台白名单 → 与正常结果同构的逐段节点
-            # （免责声明是最后一个独立节点）；否则维持普通链消息。
+            # （免责声明是最后一个独立节点）；plain / text_only → 结果一条、免责声明单独一条。
             if self.forward_for(caps):
+                if self.disclaimer:
+                    groups.append((False, [Plain(self.disclaimer)]))
                 nodes = []
                 for is_image, content in groups:
                     if is_image:
@@ -142,8 +142,11 @@ class Deliverer:
                     nodes.append(Node(content=content, name="星羽塔罗", uin=caps.self_id))
                 yield messenger.chain_result([Nodes(nodes)])
             else:
-                yield messenger.chain_result(
-                    [component for _, group in groups for component in group])
+                if groups:
+                    yield messenger.chain_result(
+                        [component for _, group in groups for component in group])
+                if self.disclaimer:
+                    yield messenger.chain_result([Plain(self.disclaimer)])
             return
         # 结构化切分只做一次：AI 返回时已解析成 Interpretation，这里不再重新切；
         # 只有旧版字符串才回退 split_sections。随后仍按 segment_size 防止单段超长。
@@ -153,25 +156,24 @@ class Deliverer:
             text = interp.text if isinstance(interp, Interpretation) else interp
             segs = split_sections(text, self.segment_size)
         parts = [sub for seg in segs for sub in split_text(seg, self.segment_size)]
-        if not parts:
+        if not parts and not self.disclaimer:
             return
-        # 免责声明：空字符串不显示；正常解读末尾统一追加一段
-        if self.disclaimer:
-            parts = parts + [self.disclaimer]
+        # 免责声明不并入正文：forward 下是最后一个独立节点，plain/text_only 下单独一条消息。
         uin = caps.self_id
         if self.forward_for(caps):
             # 是否含图由调用方门控（text_only 模式下 img 为 None → 纯文字转发）
-            # preface = 牌灵的话（正常路径）/洗牌提示降级并入；节点序：牌面 → preface → 解读段
+            # preface = 牌灵的话（正常路径）/洗牌提示降级并入；节点序：牌面 → preface → 解读段 → 免责
             nodes = []
             if img:
                 nodes.append(Node(content=[Image(file=img), Plain(FORWARD_IMAGE_LABEL)], name="星羽塔罗", uin=uin))
             if preface:
                 nodes.append(Node(content=[Plain(preface)], name="星羽塔罗", uin=uin))
             nodes.extend(Node(content=[Plain(seg)], name="星羽塔罗", uin=uin) for seg in parts)
+            if self.disclaimer:
+                nodes.append(Node(content=[Plain(self.disclaimer)], name="星羽塔罗", uin=uin))
             yield messenger.chain_result([Nodes(nodes)])
         else:
-            # 非转发模式：内容合并进一条链消息（逐段 yield 在工具入口那侧会被丢掉——
-            # 那边取末值，只看最后一个 yield）
+            # 非转发模式：正文合并进一条链消息；免责声明单独一条。
             chain = []
             if img:
                 chain.append(Image(file=img))
@@ -180,5 +182,8 @@ class Deliverer:
             for i, seg in enumerate(parts):
                 tail = "" if i == len(parts) - 1 else "\n"
                 chain.append(Plain(seg + tail))
-            yield messenger.chain_result(chain)
+            if chain:
+                yield messenger.chain_result(chain)
+            if self.disclaimer:
+                yield messenger.chain_result([Plain(self.disclaimer)])
 
