@@ -16,7 +16,8 @@ conftest，import 到的才是真框架。
 是子模块而不是模块属性，只有真的 import 一次才会挂到父模块上，`hasattr` 单独看会误判
 成缺失）、框架版本落在 metadata.yaml 声明的 `astrbot_version` 范围里。
 **不管什么**：签名宽度（归 test_stub_signatures）与语义行为（归各域用例）；也不导入插件
-本体——「真框架下能不能 import 起插件」是兼容性的下一格，等这一格稳了再谈。
+本体——「真框架下能不能 import 起插件」归 scripts/plugin_import_check.py（CI 契约格里
+只观察、不设卡）。
 **红不拦路**：CI 那一格 continue-on-error（报而不拦）；本机没有框架时跳过，不误红。
 
 本机手跑（要真框架就把 PYTHONPATH 指到 AstrBot 根）：

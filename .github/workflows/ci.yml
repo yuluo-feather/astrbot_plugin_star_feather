@@ -143,6 +143,13 @@ jobs:
         run: python -c "import astrbot; print('astrbot', getattr(astrbot, '__version__', '?'))"
       - name: 契约检查
         run: python -m pytest tests/test_astrbot_contract.py -s
+      - name: 真框架导入插件（只观察，不拦）
+        # 补契约检查与完整冒烟之间那一格：插件本体在真框架里能不能 import 起来、
+        # @register 有没有落进 star_map、命令/工具注册与 main.py 对不对得上、类能不能
+        # 实例化。不起 WebUI（那是 smoke 的活）。
+        # 现阶段只观察：真框架升版本时这一格可能先红，先看两周再定要不要转必拦。
+        continue-on-error: true
+        run: python scripts/plugin_import_check.py
 
   static:
     # 静态类型检查。口径在仓库根 mypy.ini —— 跟 pytest.ini 一个道理，
