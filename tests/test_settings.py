@@ -68,6 +68,19 @@ class TestAiPersona:
         assert parse({"persona": "mystic"}).ai.persona == "mystic"
 
 
+class TestSpiritLine:
+    """牌灵的话开关（ai.spirit_line）：默认开，显式 false 才关。"""
+
+    def test_default_on(self):
+        assert parse(None).ai.spirit_line is True
+
+    def test_off(self):
+        assert parse({"ai": {"spirit_line": False}}).ai.spirit_line is False
+
+    def test_flat_legacy(self):
+        assert parse({"spirit_line": False}).ai.spirit_line is False
+
+
 class TestParsedSettings:
     def test_grouped_values(self):
         cfg = {"ai": {"ai_timeout": 7, "enable_ai": False, "question_max_len": 0,

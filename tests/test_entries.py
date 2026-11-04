@@ -59,12 +59,14 @@ class FakeDaily:
         self.cached = cached
         self.spirit = spirit
         self.interp = interp
+        self.spirit_calls = 0
 
     async def pick_cached(self, uid, today=None):
         return self.cached
 
     async def spirit_cached(self, umo, uid, picks, topic, persona_eff, budget=None,
                             *, today=None):
+        self.spirit_calls += 1
         return self.spirit
 
     async def interp_cached(self, umo, uid, formation, positions, picks, clean,
@@ -772,3 +774,25 @@ class TestExceptionDetail:
         group = ExceptionGroup("unhandled errors in a TaskGroup", [ValueError("boom")])
         detail = handlers._exc_detail(group)
         assert "ValueError: boom" in detail
+
+
+class TestSpiritLineSwitch:
+    """ai.spirit_line=false：整段牌灵的话不生成、不发送（连池内签文也不取）。"""
+
+    @staticmethod
+    def _read(settings, daily):
+        svc = _service(daily=daily, settings=settings)
+        prepared = asyncio.run(svc.prepare(build_request("auto", "今天天气不错"), "u1"))
+        return asyncio.run(svc.run(prepared, ReadingContext("u1", "umo", FakeMessenger()),
+                                   question="今天天气不错"))
+
+    def test_default_on_keeps_the_line(self):
+        daily = FakeDaily(spirit="牌灵说")
+        assert self._read(_settings(), daily).spirit == "牌灵说"
+        assert daily.spirit_calls == 1
+
+    def test_off_skips_call_and_line(self):
+        daily = FakeDaily(spirit="牌灵说")
+        reading = self._read(_settings(ai={"spirit_line": False}), daily)
+        assert reading.spirit == ""
+        assert daily.spirit_calls == 0

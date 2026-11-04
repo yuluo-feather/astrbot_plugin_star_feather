@@ -25,6 +25,7 @@ def flatten(settings) -> dict[str, object]:
         "ai.enable_ai": settings.ai.enable_ai,
         "ai.ai_provider": settings.ai.provider_id,
         "ai.persona": settings.ai.persona,
+        "ai.spirit_line": settings.ai.spirit_line,
         "ai.ai_timeout": settings.ai.timeout,
         "ai.ai_fail_cooldown": settings.ai.fail_cooldown,
         "ai.ai_budget_seconds": settings.ai.budget_seconds,

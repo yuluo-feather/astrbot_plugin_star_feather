@@ -103,10 +103,11 @@ class ReadingService:
             self.settings.ai.persona, seed=self._persona_seed(prepared.uid, prepared.today))
         budget = self.interpreter.new_budget()
 
+        # ai.spirit_line=false：整段不生成、不发送，连池内签文也不取（省一次 AI 调用与一条前置行）。
         spirit_call = (self.daily.spirit_cached(ctx.umo, prepared.uid, picks, topic,
                                                 persona_eff, budget,
                                                 today=prepared.today)
-                       if picks else None)
+                       if picks and self.settings.ai.spirit_line else None)
         if prepared.is_daily and prepared.uid:
             interp_call = self.daily.interp_cached(
                 ctx.umo, prepared.uid, prepared.formation, positions, picks, clean,

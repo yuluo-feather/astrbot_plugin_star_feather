@@ -25,6 +25,7 @@ DEFAULT_SPIRIT_STAGE_BUDGET = 20  # 牌灵的话的阶段上限（秒）：次�
 DEFAULT_DISCLAIMER = "✨ 占卜仅供娱乐参考，选择权永远在你手里。"  # 免责声明默认文案（output.disclaimer，空字符串=不显示）
 DEFAULT_AI_COOLDOWN = 60        # AI 解读失败后的冷却（秒），按 Provider 粒度：挂掉的模型只冷却自己，其余照常服务
 DEFAULT_AI_PERSONA = "random"   # 牌灵人设（ai.persona）：off=中立 / tsundere 傲娇 / gentle 温柔 / mystic 神秘 / random 每次随机
+DEFAULT_AI_SPIRIT_LINE = True   # 牌灵的话开关（ai.spirit_line）：关掉后不生成、不发送，省一次 AI 调用与一条前置行
 PERSONA_VALUES = ("off", "tsundere", "gentle", "mystic", "random")  # 与 _conf_schema.json 的 options 一一对应
 # 解读结构校验强度（ai.structure_check）：loose=只按宽松口径（标记段数≥牌数，默认），
 # strict=按严格口径拒候选。严格口径的三条判据见 ai/parse.py。
@@ -55,6 +56,7 @@ class AiSettings:
     max_concurrency: int = DEFAULT_AI_MAX_CONCURRENCY
     all_providers_fallback: bool = DEFAULT_ALL_PROVIDERS_FALLBACK
     persona: str = DEFAULT_AI_PERSONA
+    spirit_line: bool = DEFAULT_AI_SPIRIT_LINE
     question_max_len: int = DEFAULT_QUESTION_MAX_LEN
     structure_check: str = DEFAULT_STRUCTURE_CHECK
 
@@ -233,6 +235,7 @@ def parse(config) -> Settings:
             all_providers_fallback=_cfg_bool(config, "ai", "all_providers_fallback",
                                              DEFAULT_ALL_PROVIDERS_FALLBACK),
             persona=persona,
+            spirit_line=_cfg_bool(config, "ai", "spirit_line", DEFAULT_AI_SPIRIT_LINE),
             question_max_len=ai_max_len,
             structure_check=structure_check,
         ),
