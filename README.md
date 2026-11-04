@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-<img src="https://img.shields.io/badge/version-v0.9.4-f8a5c2" alt="v0.9.4"/>
+<img src="https://img.shields.io/badge/version-v0.9.5-f8a5c2" alt="v0.9.5"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -232,7 +232,7 @@
 
 **依赖**：牌面渲染需要 [Pillow](https://pypi.org/project/pillow/)（AstrBot 环境通常自带；若缺失可执行 `pip install -r requirements.txt`）。字体缺字回退校验需要 [fonttools](https://pypi.org/project/fonttools/)，已一并列入 `requirements.txt`；时区解析需要 [tzdata](https://pypi.org/project/tzdata/)（Windows 与精简容器不带系统时区库，缺它 `ZoneInfo` 连 UTC 都解析不了，框架里配的 `timezone` 会静默失效），也在 `requirements.txt` 里——就这三样，本羽没往里塞多余的。
 
-> Pillow 安全下限为 `>=12.3.0`：12.3.0 是 OSV 现查无已知条目的最低版本，10.x / 11.x 仍带已知 CVE。
+> Pillow 安全下限为 `>=13.0.0`：12.3.0 已被多项安全公告覆盖（含 critical 的解码问题），13.0.0 是修复版本；10.x / 11.x 仍带已知 CVE。
 
 ## 🤍 技术实现
 
@@ -267,6 +267,10 @@
 
 ## 📜 更新记录
 
+#### v0.9.5
+
+- 修复：Pillow 安全下限提升到 13.0.0，fonttools 提升到 4.68.0，tzdata 更新到 2026.6
+
 #### v0.9.4
 
 - 修复：结果没发出去时不再提示「已发送」；AI 未返回解读或转纯文字补发时，免责声明不再漏发
@@ -294,15 +298,6 @@
 - 修复：用户问题改用分隔标签包裹，标签关键词循环剥除到不动点；注入过滤不再误伤正常问句与自述
 - 修复：牌灵缓存按人设隔离，缓存二次读失败不再清空记录；图片退路目录只回收空壳
 - 变更：日志统一走框架 logger；帮助行补上 `/单抽 帮助` 与 `/今日牌运 帮助`
-
-#### v0.8.3
-
-- 修复：注入过滤不再误伤正常问句（口语前缀、常见职业词、英文技术词原样通过）；用户问题改用分隔标签包裹，引号与标签关键词先行剥除——问题里写出结束标记也闭合不了数据块
-- 修复：今日牌运的解读按原句分桶——「今天运势如何，我该不该表白」不再拿到早上那段泛问解读；跨午夜生成的写回不再覆盖新一天的缓存
-- 修复：选阵不再被「他」「喜欢」的构词带偏；「表白」「暗恋」这类爱慕问法仍进恋爱阵
-- 优化：牌灵的话与解读并发执行、共用同一笔预算；牌面图改用 JPEG，体积约为原来的四分之一
-- 修复：未验证平台或取不到平台名时回退普通消息，结果不再可能被静默丢弃
-- 变更：`/单抽` 的说明与实际一致；框架导入改为显式导入，框架名字写错会被静态检查抓到
 
 > 更早版本（v0.8.1 及以前）的逐条明细见 [CHANGELOG.md](CHANGELOG.md) 与 `changelogs/` 目录——这里只保留最近 6 个版本的摘要。
 

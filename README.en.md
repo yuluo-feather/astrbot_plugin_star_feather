@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-<img src="https://img.shields.io/badge/version-v0.9.4-f8a5c2" alt="v0.9.4"/>
+<img src="https://img.shields.io/badge/version-v0.9.5-f8a5c2" alt="v0.9.5"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -247,7 +247,7 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 
 **Dependency**: card rendering needs [Pillow](https://pypi.org/project/pillow/) (usually bundled with AstrBot; otherwise `pip install -r requirements.txt`). Glyph-coverage fallback verification needs [fonttools](https://pypi.org/project/fonttools/), also listed in `requirements.txt`; timezone resolution needs [tzdata](https://pypi.org/project/tzdata/) (Windows and slim containers ship no system tz database, and without it `ZoneInfo` cannot even parse UTC — the framework's `timezone` setting then silently does nothing), also in `requirements.txt` — those three, and nothing more.
 
-> The Pillow security floor is `>=12.3.0`: 12.3.0 is the lowest version with no OSV advisories at the time of writing; 10.x / 11.x still carry known CVEs.
+> The Pillow security floor is `>=13.0.0`: 12.3.0 is covered by several security advisories (including critical decoding issues), and 13.0.0 is the first patched release; 10.x / 11.x still carry known CVEs.
 
 ## 🤍 Technical Details
 
@@ -281,6 +281,10 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 
 ## 📜 Changelog
 
+#### v0.9.5
+
+- Fixed: the Pillow security floor is now 13.0.0, fonttools is 4.68.0, and tzdata is 2026.6
+
 #### v0.9.4
 
 - Fixed: a failed delivery no longer claims the reading was sent; the disclaimer is no longer skipped when the AI returns no reading or delivery falls back to plain text
@@ -308,15 +312,6 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 - Fixed: user questions are fenced with loop-stripped markers, and the injection filter no longer mangles ordinary questions or self-descriptions
 - Fixed: the spirit-line cache is isolated per persona, a failed second read no longer wipes the record, and stale image directories are reaped only when empty
 - Changed: logging goes through the framework logger; the help row lists `/单抽 帮助` and `/今日牌运 帮助`
-
-#### v0.8.3
-
-- Fixed: the injection filter no longer mangles ordinary questions (colloquial prefixes, common professions and English technical terms pass through); user questions are fenced and stripped of quotes and fence keywords, so writing a closing marker in the question cannot end the data block early
-- Fixed: daily readings are bucketed by the cleaned question, so a mixed question no longer receives the morning's broad reading; a generation that crosses midnight no longer overwrites the new day's cache
-- Fixed: spread selection is no longer misled by pronoun and hobby substrings, while romance questions still pick the lovers cross
-- Improved: the spirit's line and the reading run concurrently on one shared budget; cards are delivered as JPEG at roughly a quarter of the previous size
-- Fixed: unverified platforms, and events whose platform name cannot be read, fall back to plain messages instead of risking a silently dropped result
-- Changed: the `/单抽` description matches its behaviour, and framework imports are explicit so a misspelled name is a static error
 
 > Full per-version details for v0.8.1 and earlier live in [CHANGELOG.md](CHANGELOG.md) and the `changelogs/` directory — this page keeps only the six most recent releases.
 

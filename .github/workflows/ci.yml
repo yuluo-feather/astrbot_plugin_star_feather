@@ -10,8 +10,8 @@
 #   - 私密昵称扫描不进这里：它是发布体检 preflight 的职责，且本文件自身也在扫描范围内。
 #
 # 兼容性矩阵（为什么是这些格，别照着抄数字）：
-#   - 安全下限侧：requirements.txt 钉着 pillow>=12.3.0，12.3.0 是 OSV 现查无已知条目的
-#     最低版本；3.12 与 3.13 都精确钉 12.3.0，确认这一格真能装、真能跑；
+#   - 安全下限侧：requirements.txt 钉着 pillow>=13.0.0，13.0.0 是 12.3.0 已披露 CVE 的
+#     修复版本；3.12 与 3.13 都精确钉 13.0.0，确认这一格真能装、真能跑；
 #   - 上限侧：不钉，装上游最新 Pillow——新轮子先炸先知道；
 #   - Windows 是 AstrBot 的主场：路径、文件锁、字体目录都跟 libc 不同源，只在 ubuntu
 #     上绿不算绿。下限格只在 ubuntu 上钉：轮子是二进制构建差异，API 面与平台无关；
@@ -54,15 +54,15 @@ jobs:
         && fromJSON('{"include":[
         {"os":"ubuntu-latest","python":"3.12","pillow":"","label":"最新 Pillow"},
         {"os":"windows-latest","python":"3.12","pillow":"","label":"最新 Pillow"},
-        {"os":"ubuntu-latest","python":"3.12","pillow":"12.3.0","label":"Pillow 12.3.0 安全下限"}
+        {"os":"ubuntu-latest","python":"3.12","pillow":"13.0.0","label":"Pillow 13.0.0 安全下限"}
         ]}')
         || fromJSON('{"include":[
         {"os":"ubuntu-latest","python":"3.12","pillow":"","label":"最新 Pillow"},
         {"os":"ubuntu-latest","python":"3.13","pillow":"","label":"最新 Pillow"},
         {"os":"windows-latest","python":"3.12","pillow":"","label":"最新 Pillow"},
         {"os":"windows-latest","python":"3.13","pillow":"","label":"最新 Pillow"},
-        {"os":"ubuntu-latest","python":"3.12","pillow":"12.3.0","label":"Pillow 12.3.0 安全下限"},
-        {"os":"ubuntu-latest","python":"3.13","pillow":"12.3.0","label":"Pillow 12.3.0 安全下限"}
+        {"os":"ubuntu-latest","python":"3.12","pillow":"13.0.0","label":"Pillow 13.0.0 安全下限"},
+        {"os":"ubuntu-latest","python":"3.13","pillow":"13.0.0","label":"Pillow 13.0.0 安全下限"}
         ]}') }}
     steps:
       - uses: actions/checkout@v7
@@ -171,7 +171,7 @@ jobs:
             requirements-dev.txt
       - name: 装依赖并钉住 Pillow 下限
         env:
-          PILLOW_WANT: "12.3.0"
+          PILLOW_WANT: "13.0.0"
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
@@ -182,7 +182,7 @@ jobs:
       # mypy 那侧不在这里抄一份版本号：钉值现读 requirements-dev.txt（单一真源）
       - name: 钉完当场复核
         env:
-          PILLOW_WANT: "12.3.0"
+          PILLOW_WANT: "13.0.0"
         run: |
           python -c "import os, PIL; w = os.environ['PILLOW_WANT']; assert PIL.__version__ == w, f'Pillow 装到 {PIL.__version__}，不是 {w}——这一格就名不副实了'"
           python -c 'import re, mypy.version; want = re.search(r"^mypy==(\S+)", open("requirements-dev.txt", encoding="utf-8").read(), re.M).group(1); assert mypy.version.__version__ == want, "mypy 装到 %s，不是 %s（requirements-dev.txt 钉的那版）" % (mypy.version.__version__, want); print("mypy", want, "对齐 requirements-dev.txt")'
