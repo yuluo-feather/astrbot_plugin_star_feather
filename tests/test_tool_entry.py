@@ -9,7 +9,10 @@ import types
 
 from astrbot.api.event import MessageChain
 from astrbot.api.message_components import Plain
-from data.plugins.astrbot_plugin_star_feather.adapters.astrbot_io import messenger_for
+from data.plugins.astrbot_plugin_star_feather.adapters.astrbot_io import (
+    EventMessenger,
+    messenger_for,
+)
 from data.plugins.astrbot_plugin_star_feather.adapters.event import (
     delivery_capabilities,
     incoming_from_event,
@@ -284,3 +287,71 @@ class TestSendStatus:
     def test_help_send_failure_does_not_claim_sent(self):
         out = _tool(_plugin(), _evt(text="帮助", fail_sends=1))
         assert out == TOOL_SEND_FAILED
+
+
+class TestEntryExceptionBoundary:
+    """前置步骤（意图解析 / 节流 / 每日计数）也要有用户可见的异常出口。
+
+    这些步骤漏到 Agent Loop 里，用户一句解释都收不到——命令入口从第一行就包在
+    try 里，工具入口此前只包住占卜与呈现，两条路径的异常契约不对称。
+    """
+
+    @staticmethod
+    def _assert_failure_exit(p, evt):
+        out = _tool(p, evt)
+        assert out == TOOL_FAILED_SENT
+        assert "占卜结果已发送" not in out
+        assert any("牌灵需要缓缓" in chain.chain[0].text for chain in evt.sent)
+
+    def test_intent_build_failure_is_caught(self, monkeypatch):
+        def boom(*a, **kw):
+            raise RuntimeError("intent down")
+
+        monkeypatch.setattr(handlers, "build_request", boom)
+        self._assert_failure_exit(_plugin(), _evt())
+
+    def test_throttle_failure_is_caught(self):
+        p = _plugin()
+
+        async def boom(*a, **kw):
+            raise RuntimeError("throttle down")
+
+        p.container.gate.session_throttle = boom
+        self._assert_failure_exit(p, _evt())
+
+    def test_daily_limit_failure_is_caught(self):
+        p = _plugin()
+
+        async def boom(*a, **kw):
+            raise RuntimeError("gate down")
+
+        p.container.gate.check = boom
+        self._assert_failure_exit(p, _evt())
+
+    def test_failure_hint_send_failure_reports_not_sent(self, monkeypatch):
+        def boom(*a, **kw):
+            raise RuntimeError("intent down")
+
+        monkeypatch.setattr(handlers, "build_request", boom)
+        assert _tool(_plugin(), _evt(fail_sends=1)) == TOOL_SEND_FAILED
+
+    def test_help_send_exception_is_not_reading_failure(self, monkeypatch):
+        """帮助页发送异常只回 TOOL_SEND_FAILED，不该走「这卦起得有点乱」那条文案。"""
+        async def send_boom(self, text):
+            raise RuntimeError("send down")
+
+        monkeypatch.setattr(EventMessenger, "send_text", send_boom)
+        out = _tool(_plugin(), _evt(text="帮助"))
+        assert out == TOOL_SEND_FAILED
+
+    def test_failure_hint_exception_does_not_escape(self, monkeypatch):
+        """异常通知自己发不出去时，不许再抛出第二次未处理异常。"""
+        def boom(*a, **kw):
+            raise RuntimeError("intent down")
+
+        async def send_boom(self, text):
+            raise RuntimeError("send down")
+
+        monkeypatch.setattr(handlers, "build_request", boom)
+        monkeypatch.setattr(EventMessenger, "send_text", send_boom)
+        assert _tool(_plugin(), _evt()) == TOOL_SEND_FAILED

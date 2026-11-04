@@ -76,28 +76,38 @@ async def tool_entry(container, incoming: IncomingEvent,
     if not text:
         return ("工具收到空文本：用户没说占卜什么。请回一句，引导用户说出想占卜的内容"
                 "（如感情、事业、学业、今日运势）。")
-    request = build_request(
-        "auto", text, daily_enabled=container.settings.output.daily_fixed,
-        source="tool", formation_hint=formation)
-    if request.kind == KIND_HELP:
-        if not await messenger.send_text(help_text(version)):
-            return TOOL_SEND_FAILED
-        return "帮助页已发送。请自然回应一句，不必再调用工具。"
-    remain = await container.gate.session_throttle(
-        f"sf_tool_cd_{incoming.conversation_key}", container.settings.tool.llm_cooldown)
-    if remain > 0:
-        if not await messenger.send_text(
-                f"牌灵刚忙完一卦，让它歇 {remain} 秒，或者用 /占卜 再来一卦~"):
-            return TOOL_SEND_FAILED
-        return f"已提示用户节流中（剩 {remain} 秒）。请自然回应一句，不必再调用工具。"
-    block = await container.gate.check(incoming, for_command=False)
-    if block:
-        if not await messenger.send_text(block):
-            return TOOL_SEND_FAILED
-        return "已提示用户今日次数限制。请自然回应一句，不必再调用工具。"
-    # 收尾引导放在所有早退分支之后取：早退路径不该白耗一次全局随机状态。
-    note = random.choice(TOOL_EPILOGUE)
+    # 整条业务流程一个异常出口：意图解析、限流与每日计数同样可能抛出未预期异常，
+    # 漏到 Agent Loop 里用户就一句解释都收不到（命令入口从第一行就包在 try 里）。
+    # 只 catch Exception：取消语义属于 BaseException，必须原样传出去。
     try:
+        request = build_request(
+            "auto", text, daily_enabled=container.settings.output.daily_fixed,
+            source="tool", formation_hint=formation)
+        if request.kind == KIND_HELP:
+            # 帮助页有自己的失败语义：发送异常也只回 TOOL_SEND_FAILED，
+            # 不能落进下面「占卜失败」的出口（用户问的是帮助，不是占卜）。
+            try:
+                sent = await messenger.send_text(help_text(version))
+            except Exception as e:
+                log.error(f"帮助页发送失败: {_exc_detail(e)}")
+                sent = False
+            if not sent:
+                return TOOL_SEND_FAILED
+            return "帮助页已发送。请自然回应一句，不必再调用工具。"
+        remain = await container.gate.session_throttle(
+            f"sf_tool_cd_{incoming.conversation_key}", container.settings.tool.llm_cooldown)
+        if remain > 0:
+            if not await messenger.send_text(
+                    f"牌灵刚忙完一卦，让它歇 {remain} 秒，或者用 /占卜 再来一卦~"):
+                return TOOL_SEND_FAILED
+            return f"已提示用户节流中（剩 {remain} 秒）。请自然回应一句，不必再调用工具。"
+        block = await container.gate.check(incoming, for_command=False)
+        if block:
+            if not await messenger.send_text(block):
+                return TOOL_SEND_FAILED
+            return "已提示用户今日次数限制。请自然回应一句，不必再调用工具。"
+        # 收尾引导放在所有早退分支之后取：早退路径不该白耗一次全局随机状态。
+        note = random.choice(TOOL_EPILOGUE)
         uid = incoming.user_id
         prepared = await container.reading.prepare(request, uid)
         reading = await container.reading.run(
@@ -107,6 +117,10 @@ async def tool_entry(container, incoming: IncomingEvent,
         return note if delivered else TOOL_SEND_FAILED
     except Exception as e:
         log.error(f"自然语言占卜失败: {_exc_detail(e)}")
-        if await messenger.send_text("这卦起得有点乱……牌灵需要缓缓，换个时候再来问。"):
-            return TOOL_FAILED_SENT
-        return TOOL_SEND_FAILED
+        # 通知本身失败不能再往外抛：入口只返回字符串，抛出去又是漏给 Agent Loop
+        try:
+            sent = await messenger.send_text("这卦起得有点乱……牌灵需要缓缓，换个时候再来问。")
+        except Exception as send_exc:
+            log.error(f"占卜失败提示发送失败: {_exc_detail(send_exc)}")
+            sent = False
+        return TOOL_FAILED_SENT if sent else TOOL_SEND_FAILED
