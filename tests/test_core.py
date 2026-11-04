@@ -131,6 +131,14 @@ class TestAiInterpret:
         assert self._run(it).text == OK_INTERP
         assert p1.calls == 1
 
+    def test_non_string_response_is_candidate_failure_not_crash(self):
+        """畸形 completion_text 只算该候选失败，必须继续下一个候选，不许抛出兜底边界。"""
+        bad = FakeProvider("bad", result=123)  # truthy 非字符串
+        good = FakeProvider("good", result=OK_INTERP)
+        it = self._interp(bad, [good])
+        assert self._run(it).text == OK_INTERP
+        assert bad.calls == 1 and good.calls == 1
+
     def test_persona_applied_to_system_prompt(self):
         p1 = FakeProvider("p1", result=OK_INTERP)
         it = self._interp(p1, persona="tsundere")

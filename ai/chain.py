@@ -419,8 +419,12 @@ class AiInterpreter:
         except Exception as e:
             logger.warning(f"AI 解读请求失败: {e}")
             return None
-        # 网关的契约是「返回文本」（不再交给调用方解析 Provider 响应对象）
-        return (resp or "").strip() or None
+        # 网关的契约是「返回文本」，但仍守住「非字符串 = 该候选失败」的旧边界：
+        # 畸形的 completion_text 不许从兜底之外抛出去，带走整条卦。
+        try:
+            return (resp or "").strip() or None
+        except Exception:
+            return None
 
     async def _await_chat(self, provider, prompt: str, system_prompt: str,
                           limit: float):

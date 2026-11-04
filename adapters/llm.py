@@ -21,9 +21,10 @@ class AstrBotProviderGateway:
         return handle.meta().id
 
     async def chat(self, handle, prompt, system_prompt):
-        """发一次文本请求，只取 completion_text；缺失按空串，读取异常向上抛。"""
+        """发一次文本请求，只取 completion_text；非字符串按空串，读取异常向上抛。"""
         resp = await handle.text_chat(
             prompt=prompt, session_id=None, contexts=[], image_urls=[],
             system_prompt=system_prompt,
         )
-        return resp.completion_text or ""
+        text = resp.completion_text
+        return text if isinstance(text, str) else ""
