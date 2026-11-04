@@ -11,7 +11,6 @@
 import asyncio
 
 import pytest
-from data.plugins.astrbot_plugin_star_feather.ai.chain import AiInterpreter
 from data.plugins.astrbot_plugin_star_feather.ai.parse import (
     validate_interpret_structure,
     validate_interpret_structure_strict,
@@ -21,7 +20,7 @@ from data.plugins.astrbot_plugin_star_feather.core.settings import (
     STRUCTURE_CHECK_LOOSE,
     STRUCTURE_CHECK_STRICT,
 )
-from stubs import EVENT, OK_INTERP, PICK, FakeContext, FakeProvider
+from stubs import EVENT, OK_INTERP, PICK, FakeContext, FakeProvider, make_interpreter
 
 OK3 = ("【第1张·过去】一段过去。【第2张·现在】一段现在。"
        "【第3张·未来】一段未来。【总结】结论。")
@@ -31,7 +30,7 @@ LEGACY_TWO_OF_THREE = "【第1张·过去】一段过去。【第2张·现在】
 
 
 def _interp(providers, structure_check=DEFAULT_STRUCTURE_CHECK):
-    return AiInterpreter(FakeContext(others=providers), structure_check=structure_check,
+    return make_interpreter(FakeContext(others=providers), structure_check=structure_check,
                              all_providers_fallback=True)
 
 

@@ -24,6 +24,7 @@ from ..core.settings import (
     _budget_seconds_float,
 )
 from .budget import UNLIMITED_TIMEOUT, AiBudget
+from .gateway import ProviderGateway
 from .hardening import (
     clip_question,
     normalize_injection_input,
@@ -70,7 +71,8 @@ class AiInterpreter:
     问题清洗（截断/剥除）与输出校验委托 hardening。
     """
 
-    def __init__(self, context, enable_ai: bool = True, ai_timeout: int = 30,
+    def __init__(self, gateway: ProviderGateway, enable_ai: bool = True,
+                 ai_timeout: int = 30,
                  ai_cooldown: int = 60, ai_provider_id: str = "",
                  max_question_len: int = DEFAULT_QUESTION_MAX_LEN,
                  persona: str = DEFAULT_AI_PERSONA,
@@ -79,7 +81,7 @@ class AiInterpreter:
                  max_concurrency: int = 2,
                  all_providers_fallback: bool = False,
                  clock=time.monotonic):
-        self.context = context
+        self.gateway = gateway
         self.enable_ai = enable_ai
         self.ai_timeout = ai_timeout
         self.ai_cooldown = ai_cooldown
@@ -155,7 +157,7 @@ class AiInterpreter:
 
     def _provider_id(self, provider) -> str:
         try:
-            return provider.meta().id
+            return self.gateway.identify(provider)
         except Exception:
             return f"obj:{id(provider)}"
 
@@ -195,9 +197,9 @@ class AiInterpreter:
         # 它挂了后面照样走会话模型 → 全局默认 → 全部已加载，健壮性不变
         if self.ai_provider_id:
             try:
-                for provider in self.context.get_all_providers():
+                for provider in self.gateway.all():
                     try:
-                        if provider.meta().id == self.ai_provider_id:
+                        if self.gateway.identify(provider) == self.ai_provider_id:
                             _add(provider)
                             break
                     except Exception as e:
@@ -211,16 +213,16 @@ class AiInterpreter:
         # 候选链的纪律，静默失败却会让「用户看到回退本地牌义、日志里一片安静」
         # 无从归因（2026-10-02 补）。
         try:
-            _add(await self.context.get_using_provider_async(umo))
+            _add(await self.gateway.current(umo))
         except Exception as e:
             logger.warning(f"候选来源[会话模型]取用失败，本签该来源缺席: {e}")
         try:
-            _add(await self.context.get_using_provider_async())
+            _add(await self.gateway.current(None))
         except Exception as e:
             logger.warning(f"候选来源[全局默认]取用失败，本签该来源缺席: {e}")
         if self.all_providers_fallback:
             try:
-                for provider in self.context.get_all_providers():
+                for provider in self.gateway.all():
                     _add(provider)
             except Exception as e:
                 logger.warning(f"候选来源[全部已加载]枚举失败，本签该来源缺席: {e}")
@@ -417,18 +419,13 @@ class AiInterpreter:
         except Exception as e:
             logger.warning(f"AI 解读请求失败: {e}")
             return None
-        try:
-            return (resp.completion_text or "").strip() or None
-        except Exception:
-            return None
+        # 网关的契约是「返回文本」（不再交给调用方解析 Provider 响应对象）
+        return (resp or "").strip() or None
 
     async def _await_chat(self, provider, prompt: str, system_prompt: str,
                           limit: float):
         """真正发请求：超时/不限制两档在这里落地。"""
-        call = provider.text_chat(
-            prompt=prompt, session_id=None, contexts=[], image_urls=[],
-            system_prompt=system_prompt,
-        )
+        call = self.gateway.chat(provider, prompt, system_prompt)
         if limit == UNLIMITED_TIMEOUT:
             return await call
         return await asyncio.wait_for(call, timeout=limit)

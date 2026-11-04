@@ -27,7 +27,15 @@ from data.plugins.astrbot_plugin_star_feather.core.settings import (
     DEFAULT_SPIRIT_STAGE_BUDGET,
 )
 from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
-from stubs import CARD, EVENT, OK_INTERP, PICK, FakeContext, FakeProvider
+from stubs import (
+    CARD,
+    EVENT,
+    OK_INTERP,
+    PICK,
+    FakeContext,
+    FakeProvider,
+    make_interpreter,
+)
 
 
 class _Interp:
@@ -70,7 +78,7 @@ class _KV:
 
 def _interp(providers, using=None, **kw):
     kw.setdefault("all_providers_fallback", True)
-    return AiInterpreter(FakeContext(using=using, others=providers), **kw)
+    return make_interpreter(FakeContext(using=using, others=providers), **kw)
 
 
 def _spy_chat(monkeypatch, clock, step, results):
@@ -297,7 +305,7 @@ class TestSpiritStageBudgetAccumulates:
         wait_for 上。代价约 0.3 秒。
         """
         monkeypatch.setattr(interpret_mod, "DEFAULT_SPIRIT_STAGE_BUDGET", 0.3)
-        it = AiInterpreter(_SlowContext(delay=5.0), ai_timeout=30, ai_budget=0)
+        it = make_interpreter(_SlowContext(delay=5.0), ai_timeout=30, ai_budget=0)
         t0 = time.monotonic()
         out = self._spirit(it, AiBudget(0))
         elapsed = time.monotonic() - t0
@@ -468,7 +476,7 @@ class TestEndToEndDeliveryUnderSpentBudget:
         )
 
         ctx = FakeContext(using=None, others=list(providers))
-        it = AiInterpreter(ctx, ai_timeout=30, ai_budget=1.2,
+        it = make_interpreter(ctx, ai_timeout=30, ai_budget=1.2,
                            all_providers_fallback=True)
         created = []
         real_new_budget = it.new_budget
@@ -602,7 +610,7 @@ class TestCandidateFetchWithinBudget:
         真睡不可免的理由同 TestRealWallClock：只有墙钟能证明它确实接到了 wait_for 上。
         """
         seen = []
-        it = AiInterpreter(_SlowContext(delay=5.0, calls=seen), ai_timeout=30)
+        it = make_interpreter(_SlowContext(delay=5.0, calls=seen), ai_timeout=30)
         t0 = time.monotonic()
         out = self._run(it, AiBudget(1.2))
         elapsed = time.monotonic() - t0
@@ -612,7 +620,7 @@ class TestCandidateFetchWithinBudget:
 
     def test_candidate_wait_is_accounted_as_the_same_budget_stop(self, caplog):
         """取候选超时按同一个死因记账：该阶段进 stopped，且只落一条预算日志。"""
-        it = AiInterpreter(_SlowContext(delay=5.0), ai_timeout=30)
+        it = make_interpreter(_SlowContext(delay=5.0), ai_timeout=30)
         bd = AiBudget(1.2)
         with caplog.at_level(logging.WARNING):
             assert self._run(it, bd) is None
@@ -624,7 +632,7 @@ class TestCandidateFetchWithinBudget:
         """开局即耗尽：连候选都不去取——取用本身也是要花时间的异步动作。"""
         clk = Clock()
         seen = []
-        it = AiInterpreter(_SlowContext(delay=5.0, calls=seen), ai_timeout=30)
+        it = make_interpreter(_SlowContext(delay=5.0, calls=seen), ai_timeout=30)
         bd = AiBudget(120, clk)
         clk.advance(120)
         assert self._run(it, bd) is None
@@ -637,7 +645,7 @@ class TestCandidateFetchWithinBudget:
         超时上，这一格就当场变红。
         """
         prov = FakeProvider("p0", result=OK_INTERP)
-        it = AiInterpreter(_SlowContext(using=prov, delay=1.5), ai_timeout=1, ai_budget=0)
+        it = make_interpreter(_SlowContext(using=prov, delay=1.5), ai_timeout=1, ai_budget=0)
         assert self._run(it, AiBudget(0)).text == OK_INTERP
 
     def test_zero_budget_and_zero_timeout_stay_unbounded_by_design(self, monkeypatch):
@@ -655,7 +663,7 @@ class TestCandidateFetchWithinBudget:
     def test_candidate_fetch_timeout_does_not_freeze_the_provider(self):
         """取候选超时 ≠ 模型服务故障：不许把它记进失败冷却、拖累后面的占卜。"""
         prov = FakeProvider("p0", result=OK_INTERP)
-        it = AiInterpreter(_SlowContext(using=prov, delay=5.0), ai_timeout=30, ai_cooldown=60)
+        it = make_interpreter(_SlowContext(using=prov, delay=5.0), ai_timeout=30, ai_cooldown=60)
         assert self._run(it, AiBudget(1.2)) is None
         assert it._fail_ts_by_provider == {}
 
@@ -685,7 +693,7 @@ class TestUnlimitedBudgetKeepsTheImagePipeline:
         from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
 
         ctx = FakeContext(using=None, others=[FakeProvider("p0", result=OK_INTERP)])
-        it = AiInterpreter(ctx, ai_timeout=30, ai_budget=0)   # 总预算关掉
+        it = make_interpreter(ctx, ai_timeout=30, ai_budget=0)   # 总预算关掉
 
         gone = str(tmp_path / "gone.png")     # 渲染给了路径，文件却在这几毫秒里没了
         alive = str(tmp_path / "alive.png")

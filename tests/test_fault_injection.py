@@ -26,7 +26,7 @@ import pytest
 from data.plugins.astrbot_plugin_star_feather.core.dailylines import pick_signature
 from data.plugins.astrbot_plugin_star_feather.core.dto import IncomingEvent
 from data.plugins.astrbot_plugin_star_feather.services import daily as daily_mod
-from stubs import PICK, FakeContext
+from stubs import PICK, FakeContext, make_interpreter
 
 TODAY = time.strftime("%Y%m%d")
 UID = "u_fault"
@@ -464,7 +464,6 @@ class TestImageGoneBeforeSend:
     def _plugin(render, on_after_render=None):
         """真入口 + 真渲染器 + 真分发，只把「渲染实现」和 AI 换成可控桩。"""
         from data.plugins.astrbot_plugin_star_feather.adapters.clock import Clock
-        from data.plugins.astrbot_plugin_star_feather.ai.chain import AiInterpreter
         from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
 
@@ -480,7 +479,7 @@ class TestImageGoneBeforeSend:
         renderer = Renderer(image_dir="", send_mode="plain")
         renderer._render_sync = fake_sync
         settings = _plain_settings()
-        interpreter = AiInterpreter(FakeContext(None), enable_ai=False)
+        interpreter = make_interpreter(FakeContext(None), enable_ai=False)
         daily = DailyFortune(KvSpy(), clock=Clock(), interpreter=interpreter)
         p = _entry_plugin(settings=settings, daily=daily, interpreter=interpreter,
                           renderer=renderer)
@@ -776,7 +775,6 @@ class TestCleanupFuseNeverCarriesTheReading:
     def _reading_with_real_fuse(self, render_service, tmp_path):
         """真入口 + 真渲染器 + 真登记清理，只把渲染实现与 AI 换桩。"""
         from data.plugins.astrbot_plugin_star_feather.adapters.clock import Clock
-        from data.plugins.astrbot_plugin_star_feather.ai.chain import AiInterpreter
         from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
         from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
 
@@ -789,7 +787,7 @@ class TestCleanupFuseNeverCarriesTheReading:
         renderer = Renderer(image_dir=str(tmp_path), send_mode="plain")
         renderer._render_sync = fake_render_sync
         settings = _plain_settings()
-        interpreter = AiInterpreter(FakeContext(None), enable_ai=False)
+        interpreter = make_interpreter(FakeContext(None), enable_ai=False)
         daily = DailyFortune(KvSpy(), clock=Clock(), interpreter=interpreter)
         p = _entry_plugin(settings=settings, daily=daily, interpreter=interpreter,
                           renderer=renderer)

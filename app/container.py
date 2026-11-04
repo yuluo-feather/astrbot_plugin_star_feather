@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from ..adapters.astrbot_io import PluginKV
 from ..adapters.clock import Clock
 from ..adapters.deliver import Deliverer
+from ..adapters.llm import AstrBotProviderGateway
 from ..adapters.presenter import Presenter
 from ..ai.chain import AiInterpreter
 from ..core.settings import Settings, parse
@@ -33,7 +34,7 @@ def build_container(context, plugin, config) -> Container:
     clock = Clock.from_context(context)
     kv = PluginKV(plugin)
     interpreter = AiInterpreter(
-        context,
+        AstrBotProviderGateway(context),
         enable_ai=settings.ai.enable_ai,
         ai_timeout=settings.ai.timeout,
         ai_cooldown=settings.ai.fail_cooldown,

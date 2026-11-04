@@ -46,6 +46,39 @@ class FakeContext:
         return self.others
 
 
+class FakeGateway:
+    """ProviderGateway 测试桩：把 FakeContext 的四件事原样转给解释器。"""
+
+    def __init__(self, context):
+        self.context = context
+
+    async def current(self, umo=None):
+        if self.context is None:
+            return None
+        return await self.context.get_using_provider_async(umo)
+
+    def all(self):
+        if self.context is None:
+            return []
+        return list(self.context.get_all_providers())
+
+    def identify(self, handle):
+        return handle.meta().id
+
+    async def chat(self, handle, prompt, system_prompt):
+        resp = await handle.text_chat(
+            prompt=prompt, session_id=None, contexts=[], image_urls=[],
+            system_prompt=system_prompt,
+        )
+        return resp.completion_text or ""
+
+
+def make_interpreter(context, *args, **kwargs):
+    """测试入口：用 FakeGateway 包住 context，保持原构造参数不变。"""
+    from data.plugins.astrbot_plugin_star_feather.ai.chain import AiInterpreter
+    return AiInterpreter(FakeGateway(context), *args, **kwargs)
+
+
 CARD = TAROT_CARDS[0]  # 愚者（字典结构，与真实牌库同源）
 PICK = {"card": CARD, "upright": True}
 EVENT = types.SimpleNamespace(unified_msg_origin="test_umo")

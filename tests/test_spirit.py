@@ -15,7 +15,7 @@ from data.plugins.astrbot_plugin_star_feather.core.dailylines import pick_signat
 from data.plugins.astrbot_plugin_star_feather.core.tarot_data import (
     TAROT_CARDS,
 )
-from stubs import CARD, EVENT, PICK, FakeContext, FakeProvider
+from stubs import CARD, EVENT, PICK, FakeContext, FakeProvider, make_interpreter
 
 
 # ---------- 牌灵的话：daily.spirit_cached（AI 生成 + 当日缓存） ----------
@@ -335,8 +335,7 @@ class TestSpiritCache:
 # ---------- 牌灵的话：interpret.spirit_line 生成 ----------
 class TestSpiritLine:
     def _interp(self, provider, enable=True):
-        from data.plugins.astrbot_plugin_star_feather.ai.chain import AiInterpreter
-        return AiInterpreter(FakeContext(provider, [provider]), enable, 5, 60, "", 200)
+        return make_interpreter(FakeContext(provider, [provider]), enable, 5, 60, "", 200)
 
     def test_success_returns_cleaned_line(self):
         p1 = FakeProvider("p1", result="「别急，路会慢慢亮起来的。」")
@@ -381,11 +380,10 @@ class TestSpiritLine:
         spirit_line 原本零条——「牌灵的话为何老回退池内签文」在日志里查不出原因。
         「只有换行使首行剥完为空」走同一条不合规分支，共用这一行日志。
         """
-        from data.plugins.astrbot_plugin_star_feather.ai.chain import AiInterpreter
         long_text = "这句话故意写得很长，长到超过四十个字，专门用来触发那条不合规分支" * 2
         p1 = FakeProvider("p1", result=long_text)
         p2 = FakeProvider("p2", result="短句就位。")
-        i = AiInterpreter(FakeContext(p1, [p1, p2]), True, 5, 60, "", 200,
+        i = make_interpreter(FakeContext(p1, [p1, p2]), True, 5, 60, "", 200,
                                   all_providers_fallback=True)
         with caplog.at_level(logging.INFO):
             out = asyncio.run(i.spirit_line(EVENT, [(CARD, True)], "感情", None))

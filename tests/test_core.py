@@ -8,10 +8,7 @@ import asyncio
 import logging
 import types
 
-from data.plugins.astrbot_plugin_star_feather.ai.chain import (
-    QUEUE_TIMEOUT,
-    AiInterpreter,
-)
+from data.plugins.astrbot_plugin_star_feather.ai.chain import QUEUE_TIMEOUT
 from data.plugins.astrbot_plugin_star_feather.ai.prompts import (
     PERSONA_POOL,
     PERSONA_PROFILES,
@@ -30,7 +27,7 @@ from data.plugins.astrbot_plugin_star_feather.core.tarot_data import (
 )
 from data.plugins.astrbot_plugin_star_feather.core.texts import SHUFFLE_LINES
 from data.plugins.astrbot_plugin_star_feather.services.render import Renderer
-from stubs import EVENT, OK_INTERP, PICK, FakeContext, FakeProvider
+from stubs import EVENT, OK_INTERP, PICK, FakeContext, FakeProvider, make_interpreter
 
 UMO = getattr(EVENT, "unified_msg_origin", None)
 
@@ -119,7 +116,7 @@ class TestAiInterpret:
     @staticmethod
     def _interp(using, others=None, timeout=5, cooldown=60, enable=True,
                 max_len=200, persona="random", provider_id=""):
-        return AiInterpreter(FakeContext(using, others), enable, timeout, cooldown,
+        return make_interpreter(FakeContext(using, others), enable, timeout, cooldown,
                              provider_id, max_len, persona=persona,
                              all_providers_fallback=True)
 
@@ -177,7 +174,7 @@ class TestAiInterpret:
     def test_provider_cooldown_uses_injected_clock(self):
         """provider 冷却只吃进程内时钟：墙钟回拨不该延长冷却。"""
         now = [100.0]
-        it = AiInterpreter(None, ai_cooldown=60, clock=lambda: now[0])
+        it = make_interpreter(None, ai_cooldown=60, clock=lambda: now[0])
         it._mark_fail("p1")
         assert it._in_cooldown("p1")
         now[0] += 60
@@ -231,7 +228,7 @@ class TestAiInterpret:
 class TestInjectionGuard:
     @staticmethod
     def _interp(using, others=None):
-        return AiInterpreter(FakeContext(using, others), True, 5, 60, "", 200,
+        return make_interpreter(FakeContext(using, others), True, 5, 60, "", 200,
                              all_providers_fallback=True)
 
     @staticmethod
@@ -388,7 +385,7 @@ class TestPrompts:
 class TestAiProvider:
     @staticmethod
     def _interp(using, others, provider_id=""):
-        return AiInterpreter(FakeContext(using, others), True, 5, 60, provider_id,
+        return make_interpreter(FakeContext(using, others), True, 5, 60, provider_id,
                              all_providers_fallback=True)
 
     @staticmethod
@@ -428,14 +425,14 @@ class TestProviderFallbackSwitch:
     def test_off_by_default_does_not_try_other_providers(self):
         p1 = FakeProvider("p1", exc=RuntimeError("挂"))
         p2 = FakeProvider("p2", result=OK_INTERP)
-        it = AiInterpreter(FakeContext(p1, [p2]), True, 5, 60, "")
+        it = make_interpreter(FakeContext(p1, [p2]), True, 5, 60, "")
         assert self._run(it) is None
         assert p2.calls == 0
 
     def test_explicit_switch_tries_every_provider(self):
         p1 = FakeProvider("p1", exc=RuntimeError("挂"))
         p2 = FakeProvider("p2", result=OK_INTERP)
-        it = AiInterpreter(FakeContext(p1, [p2]), True, 5, 60, "",
+        it = make_interpreter(FakeContext(p1, [p2]), True, 5, 60, "",
                            all_providers_fallback=True)
         assert self._run(it).text == OK_INTERP
         assert p2.calls == 1
@@ -462,7 +459,7 @@ class TestProviderConcurrencyLimit:
 
     def _peak(self, limit):
         prov = self._SlowProvider()
-        it = AiInterpreter(FakeContext(prov, [prov]), True, 5, 60, "",
+        it = make_interpreter(FakeContext(prov, [prov]), True, 5, 60, "",
                            max_concurrency=limit)
         async def go():
             await asyncio.gather(
@@ -484,7 +481,7 @@ class TestProviderConcurrencyLimit:
     def test_queue_wait_counts_against_timeout(self):
         """排队时间也算进本次请求预算：等不到槽位就返回本地原因哨兵。"""
         prov = self._SlowProvider(delay=0.2)
-        it = AiInterpreter(FakeContext(prov, [prov]), True, 5, 60, "",
+        it = make_interpreter(FakeContext(prov, [prov]), True, 5, 60, "",
                            max_concurrency=1, all_providers_fallback=False)
 
         async def go():
@@ -499,7 +496,7 @@ class TestProviderConcurrencyLimit:
     def test_queue_timeout_does_not_cool_down_the_provider(self):
         """排队超时是本地原因，不能记成 Provider 服务失败。"""
         p1 = FakeProvider("p1", result=OK_INTERP)
-        it = AiInterpreter(FakeContext(p1, [p1]), True, 5, 60, "")
+        it = make_interpreter(FakeContext(p1, [p1]), True, 5, 60, "")
 
         async def fake_chat(*args, **kwargs):
             return QUEUE_TIMEOUT
@@ -516,7 +513,7 @@ class TestSemaphoreRegistryLifecycle:
     @staticmethod
     def _interp():
         prov = FakeProvider("p0")
-        return AiInterpreter(FakeContext(prov, [prov]), True, 5, 60, "",
+        return make_interpreter(FakeContext(prov, [prov]), True, 5, 60, "",
                              max_concurrency=2), prov
 
     def test_uncontended_closed_loop_entries_are_reaped(self):
@@ -533,7 +530,7 @@ class TestSemaphoreRegistryLifecycle:
     def test_contended_closed_loop_is_reaped_on_next_call(self):
         # 单槽 + 两个持有者才会真正排队，Semaphore 在等待路径上绑定循环
         prov = FakeProvider("p0")
-        it = AiInterpreter(FakeContext(prov, [prov]), True, 5, 60, "",
+        it = make_interpreter(FakeContext(prov, [prov]), True, 5, 60, "",
                            max_concurrency=1)
 
         async def contend():
@@ -603,7 +600,7 @@ class TestProviderCandidateSilentFailure:
     """候选来源故障必须留痕（2026-10-02 复核⑦）：接口不抛是纪律，静默失败不是。"""
 
     def test_each_source_failure_keeps_a_trace(self, caplog):
-        interp = AiInterpreter(_BrokenProviderContext(), True, 5, 60, "",
+        interp = make_interpreter(_BrokenProviderContext(), True, 5, 60, "",
                                all_providers_fallback=True)
         with caplog.at_level(logging.WARNING):
             out = asyncio.run(interp._provider_candidates("umo"))
@@ -614,7 +611,7 @@ class TestProviderCandidateSilentFailure:
 
     def test_healthy_context_stays_silent(self, caplog):
         p = FakeProvider("p1")
-        interp = AiInterpreter(FakeContext(p, [p]), True, 5, 60, "")
+        interp = make_interpreter(FakeContext(p, [p]), True, 5, 60, "")
         with caplog.at_level(logging.WARNING):
             out = asyncio.run(interp._provider_candidates("umo"))
         assert out == [p]

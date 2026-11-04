@@ -1,6 +1,6 @@
 # 宿主解耦任务书：AstrBot 作为可替换适配器
 
-> 状态：草案 v0.2（2026-11-05）· 接口语义按源码核对后补全 · **阶段一已合并（PR #89）**；**阶段二进行中（Event DTO + Messenger）**；阶段三未开工。
+> 状态：草案 v0.2（2026-11-05）· 接口语义按源码核对后补全 · **阶段一已合并（PR #89）**；**阶段二已合并（PR #91）**；**阶段三进行中（LLM Provider Gateway）**。
 > 目标不是「消灭 AstrBot 依赖」，而是把 AstrBot 从应用核心的**隐性依赖**变成**可替换的宿主适配器**。
 > 现有 `core / services / ai / render` 与 `adapters` 的分层保留，不重写、不重排目录。
 
@@ -107,7 +107,7 @@
 **错误语义（草案）**
 
 - 网关只做适配，**不重新定义错误处理策略**：Provider 不可用、查询失败、请求超时、返回结构异常、请求抛异常，都按原样向上抛；`AiInterpreter` 现有的 try/except、来源名告警、候选跳过与失败冷却一律不动。
-- `identify(handle)` 保持 `provider.meta().id`，异常时 `obj:{id(handle)}`；同一句柄必须得到同一 id（冷却 map 的键）。
+- `identify(handle)` 返回 `provider.meta().id`；异常由解释器按原口径兜底 `obj:{id(handle)}`，逐条告警保留。
 - `chat(handle, prompt, system_prompt)`：适配器按现有参数调用 `provider.text_chat(prompt=…, session_id=None, contexts=[], image_urls=[], system_prompt=…)`，只取 `completion_text`；取不到或为空 → 返回空串，由解释器现有的 `(text or "").strip() or None` 归一；读取属性时抛异常 → 视为请求失败向上抛，由现有失败路径处理。**不得把异常吞成空串**。
 - 超时不进网关：`asyncio.wait_for` 仍由解释器按预算施加；网关不得自加重试、超时、并发闸或日志。
 
