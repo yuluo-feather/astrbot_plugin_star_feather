@@ -1098,6 +1098,55 @@ class TestPromptBumpViaSpiritWriteBack:
         assert _text(out) == "新解读"
         assert calls == ["interpret", "interpret"], "换版后必须重新生成，不能命中旧桶"
 
+    @pytest.mark.parametrize("order", ["spirit_first", "interp_first"])
+    def test_new_version_interp_survives_either_writeback_order(self, monkeypatch, order):
+        """两种写回顺序都要满足：旧桶清掉，新版本生成的有效解读不被误删。"""
+        from data.plugins.astrbot_plugin_star_feather.core.intent import norm_topic
+        from data.plugins.astrbot_plugin_star_feather.services import daily as daily_mod
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
+
+        kv = {}
+        seq = iter(["解读#1", "解读#2"])
+
+        class _Ctx:
+            async def get_kv_data(self, key, default=None):
+                return kv.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                kv[key] = value
+
+        class _Interp:
+            async def interpret(self, *a, **kw):
+                return next(seq)
+
+            async def spirit_line(self, *a, **kw):
+                return "新牌灵"
+
+        day = "20260827"
+        topic = norm_topic("事业运势")
+        df = DailyFortune(_Ctx(), persona="", interpreter=_Interp())
+        asyncio.run(df.pick_cached("u1", day))
+        asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK],
+                                     "事业运势", today=day))
+        assert kv["sf_daily_u1"]["interps"][topic]["text"] == "解读#1"
+
+        monkeypatch.setattr(daily_mod, "_PROMPT_V", "v-next")
+        if order == "spirit_first":
+            asyncio.run(df.spirit_cached(None, "u1", [PICK], "事业运势", None, today=day))
+            assert kv["sf_daily_u1"]["interps"] == {}, "牌灵先写回：旧桶必须当场清掉"
+            asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK],
+                                         "事业运势", today=day))
+        else:
+            asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK],
+                                         "事业运势", today=day))
+            asyncio.run(df.spirit_cached(None, "u1", [PICK], "事业运势", None, today=day))
+
+        record = kv["sf_daily_u1"]
+        assert record["interps"][topic]["text"] == "解读#2", \
+            "新版本生成的有效解读不能被误删"
+        assert record["spirit_line"] == "新牌灵"
+        assert record["prompt_v"] == "v-next"
+
 
 # ---------- 主题桶内容损坏：当未命中，不静默丢解读 ----------
 _REGENERATED_TEXT = "【第1张·你的当下】新解读。"
