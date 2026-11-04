@@ -84,21 +84,28 @@ def _expected_handlers(main_py: Path) -> tuple[set[str], set[str]]:
     return commands, tools
 
 
-def _observed_handlers(module_name: str) -> tuple[set[str], int]:
-    """真框架注册表里属于本模块的命令名与 LLM 工具数。"""
+def _observed_handlers(module_name: str) -> tuple[set[str], set[str]]:
+    """真框架注册表里属于本模块的命令名与 LLM 工具名。
+
+    工具名从 `llm_tools.func_list` 取（`@filter.llm_tool(name=...)` 最终落在那里），
+    按 handler 的 `__module__` 过滤出本模块的工具——只比数量的话，注册名漂移会被
+    当成通过（Codex review, PR #101）。
+    """
+    from astrbot.core.provider.register import llm_tools
     from astrbot.core.star.filter.command import CommandFilter
-    from astrbot.core.star.star_handler import EventType, star_handlers_registry
+    from astrbot.core.star.star_handler import star_handlers_registry
 
     commands: set[str] = set()
-    tools = 0
     for md in star_handlers_registry:
         if md.handler_module_path != module_name:
             continue
-        if md.event_type == EventType.OnCallingFuncToolEvent:
-            tools += 1
         for flt in md.event_filters:
             if isinstance(flt, CommandFilter):
                 commands.add(flt.command_name)
+    tools = {
+        str(tool.name) for tool in llm_tools.func_list
+        if getattr(getattr(tool, "handler", None), "__module__", None) == module_name
+    }
     return commands, tools
 
 
@@ -162,8 +169,8 @@ def main() -> int:
             want_cmds == got_cmds, "commands",
             f"期望 {sorted(want_cmds)}，实际 {sorted(got_cmds)}"))
         checks.append(_report(
-            len(want_tools) == got_tools, "llm tools",
-            f"期望 {sorted(want_tools)}，实际 {got_tools} 个"))
+            want_tools == got_tools, "llm tools",
+            f"期望 {sorted(want_tools)}，实际 {sorted(got_tools)}"))
 
         try:
             cls(_MinimalContext())
