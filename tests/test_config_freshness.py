@@ -212,48 +212,59 @@ class TestEntryBinding:
         assert any("自检失败" in w for w in _warnings(caplog))
 
 
+def _event(text=""):
+    e = types.SimpleNamespace(message_str=text, unified_msg_origin="umo")
+    e.get_sender_id = lambda: "u1"
+    e.get_platform_id = lambda: ""
+    e.get_platform_name = lambda: "aiocqhttp"
+    e.get_self_id = lambda: "1"
+    e.should_call_llm = lambda v: None
+    return e
+
+
 class TestEntriesAreWired:
-    """接线守卫：两个入口都得进门自报，否则上面那把哨兵永远不会被触发。"""
+    """接线守卫：两个入口都得进门自报，否则上面那把哨兵永远不会被触发。
+
+    进门自报现在在 main.py（宿主侧）调用，所以守卫改盯宿主入口：
+    把 main 里的 note_entry_binding 摘掉，这两条就会红。
+    """
 
     def test_command_entry_notes_binding(self, monkeypatch):
+        from data.plugins.astrbot_plugin_star_feather import main as main_mod
         from data.plugins.astrbot_plugin_star_feather.app import handlers
         from data.plugins.astrbot_plugin_star_feather.core.settings import parse
 
         p = _plugin()
-        seen = []
-        monkeypatch.setattr(handlers, "note_entry_binding", lambda _p, e: seen.append(e))
+        p.container = types.SimpleNamespace(settings=parse(None))
+        seen, called = [], []
 
-        async def block(event, for_command):
-            return "BLOCK"
+        async def fake_entry(*args, **kwargs):
+            called.append(args)
 
-        p.container = types.SimpleNamespace(
-            settings=parse(None),
-            gate=types.SimpleNamespace(check=block),
-            reading=types.SimpleNamespace(),
-            presenter=types.SimpleNamespace())
-        ev = types.SimpleNamespace(should_call_llm=lambda v: None,
-                                   send=lambda chain: asyncio.sleep(0))
+        monkeypatch.setattr(main_mod, "note_entry_binding", lambda _p, e: seen.append(e))
+        monkeypatch.setattr(handlers, "command_entry", fake_entry)
 
-        asyncio.run(handlers.command_entry(p, ev, "", version="0", err_tpl="x"))
+        asyncio.run(p.divine(_event()))
         assert seen == ["command"]
+        assert called
 
     def test_tool_entry_notes_binding(self, monkeypatch):
+        from data.plugins.astrbot_plugin_star_feather import main as main_mod
         from data.plugins.astrbot_plugin_star_feather.app import handlers
         from data.plugins.astrbot_plugin_star_feather.core.settings import parse
 
         p = _plugin()
+        p.container = types.SimpleNamespace(settings=parse(None))
         seen = []
-        monkeypatch.setattr(handlers, "note_entry_binding", lambda _p, e: seen.append(e))
-        p.container = types.SimpleNamespace(
-            settings=parse({"tool": {"llm_tool_enabled": False}}),
-            gate=types.SimpleNamespace(),
-            reading=types.SimpleNamespace(),
-            presenter=types.SimpleNamespace())
-        ev = types.SimpleNamespace()
 
-        async def send(chain):
-            return None
-        ev.send = send
+        async def fake_tool(*args, **kwargs):
+            return "ok"
 
-        asyncio.run(handlers.tool_entry(p, ev, version="0"))
+        monkeypatch.setattr(main_mod, "note_entry_binding", lambda _p, e: seen.append(e))
+        monkeypatch.setattr(handlers, "tool_entry", fake_tool)
+
+        async def drain():
+            return [x async for x in p.divine_tool(_event())]
+
+        assert asyncio.run(drain()) == ["ok"]
         assert seen == ["tool"]

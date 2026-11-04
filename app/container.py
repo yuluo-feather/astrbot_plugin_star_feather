@@ -52,7 +52,6 @@ def build_container(context, plugin, config) -> Container:
         settings=settings, clock=clock, daily=daily,
         interpreter=interpreter, renderer=renderer)
     presenter = Presenter(Deliverer(
-        settings.output.segment_size, settings.output.disclaimer,
-        settings.output.send_mode == "forward"))
+        settings.output.segment_size, settings.output.disclaimer))
     return Container(settings, clock, kv, interpreter, daily, gate, renderer,
                      reading, presenter)

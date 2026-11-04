@@ -70,6 +70,10 @@ class EventMessenger:
             logger.warning(f"结果发送失败: {e}")
             return False
 
+    def chain_result(self, chain):
+        """把中立链条交给宿主事件构造成它的消息对象；Deliverer 用。"""
+        return self.event.chain_result(chain)
+
 
 def messenger_for(event) -> EventMessenger:
     """给一个事件套上消息端口。"""

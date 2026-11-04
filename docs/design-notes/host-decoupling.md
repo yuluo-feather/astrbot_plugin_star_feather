@@ -1,6 +1,6 @@
 # 宿主解耦任务书：AstrBot 作为可替换适配器
 
-> 状态：草案 v0.2（2026-11-05）· 接口语义按源码核对后补全，仍待主人确认 · **阶段一已实现（本地未推，实机未验）**；阶段二/三未开工。
+> 状态：草案 v0.2（2026-11-05）· 接口语义按源码核对后补全 · **阶段一已合并（PR #89）**；**阶段二进行中（Event DTO + Messenger）**；阶段三未开工。
 > 目标不是「消灭 AstrBot 依赖」，而是把 AstrBot 从应用核心的**隐性依赖**变成**可替换的宿主适配器**。
 > 现有 `core / services / ai / render` 与 `adapters` 的分层保留，不重写、不重排目录。
 
@@ -53,7 +53,7 @@
 
 | 文件 | 动作 |
 |---|---|
-| 新增 `app/dto.py` | `IncomingEvent`（输入）与 `DeliveryCapabilities`（投递能力）；都不含原始事件 |
+| 新增 `core/dto.py` | `IncomingEvent`（输入）与 `DeliveryCapabilities`（投递能力）；都不含原始事件。放 core 是因为 `services/gating` 也要用，避免服务层反向依赖 app |
 | 新增 `adapters/event.py` | `incoming(event)` 构造 DTO；`mark_handled(event)` 承接 `should_call_llm(True)`；`capabilities(event, forward_result)` 计算 `can_forward` / `self_id`；`core/identity.py` 的二级降级（int 型 ID、`message_obj.sender.user_id`、平台前缀）移到这里，纯转义逻辑可留在 core |
 | `app/handlers.py` | 入口签名改为 `(container, incoming, capabilities, messenger, …)`；移除 `getattr(event, …)` 与 `should_call_llm`；`note_entry_binding` 移到 `main.py`（宿主侧诊断） |
 | `services/gating.py` | `check(incoming, for_command)`；键值口径不变：`sf_cmd_cd_{conversation_key}` / `sf_tool_cd_{conversation_key}` / `sf_cmd_cnt_{user_id}` |
@@ -66,6 +66,7 @@
 
 - `IncomingEvent` 只描述输入；`Messenger` 只负责发送（`send_text` / `send_result`，返回 bool）；`DeliveryCapabilities` 只描述本次投递能力。三者不合并，也不互相替代。
 - 应用层所有发送都经由 `messenger`；不得出现 `event.send` / `event.chain_result`。
+- 结果对象由适配器构造：`EventMessenger.chain_result` 负责宿主消息对象；`Messenger` 端口仍只有 `send_text` / `send_result`，`ResultMessenger` 只是给 `Deliverer` 用的扩展。
 - `Presenter` / `Deliverer` 属于适配器，由 `Container` 注入；它们只接收 `DeliveryCapabilities`，不再接收 `event`。
 - `can_forward = send_mode == "forward" and supports_forward(platform_name)`；`self_id = event.get_self_id() or "0"`——与现状取值一致（转发节点 uin 用它）。
 

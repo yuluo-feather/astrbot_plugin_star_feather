@@ -13,10 +13,12 @@ from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 
+from .adapters.astrbot_io import messenger_for
+from .adapters.event import delivery_capabilities, incoming_from_event, mark_handled
 from .adapters.log import bind_host_logger
 from .app import handlers
 from .app.container import build_container
-from .app.diagnostics import image_dir_of, register_instance
+from .app.diagnostics import image_dir_of, note_entry_binding, register_instance
 from .render.assets import asset_manifest
 from .render.store import cleanup_stale_images
 
@@ -62,25 +64,38 @@ class StarFeatherPlugin(Star):
     def _help(self) -> str:
         return handlers.help_text(VERSION)
 
+    def _entry_parts(self, event):
+        """宿主侧收口：原始事件只在这里转成 DTO / 投递能力 / 消息端口。"""
+        caps = delivery_capabilities(
+            event, self.container.settings.output.send_mode == "forward")
+        return incoming_from_event(event), caps, messenger_for(event)
+
+    async def _run_command(self, event, text: str, **kwargs) -> None:
+        note_entry_binding(self, "command")
+        mark_handled(event)
+        incoming, caps, messenger = self._entry_parts(event)
+        await handlers.command_entry(
+            self.container, incoming, caps, messenger, text, **kwargs)
+
     @filter.command("占卜", desc="78张塔罗牌 AI 占卜与深度解读")
     async def divine(self, event: AstrMessageEvent, text: str = ""):
-        await handlers.command_entry(
-            self, event, text, version=VERSION,
+        await self._run_command(
+            event, text, version=VERSION,
             err_tpl="哼，这场占卜断了。牌灵今天状态不好，换个时候再来问。",
             fail_note="📖 解读：\n（AI 今天闹脾气不肯开口，牌面先给你，自己琢磨~）")
 
     @filter.command("单抽", desc="快速抽一张牌（每次现抽，不按天固定）")
     async def single(self, event: AstrMessageEvent, text: str = ""):
-        await handlers.command_entry(
-            self, event, text, version=VERSION,
+        await self._run_command(
+            event, text, version=VERSION,
             err_tpl="单抽断线了。牌灵今天不太配合，晚点再试。",
             intent_kind="single")
 
     @filter.command("今日牌运", alias={"运势", "每日一签"},
                     desc="今天的固定牌运（同一天同一人始终同一张牌）")
     async def daily(self, event: AstrMessageEvent, text: str = ""):
-        await handlers.command_entry(
-            self, event, text, version=VERSION,
+        await self._run_command(
+            event, text, version=VERSION,
             err_tpl="今日牌运断线了。牌灵今天不太配合，晚点再试。",
             intent_kind="daily", empty_fallback="（今日牌运）")
 
@@ -102,4 +117,7 @@ class StarFeatherPlugin(Star):
                 羽镜（圣三角）、恋羽十字（恋人十字）。用户明确提到牌阵、或问题重心清楚时填写；
                 拿不准就留空，插件会按问题规则自动选择。
         """
-        yield await handlers.tool_entry(self, event, formation, version=VERSION)
+        note_entry_binding(self, "tool")
+        incoming, caps, messenger = self._entry_parts(event)
+        yield await handlers.tool_entry(
+            self.container, incoming, caps, messenger, formation, version=VERSION)

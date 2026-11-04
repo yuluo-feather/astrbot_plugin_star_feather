@@ -17,7 +17,7 @@ import time
 
 from ..adapters.clock import Clock
 from ..adapters.kv_utils import kv_get, kv_put
-from ..core.identity import resolve_sender_uid
+from ..core.dto import IncomingEvent
 from ..core.limiter import cooldown_remaining, daily_remaining, daily_touch
 
 
@@ -61,11 +61,11 @@ class LimitGate:
             await kv_put(self.kv_store, key, time.time(), "会话节流")
             return 0
 
-    async def check(self, event, for_command: bool) -> str | None:
+    async def check(self, incoming: IncomingEvent, for_command: bool) -> str | None:
         """限流闸门（三入口共用）：返回 None 放行，返回文案表示拦截本次占卜。
 
         - 命令入口会话级节流（仅 for_command=True 时查，防连点刷屏）：
-          sf_cmd_cd_{消息源} 存上次时间戳，cmd_rate_limit 秒内不重复放行；
+          sf_cmd_cd_{会话键} 存上次时间戳，cmd_rate_limit 秒内不重复放行；
         - 每用户每日次数（三入口统一查，防 AI 解读被刷爆 token）：
           sf_cmd_cnt_{用户ID} 存 {date, count}，按日期判失效、跨天自动重置。
 
@@ -76,15 +76,15 @@ class LimitGate:
         """
         # ① 命令入口会话级节流
         if for_command:
-            umo = (getattr(event, "unified_msg_origin", None) or "global")
-            remain = await self.session_throttle(f"sf_cmd_cd_{umo}", self.cmd_rate_limit)
+            remain = await self.session_throttle(
+                f"sf_cmd_cd_{incoming.conversation_key}", self.cmd_rate_limit)
             if remain > 0:
                 # 会话级节流按消息源（群/私聊）维度：群里别人刚问过，等于整个会话歇口气，
                 # 文案别把「为别人算」套在用户头上，用中性的“刚忙完，歇口气”。
                 return f"牌灵刚忙完一卦，让它歇 {remain} 秒再来问~"
         # ② 每用户每日次数（三入口统一）
         if self.daily_count_limit > 0:
-            uid = resolve_sender_uid(event)
+            uid = incoming.user_id
             if uid:
                 # 日期键走 clock（与今日牌运/牌灵的话同一口径）：会话节流那条时间戳另用
                 # time.time()，两者各管各的——一个是墙钟时长，一个是日期边界，别混

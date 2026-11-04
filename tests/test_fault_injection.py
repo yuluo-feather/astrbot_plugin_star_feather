@@ -24,6 +24,7 @@ import warnings
 
 import pytest
 from data.plugins.astrbot_plugin_star_feather.core.dailylines import pick_signature
+from data.plugins.astrbot_plugin_star_feather.core.dto import IncomingEvent
 from data.plugins.astrbot_plugin_star_feather.services import daily as daily_mod
 from stubs import PICK, FakeContext
 
@@ -308,7 +309,8 @@ def _gate(kv, cmd_rate_limit=0, daily_count_limit=5):
 
 
 def _evt(uid=UID):
-    return types.SimpleNamespace(get_sender_id=lambda: uid, unified_msg_origin="test_umo")
+    return IncomingEvent(user_id=uid, platform_id="", conversation_id="test_umo",
+                         message_text="", platform_name="")
 
 
 @pytest.mark.parametrize("mode", list(MODES))
@@ -410,9 +412,9 @@ def _entry_plugin(*, settings, daily, interpreter, renderer):
     reading = ReadingService(settings=settings, clock=clock, daily=daily,
                              interpreter=interpreter, renderer=renderer)
     presenter = Presenter(Deliverer(settings.output.segment_size,
-                                    settings.output.disclaimer, False))
+                                    settings.output.disclaimer))
 
-    async def gate_check(event, for_command):
+    async def gate_check(incoming, for_command):
         return None
 
     container = types.SimpleNamespace(
@@ -422,8 +424,19 @@ def _entry_plugin(*, settings, daily, interpreter, renderer):
 
 
 def _run_entry(p, evt, question="羽签 问感情"):
+    from data.plugins.astrbot_plugin_star_feather.adapters.astrbot_io import (
+        messenger_for,
+    )
+    from data.plugins.astrbot_plugin_star_feather.adapters.event import (
+        delivery_capabilities,
+        incoming_from_event,
+    )
     from data.plugins.astrbot_plugin_star_feather.app import handlers
-    _run(handlers.command_entry(p, evt, question, version="0", err_tpl="断了"))
+    caps = delivery_capabilities(
+        evt, p.container.settings.output.send_mode == "forward")
+    _run(handlers.command_entry(p.container, incoming_from_event(evt), caps,
+                                messenger_for(evt), question, version="0",
+                                err_tpl="断了"))
 
 
 def _plain_settings(**over):

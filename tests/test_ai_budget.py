@@ -502,7 +502,7 @@ class TestEndToEndDeliveryUnderSpentBudget:
         reading = ReadingService(settings=settings, clock=clock, daily=daily,
                                  interpreter=it, renderer=_Renderer())
         presenter = Presenter(Deliverer(settings.output.segment_size,
-                                        settings.output.disclaimer, False))
+                                        settings.output.disclaimer))
 
         async def gate_check(event, for_command):
             return None
@@ -519,6 +519,8 @@ class TestEndToEndDeliveryUnderSpentBudget:
         evt.sent = []
         evt.get_self_id = lambda: "12345"
         evt.get_sender_id = lambda: "u1"
+        evt.get_platform_id = lambda: ""
+        evt.get_platform_name = lambda: "aiocqhttp"
         evt.should_call_llm = lambda v: None
 
         def chain_result(chain):
@@ -553,8 +555,18 @@ class TestEndToEndDeliveryUnderSpentBudget:
 
     @staticmethod
     async def _drain(plugin, evt, question, **kw):
+        from data.plugins.astrbot_plugin_star_feather.adapters.astrbot_io import (
+            messenger_for,
+        )
+        from data.plugins.astrbot_plugin_star_feather.adapters.event import (
+            delivery_capabilities,
+            incoming_from_event,
+        )
         from data.plugins.astrbot_plugin_star_feather.app import handlers
-        await handlers.command_entry(plugin, evt, question, version="0",
+        caps = delivery_capabilities(
+            evt, plugin.container.settings.output.send_mode == "forward")
+        await handlers.command_entry(plugin.container, incoming_from_event(evt), caps,
+                                     messenger_for(evt), question, version="0",
                                      err_tpl="断了")
 
 # ---------- 候选来源本身也在预算之内（issue #21 ④-a） ----------
@@ -697,7 +709,7 @@ class TestUnlimitedBudgetKeepsTheImagePipeline:
         reading = ReadingService(settings=settings, clock=clock, daily=daily,
                                  interpreter=it, renderer=renderer)
         presenter = Presenter(Deliverer(settings.output.segment_size,
-                                        settings.output.disclaimer, False))
+                                        settings.output.disclaimer))
 
         async def gate_check(event, for_command):
             return None
@@ -713,6 +725,8 @@ class TestUnlimitedBudgetKeepsTheImagePipeline:
         evt.sent = []
         evt.get_self_id = lambda: "12345"
         evt.get_sender_id = lambda: "u1"
+        evt.get_platform_id = lambda: ""
+        evt.get_platform_name = lambda: "aiocqhttp"
         evt.should_call_llm = lambda v: None
 
         def chain_result(chain):
@@ -735,5 +749,16 @@ class TestUnlimitedBudgetKeepsTheImagePipeline:
 
     @staticmethod
     async def _drain(plugin, evt):
+        from data.plugins.astrbot_plugin_star_feather.adapters.astrbot_io import (
+            messenger_for,
+        )
+        from data.plugins.astrbot_plugin_star_feather.adapters.event import (
+            delivery_capabilities,
+            incoming_from_event,
+        )
         from data.plugins.astrbot_plugin_star_feather.app import handlers
-        await handlers.command_entry(plugin, evt, "问感情", version="0", err_tpl="断了")
+        caps = delivery_capabilities(
+            evt, plugin.container.settings.output.send_mode == "forward")
+        await handlers.command_entry(plugin.container, incoming_from_event(evt), caps,
+                                     messenger_for(evt), "问感情", version="0",
+                                     err_tpl="断了")

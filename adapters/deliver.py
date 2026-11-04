@@ -8,7 +8,9 @@ from astrbot.api import logger
 from astrbot.api.message_components import Image, Node, Nodes, Plain
 
 from ..ai.prompts import SECTION_MARK_RE
+from ..core.dto import DeliveryCapabilities
 from ..core.models import Interpretation
+from ..core.ports import ResultMessenger
 from ..core.texts import FORWARD_IMAGE_LABEL
 
 # 已验证能收合并转发（Nodes）的平台：框架源码里显式处理 Nodes 的只有这两个
@@ -21,18 +23,15 @@ _FORWARD_SUPPORTED_PLATFORMS = frozenset({"aiocqhttp", "satori"})
 _WARNED_FORWARD_PLATFORMS: set[str] = set()
 
 
-def supports_forward(event) -> bool:
-    """该事件所在平台能不能收 Nodes（合并转发）。
+def supports_forward(platform_name: str) -> bool:
+    """该平台能不能收 Nodes（合并转发）。
 
     判据取白名单，且**取不到平台名时按不支持处理**：普通链消息在任何适配器都送得出去，
     而未知平台发 Nodes 可能被静默丢掉——诊断字段缺失（空串 / 事件桩 / 老版本事件）
     不该赌用户能不能看到结果。非白名单平台回退普通消息，并在首次遇到时留一条 warning
     ——静默降级正是这条要修的毛病（用户配着默认值却看不到结果，日志里也没有一句解释）。
     """
-    try:
-        name = str(event.get_platform_name() or "").strip().lower()
-    except Exception:
-        name = ""
+    name = str(platform_name or "").strip().lower()
     if name in _FORWARD_SUPPORTED_PLATFORMS:
         return True
     if not name:
@@ -87,21 +86,20 @@ def split_sections(text: str, fallback_size: int) -> list[str]:
 class Deliverer:
     """结果分发器：统一「AI 成功 → 结构化发送；失败 → 图片/文字兜底」。"""
 
-    def __init__(self, segment_size: int, disclaimer: str, forward_result: bool):
-        """三段参数就是全部决策：每段多长、末尾挂什么免责、要不要合并转发。
+    def __init__(self, segment_size: int, disclaimer: str):
+        """两段参数就是全部决策：每段多长、末尾挂什么免责。
 
-        forward_result 由调用方从 send_mode 解析成 bool（send_mode == "forward"），
-        本类不关心配置长什么样——给什么用什么，坏不了。
+        走不走合并转发由 `DeliveryCapabilities.can_forward` 决定，本类不再看配置。
         """
         self.segment_size = segment_size
         self.disclaimer = disclaimer
-        self.forward_result = forward_result
 
-    def forward_for(self, event) -> bool:
-        """本次事件实际走不走合并转发：配置开了 + 平台能收 Nodes。"""
-        return self.forward_result and supports_forward(event)
+    def forward_for(self, caps: DeliveryCapabilities) -> bool:
+        """本次投递走不走合并转发：能力由适配器算好，这里只看结果。"""
+        return caps.can_forward
 
-    async def deliver(self, event, interp: str | None, img: str | None,
+    async def deliver(self, messenger: ResultMessenger, caps: DeliveryCapabilities,
+                      interp: str | None, img: str | None,
                       formation: str, positions: list[str], picks: list[dict],
                       plain_text, fail_note: str = "", preface: str = ""):
         """发送占卜结果。plain_text: callable(formation, positions, picks) -> str，
@@ -109,7 +107,7 @@ class Deliverer:
         preface: 牌面之后的独立前置行（正常路径是「牌灵的话」；亦承接洗牌提示
         独立发送失败时的降级并入），排在图片之后、解读段之前。产出统一为单次
         yield——两个入口的消费方式不同：工具入口只取最后一个 yield 的值
-        （asyncgen 取末值），命令入口则在 handlers.command_entry 里 await event.send 直发；
+        （asyncgen 取末值），命令入口则在 handlers.command_entry 里经 Presenter 直发；
         单次 yield 保证两边都只发一份结果。
         收尾句不带在这里：命令入口在 ReadingService.run 之后独立直发（不入合并转发），
         工具入口收尾由 Agent Loop 的 LLM 回复承担——本分发器只发结果本体。
@@ -132,7 +130,7 @@ class Deliverer:
             if self.disclaimer:
                 chain.append(Plain(self.disclaimer))
             if chain:
-                yield event.chain_result(chain)
+                yield messenger.chain_result(chain)
             return
         # 结构化切分只做一次：AI 返回时已解析成 Interpretation，这里不再重新切；
         # 只有旧版字符串才回退 split_sections。随后仍按 segment_size 防止单段超长。
@@ -147,11 +145,8 @@ class Deliverer:
         # 免责声明：空字符串不显示；正常解读末尾统一追加一段
         if self.disclaimer:
             parts = parts + [self.disclaimer]
-        # 转发节点 uin：优先框架 get_self_id()（与项目「框架统一接口」修复口径一致），取不到时兜底 '0'
-        uin = "0"
-        if hasattr(event, "get_self_id"):
-            uin = str(event.get_self_id() or "0")
-        if self.forward_for(event):
+        uin = caps.self_id
+        if self.forward_for(caps):
             # 是否含图由调用方门控（text_only 模式下 img 为 None → 纯文字转发）
             # preface = 牌灵的话（正常路径）/洗牌提示降级并入；节点序：牌面 → preface → 解读段
             nodes = []
@@ -160,7 +155,7 @@ class Deliverer:
             if preface:
                 nodes.append(Node(content=[Plain(preface)], name="星羽塔罗", uin=uin))
             nodes.extend(Node(content=[Plain(seg)], name="星羽塔罗", uin=uin) for seg in parts)
-            yield event.chain_result([Nodes(nodes)])
+            yield messenger.chain_result([Nodes(nodes)])
         else:
             # 非转发模式：内容合并进一条链消息（逐段 yield 在工具入口那侧会被丢掉——
             # 那边取末值，只看最后一个 yield）
@@ -172,5 +167,5 @@ class Deliverer:
             for i, seg in enumerate(parts):
                 tail = "" if i == len(parts) - 1 else "\n"
                 chain.append(Plain(seg + tail))
-            yield event.chain_result(chain)
+            yield messenger.chain_result(chain)
 

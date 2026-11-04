@@ -9,6 +9,11 @@ import types
 
 from astrbot.api.event import MessageChain
 from astrbot.api.message_components import Plain
+from data.plugins.astrbot_plugin_star_feather.adapters.astrbot_io import messenger_for
+from data.plugins.astrbot_plugin_star_feather.adapters.event import (
+    delivery_capabilities,
+    incoming_from_event,
+)
 from data.plugins.astrbot_plugin_star_feather.app import handlers
 from data.plugins.astrbot_plugin_star_feather.core.models import Reading
 from data.plugins.astrbot_plugin_star_feather.core.settings import parse
@@ -52,9 +57,9 @@ class FakePresenter:
         self.delivered = delivered
         self.used = []
 
-    async def present(self, reading, messenger, event):
+    async def present(self, reading, messenger, caps):
         self.used.append(reading)
-        result = self.result if self.result is not None else event.chain_result(
+        result = self.result if self.result is not None else messenger.chain_result(
             [Plain("按规矩洗牌")])
         await messenger.send_result(result)
         return self.delivered
@@ -70,7 +75,7 @@ def _plugin(*, throttle_remain=0, limit_block=None, settings=None, reading=None,
         fake_throttle.key = key
         return throttle_remain
 
-    async def fake_gate(event, for_command):
+    async def fake_gate(incoming, for_command):
         return limit_block
     container = types.SimpleNamespace(
         settings=settings,
@@ -88,6 +93,10 @@ def _evt(text="帮我算一卦", umo="g1", fail_sends=0):
     if umo is not None:
         e.unified_msg_origin = umo
     e.get_sender_id = lambda: "u1"
+    e.get_platform_id = lambda: ""
+    e.get_platform_name = lambda: "aiocqhttp"
+    e.get_self_id = lambda: "12345"
+    e.should_call_llm = lambda v: None
     e.sent = []
     remaining = {"n": fail_sends}
 
@@ -108,7 +117,10 @@ def _collect(agen):
 
 
 def _tool(p, evt, formation=""):
-    return asyncio.run(handlers.tool_entry(p, evt, formation, version="0.0.0"))
+    caps = delivery_capabilities(evt, p.container.settings.output.send_mode == "forward")
+    return asyncio.run(handlers.tool_entry(
+        p.container, incoming_from_event(evt), caps, messenger_for(evt),
+        formation, version="0.0.0"))
 
 
 class TestToolEntry:
@@ -221,6 +233,12 @@ class TestToolEntry:
         _tool(p, evt)
         assert p._throttle.key == "sf_tool_cd_global"
         assert len(evt.sent) == 1
+
+    def test_tool_throttle_key_uses_conversation_id(self):
+        """键值快照：工具节流键仍是 sf_tool_cd_{conversation_id}。"""
+        p = _plugin()
+        _tool(p, _evt(umo="aiocqhttp:group:9"))
+        assert p._throttle.key == "sf_tool_cd_aiocqhttp:group:9"
 
 
 class TestSendStatus:

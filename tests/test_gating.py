@@ -3,6 +3,7 @@
 import asyncio
 import types
 
+from data.plugins.astrbot_plugin_star_feather.core.dto import IncomingEvent
 from data.plugins.astrbot_plugin_star_feather.services import gating as gating_mod
 from data.plugins.astrbot_plugin_star_feather.services.gating import LimitGate
 
@@ -79,9 +80,8 @@ class MeteredSlowKV(SlowKV):
 
 
 def _evt(uid="u1", origin="g1"):
-    e = types.SimpleNamespace(unified_msg_origin=origin)
-    e.get_sender_id = lambda: uid
-    return e
+    return IncomingEvent(user_id=uid, platform_id="", conversation_id=origin,
+                         message_text="", platform_name="")
 
 
 def _gate(kv=None, cmd=10, daily=0):
@@ -145,6 +145,24 @@ class TestGateCheck:
         assert out is None
         out2 = asyncio.run(g.check(_evt(), for_command=True))
         assert out2 and "歇" in out2 and "秒" in out2
+
+    def test_throttle_key_is_byte_identical(self):
+        """键值快照：命令节流键仍是 sf_cmd_cd_{conversation_id}。"""
+        kv = FakeKV()
+        dto = IncomingEvent(user_id="qq:123", platform_id="qq",
+                            conversation_id="aiocqhttp:group:9",
+                            message_text="", platform_name="aiocqhttp")
+        asyncio.run(_gate(kv, cmd=10).check(dto, for_command=True))
+        assert "sf_cmd_cd_aiocqhttp:group:9" in kv.store
+
+    def test_daily_key_is_byte_identical(self):
+        """键值快照：每日计数键仍是 sf_cmd_cnt_{已解析 uid}。"""
+        kv = FakeKV()
+        dto = IncomingEvent(user_id="qq:123", platform_id="qq",
+                            conversation_id="aiocqhttp:group:9",
+                            message_text="", platform_name="aiocqhttp")
+        asyncio.run(_gate(kv, cmd=0, daily=5).check(dto, for_command=False))
+        assert "sf_cmd_cnt_qq:123" in kv.store
 
     def test_tool_entry_skips_session_throttle(self):
         # 工具入口 for_command=False：不查会话节流，直接放行（每日计数由别的用例管）

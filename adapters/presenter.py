@@ -4,7 +4,9 @@
 工具入口仍由调用方在最后 yield 一个字符串给 Agent Loop。
 """
 from ..core.draw import render_text
+from ..core.dto import DeliveryCapabilities
 from ..core.models import Reading
+from ..core.ports import ResultMessenger
 from .deliver import Deliverer
 
 
@@ -28,7 +30,8 @@ class Presenter:
             parts.append(self.deliverer.disclaimer)
         return "\n\n".join(part for part in parts if part)
 
-    async def present(self, reading: Reading, messenger, event) -> bool:
+    async def present(self, reading: Reading, messenger: ResultMessenger,
+                      caps: DeliveryCapabilities) -> bool:
         """把一次占卜的结果发出去；收尾句排在结果之后。
 
         合并转发 / 图文链发送失败时降级为纯文字重发：用户至少能拿到解读，
@@ -37,7 +40,7 @@ class Presenter:
         Args:
             reading: 本次占卜结果。
             messenger: 消息端口，发送失败时返回 False。
-            event: 触发本次占卜的事件。
+            caps: 本次投递能力（是否合并转发、转发 uin）。
 
         Returns:
             至少一次结果发送未报错（主结果或纯文字补发之一）。收尾句不计入：
@@ -45,7 +48,7 @@ class Presenter:
         """
         delivered = False
         async for result in self.deliverer.deliver(
-                event, reading.interpretation, reading.image, reading.formation,
+                messenger, caps, reading.interpretation, reading.image, reading.formation,
                 list(reading.positions), list(reading.picks), render_text,
                 fail_note=reading.fail_note, preface=reading.spirit):
             if await messenger.send_result(result):

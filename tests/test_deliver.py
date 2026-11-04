@@ -4,13 +4,25 @@ import asyncio
 import types
 
 from astrbot.api.message_components import Nodes
+from data.plugins.astrbot_plugin_star_feather.adapters.astrbot_io import EventMessenger
 from data.plugins.astrbot_plugin_star_feather.adapters.deliver import (
     Deliverer,
     split_sections,
     split_text,
 )
+from data.plugins.astrbot_plugin_star_feather.adapters.event import (
+    delivery_capabilities,
+)
 from data.plugins.astrbot_plugin_star_feather.core.tarot_data import meaning_text
 from stubs import PICK
+
+
+def _msg(evt):
+    return EventMessenger(evt)
+
+
+def _caps(evt, forward=False):
+    return delivery_capabilities(evt, forward)
 
 
 class TestSplitText:
@@ -86,8 +98,8 @@ class TestDeliverEpilogue:
 
     def test_no_epilogue_unchanged(self):
         evt = self._evt()
-        d = Deliverer(300, "", False)
-        self._collect(d.deliver(evt, "【总结】二", None,
+        d = Deliverer(300, "")
+        self._collect(d.deliver(_msg(evt), _caps(evt), "【总结】二", None,
                                 "羽时三刻", ["过去"], [PICK], lambda *a: "兜底"))
         assert all(getattr(c, "text", "") != "✨ 收尾句" for c in evt.result)
 
@@ -95,8 +107,8 @@ class TestDeliverEpilogue:
     def test_message_order_image_then_preface_then_sections(self):
         """呈现顺序契约：牌面 → 牌灵的话(preface 裸句无前缀无引号) → 解读段 → 总结 → 免责。"""
         evt = self._evt()
-        d = Deliverer(300, "免责声明", False)
-        self._collect(d.deliver(evt, "【第1张·过去】一【总结】二", "img.png",
+        d = Deliverer(300, "免责声明")
+        self._collect(d.deliver(_msg(evt), _caps(evt), "【第1张·过去】一【总结】二", "img.png",
                                 "羽时三刻", ["过去"], [PICK], lambda *a: "兜底",
                                 preface="今天安心"))
         kinds = [type(c).__name__ for c in evt.result]
@@ -107,8 +119,8 @@ class TestDeliverEpilogue:
     def test_message_order_image_then_preface_forward(self):
         """合并转发模式同序：牌面节点在前，牌灵的话次之，最后免责。"""
         evt = self._evt()
-        d = Deliverer(300, "免责声明", True)
-        self._collect(d.deliver(evt, "【总结】二", "img.png",
+        d = Deliverer(300, "免责声明")
+        self._collect(d.deliver(_msg(evt), _caps(evt, True), "【总结】二", "img.png",
                                 "羽时三刻", ["过去"], [PICK], lambda *a: "兜底",
                                 preface="今天安心"))
         nodes = evt.result[0].nodes
@@ -122,11 +134,11 @@ class TestNoAiFallback:
 
     def test_no_ai_fallback_appends_disclaimer(self):
         evt = TestDeliverEpilogue._evt()
-        d = Deliverer(300, "【免责声明】", False)
+        d = Deliverer(300, "【免责声明】")
 
         async def collect():
             return [x async for x in d.deliver(
-                evt, None, None, "羽签", ["当下"], [PICK],
+                _msg(evt), _caps(evt), None, None, "羽签", ["当下"], [PICK],
                 lambda *a: "本地牌义", fail_note="失败说明")]
 
         chain = asyncio.run(collect())[0]
@@ -154,14 +166,14 @@ class TestForwardPlatformFallback:
     def _collect(d, evt):
         async def run():
             return [x async for x in d.deliver(
-                evt, "【第1张·过去】一段。\n【总结】结论。", None,
+                _msg(evt), _caps(evt, True), "【第1张·过去】一段。\n【总结】结论。", None,
                 "羽时三刻", ["过去"], [PICK], lambda *a: "兜底", preface="牌灵的话")]
         return asyncio.run(run())
 
     def test_webchat_falls_back_to_plain(self):
         """WebChat 的 _send 只认 Plain/Image 等，Nodes 会被静默丢弃。"""
         evt = self._evt("webchat")
-        self._collect(Deliverer(300, "", True), evt)
+        self._collect(Deliverer(300, ""), evt)
         comps = list(evt.result)
         assert not any(isinstance(c, Nodes) for c in comps), "WebChat 不该收到 Nodes"
         text = "".join(getattr(c, "text", "") for c in comps)
@@ -170,13 +182,13 @@ class TestForwardPlatformFallback:
     def test_qq_keeps_forward_nodes(self):
         """QQ 等支持转发的平台维持原行为：结果仍是 Nodes。"""
         evt = self._evt("aiocqhttp")
-        self._collect(Deliverer(300, "", True), evt)
+        self._collect(Deliverer(300, ""), evt)
         assert any(isinstance(c, Nodes) for c in list(evt.result))
 
     def test_unverified_platform_falls_back_to_plain(self):
         """白名单之外的平台（Telegram / Discord / WeCom 等）也回退普通消息。"""
         evt = self._evt("telegram")
-        self._collect(Deliverer(300, "", True), evt)
+        self._collect(Deliverer(300, ""), evt)
         comps = list(evt.result)
         assert not any(isinstance(c, Nodes) for c in comps), "未验证平台不该收到 Nodes"
         text = "".join(getattr(c, "text", "") for c in comps)
@@ -185,7 +197,7 @@ class TestForwardPlatformFallback:
     def test_unknown_platform_name_falls_back_to_plain(self):
         """拿不到平台名按不支持处理：普通链总能送达，未知平台发 Nodes 可能被丢掉（review 复核）。"""
         evt = self._evt("")
-        self._collect(Deliverer(300, "", True), evt)
+        self._collect(Deliverer(300, ""), evt)
         assert not any(isinstance(c, Nodes) for c in list(evt.result))
 
     def test_platform_name_exception_falls_back_to_plain(self):
@@ -195,7 +207,7 @@ class TestForwardPlatformFallback:
         def boom():
             raise RuntimeError("no platform info")
         evt.get_platform_name = boom
-        self._collect(Deliverer(300, "", True), evt)
+        self._collect(Deliverer(300, ""), evt)
         assert not any(isinstance(c, Nodes) for c in list(evt.result))
 
 
@@ -242,9 +254,9 @@ class TestDeliverAIlessFallback:
 
     def test_no_image_preface_nonempty_keeps_per_card_meanings(self):
         evt = self._evt()
-        d = Deliverer(300, "", False)
+        d = Deliverer(300, "")
         positions = ["过去", "现在", "未来"]
-        self._collect(d.deliver(evt, None, None, "羽镜", positions, [PICK] * 3,
+        self._collect(d.deliver(_msg(evt), _caps(evt), None, None, "羽镜", positions, [PICK] * 3,
                                 _plain_text,
                                 fail_note="📖 解读：" + chr(10) + "（AI 今天闹脾气不肯开口）",
                                 preface="今天安心"))
@@ -260,8 +272,8 @@ class TestDeliverAIlessFallback:
     def test_with_image_no_meaning_text_appended(self):
         """有图时行为不变：图内已有牌义信息区，不重复追加逐牌牌义文字。"""
         evt = self._evt()
-        d = Deliverer(300, "", False)
-        self._collect(d.deliver(evt, None, "img.png", "羽镜",
+        d = Deliverer(300, "")
+        self._collect(d.deliver(_msg(evt), _caps(evt), None, "img.png", "羽镜",
                                 ["过去", "现在", "未来"], [PICK] * 3,
                                 _plain_text,
                                 fail_note="📖 解读：" + chr(10) + "（AI 今天闹脾气）",
@@ -295,8 +307,8 @@ class TestInterpretationReuse:
         interp = parse_interpretation("【第1张·过去】一段。\n【总结】结论。")
 
         async def run():
-            return [x async for x in Deliverer(300, "", False).deliver(
-                evt, interp, None, "羽时三刻", ["过去"], [PICK], lambda *a: "兜底")]
+            return [x async for x in Deliverer(300, "").deliver(
+                _msg(evt), _caps(evt), interp, None, "羽时三刻", ["过去"], [PICK], lambda *a: "兜底")]
 
         parts = asyncio.run(run())
         text = "".join(getattr(c, "text", "") for c in parts[0])

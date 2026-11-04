@@ -8,8 +8,14 @@ import datetime
 import types
 
 import pytest
+from data.plugins.astrbot_plugin_star_feather.adapters.astrbot_io import messenger_for
 from data.plugins.astrbot_plugin_star_feather.adapters.clock import Clock
+from data.plugins.astrbot_plugin_star_feather.adapters.event import (
+    delivery_capabilities,
+    incoming_from_event,
+)
 from data.plugins.astrbot_plugin_star_feather.app import handlers
+from data.plugins.astrbot_plugin_star_feather.core.dto import DeliveryCapabilities
 from data.plugins.astrbot_plugin_star_feather.core.intent import (
     build_request,
     is_daily_request,
@@ -519,6 +525,8 @@ class TestRunReading:
 def _event(uid="u1", text=""):
     e = types.SimpleNamespace(unified_msg_origin="umo", message_str=text)
     e.get_sender_id = lambda: uid
+    e.get_platform_id = lambda: ""
+    e.get_platform_name = lambda: "aiocqhttp"
     e.get_self_id = lambda: "12345"
     e.should_call_llm = lambda v: None
     e.sent = []
@@ -531,10 +539,16 @@ def _event(uid="u1", text=""):
     return e
 
 
+def _handler_args(p, ev):
+    """与 main.py 同口径：事件在入口处转成 DTO / 能力 / 消息端口。"""
+    caps = delivery_capabilities(ev, p.container.settings.output.send_mode == "forward")
+    return p.container, incoming_from_event(ev), caps, messenger_for(ev)
+
+
 def _plugin(*, settings=None, gate=None, prepare=None, reading=None, presenter=None):
     settings = settings or _settings()
     if gate is None:
-        async def gate_check(event, for_command):
+        async def gate_check(incoming, for_command):
             return None
         gate = types.SimpleNamespace(check=gate_check, session_throttle=None)
     if prepare is None:
@@ -549,7 +563,7 @@ def _plugin(*, settings=None, gate=None, prepare=None, reading=None, presenter=N
         class FakePresenter:
             def __init__(self):
                 self.used = []
-            async def present(self, r, messenger, event):
+            async def present(self, r, messenger, caps):
                 self.used.append(r)
                 await messenger.send_text("RESULT")
         presenter = FakePresenter()
@@ -566,7 +580,7 @@ class TestCommandEntry:
     def _run(self, p, ev, text="问题", **kw):
         kw.setdefault("version", "0.0.0")
         kw.setdefault("err_tpl", "断了")
-        asyncio.run(handlers.command_entry(p, ev, text, **kw))
+        asyncio.run(handlers.command_entry(*_handler_args(p, ev), text, **kw))
 
     def test_help_request_sends_help(self):
         ev = _event()
@@ -611,7 +625,7 @@ class TestCommandEntry:
         )
         settings = _settings()
         presenter = Presenter(Deliverer(settings.output.segment_size,
-                                        settings.output.disclaimer, False))
+                                        settings.output.disclaimer))
         p = _plugin(settings=settings, presenter=presenter)
         # 让服务返回带收尾句的 Reading
         async def run(prepared, ctx, **kw):
@@ -642,8 +656,9 @@ class TestSingleCommand:
         assert seen == {"kind": "single", "fixed": False}
 
     def _run_cmd(self, p, text):
-        asyncio.run(handlers.command_entry(p, _event(), text, version="0.0.0",
-                                          err_tpl="断了", intent_kind="single"))
+        asyncio.run(handlers.command_entry(*_handler_args(p, _event()), text,
+                                          version="0.0.0", err_tpl="断了",
+                                          intent_kind="single"))
 
 
 class TestPresenterFallback:
@@ -664,6 +679,9 @@ class TestPresenterFallback:
             self.texts.append(text)
             return self.text_ok
 
+        def chain_result(self, chain):
+            return chain
+
     @staticmethod
     def _reading(epilogue=""):
         from data.plugins.astrbot_plugin_star_feather.core.models import (
@@ -671,46 +689,43 @@ class TestPresenterFallback:
             Reading,
             ReadingRequest,
         )
-        evt = types.SimpleNamespace(get_self_id=lambda: "0",
-                                    chain_result=lambda chain: chain)
-        reading = Reading(ReadingRequest("spread", "羽签", "问题", "问题", False),
-                          "u1", "羽签", ("你的当下",), (PICK,), "sig",
-                          Interpretation(text="AI"), None, epilogue=epilogue)
-        return reading, evt
+        return Reading(ReadingRequest("spread", "羽签", "问题", "问题", False),
+                       "u1", "羽签", ("你的当下",), (PICK,), "sig",
+                       Interpretation(text="AI"), None, epilogue=epilogue)
 
     @staticmethod
-    def _present(messenger, reading, evt, disclaimer=""):
+    def _present(messenger, reading, disclaimer=""):
         from data.plugins.astrbot_plugin_star_feather.adapters.deliver import Deliverer
         from data.plugins.astrbot_plugin_star_feather.adapters.presenter import (
             Presenter,
         )
-        return asyncio.run(Presenter(Deliverer(300, disclaimer, False)).present(
-            reading, messenger, evt))
+        return asyncio.run(Presenter(Deliverer(300, disclaimer)).present(
+            reading, messenger, DeliveryCapabilities(False, "0")))
 
     def test_failed_result_falls_back_to_text(self):
         messenger = self.Messenger()
-        reading, evt = self._reading()
-        assert self._present(messenger, reading, evt) is True
+        reading = self._reading()
+        assert self._present(messenger, reading) is True
         assert messenger.results
         assert any("AI" in text for text in messenger.texts)
 
     def test_fallback_text_keeps_disclaimer(self):
         messenger = self.Messenger()
-        reading, evt = self._reading()
-        assert self._present(messenger, reading, evt, disclaimer="【免责声明】") is True
+        reading = self._reading()
+        assert self._present(messenger, reading, disclaimer="【免责声明】") is True
         assert any("【免责声明】" in text for text in messenger.texts)
 
     def test_both_sends_fail_reports_undelivered_and_skips_epilogue(self):
         messenger = self.Messenger(text_ok=False)
-        reading, evt = self._reading(epilogue="收尾句")
-        assert self._present(messenger, reading, evt) is False
+        reading = self._reading(epilogue="收尾句")
+        assert self._present(messenger, reading) is False
         assert messenger.texts  # 补发尝试过
         assert "收尾句" not in messenger.texts
 
     def test_epilogue_sent_only_after_delivery(self):
         messenger = self.Messenger()
-        reading, evt = self._reading(epilogue="收尾句")
-        assert self._present(messenger, reading, evt) is True
+        reading = self._reading(epilogue="收尾句")
+        assert self._present(messenger, reading) is True
         assert messenger.texts[-1] == "收尾句"
 
 

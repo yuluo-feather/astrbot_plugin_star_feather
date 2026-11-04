@@ -1,6 +1,7 @@
 """事件身份标识单测：发送者用户标识两级降级（群聊不用会话 ID 兜底）。
 ——牌灵认人，认人的规矩只写这一遍。"""
-from data.plugins.astrbot_plugin_star_feather.core.identity import (
+from data.plugins.astrbot_plugin_star_feather.adapters.event import (
+    incoming_from_event,
     raw_sender_id,
     resolve_sender_uid,
 )
@@ -107,3 +108,27 @@ class TestResolveSenderUid:
     def test_raw_sender_id_empty(self):
         # 完全没有 sender 的对象，直读返回空且不抛异常
         assert raw_sender_id(object()) == ""
+
+
+class TestIncomingDto:
+    """DTO 只承载适配器解析好的值：身份带平台前缀，会话与文本保持原值。"""
+
+    def test_fields_come_from_the_event(self):
+        evt = TestResolveSenderUid._evt(getter="123", platform="qq", origin="umo")
+        evt.message_str = "帮我算一卦"
+        evt.get_platform_name = lambda: "aiocqhttp"
+
+        dto = incoming_from_event(evt)
+
+        assert dto.user_id == "qq:123"
+        assert dto.platform_id == "qq"
+        assert dto.conversation_id == "umo"
+        assert dto.conversation_key == "umo"
+        assert dto.message_text == "帮我算一卦"
+        assert dto.platform_name == "aiocqhttp"
+
+    def test_missing_origin_falls_back_to_global(self):
+        evt = TestResolveSenderUid._evt(getter="123", origin="")
+        dto = incoming_from_event(evt)
+        assert dto.conversation_id == ""
+        assert dto.conversation_key == "global"

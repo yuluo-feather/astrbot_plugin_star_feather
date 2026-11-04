@@ -33,3 +33,14 @@ class Messenger(Protocol):
     async def send_text(self, text: str) -> bool: ...
 
     async def send_result(self, result: Any) -> bool: ...
+
+
+@runtime_checkable
+class ResultMessenger(Messenger, Protocol):
+    """带宿主结果构造能力的消息出口；只在适配器内部使用。
+
+    应用层只依赖 `Messenger` 的发送能力；`chain_result` 是宿主把中立链条
+    组装成自己的消息对象那一步，不进入业务逻辑。
+    """
+
+    def chain_result(self, chain: Any) -> Any: ...
