@@ -146,9 +146,9 @@ class TestNoAiFallback:
         assert texts == ["本地牌义", "失败说明", "【免责声明】"]
 
     def test_no_ai_fallback_honors_forward(self):
-        """回退也遵循投递能力：forward + 白名单平台 → 单个合并转发节点。"""
+        """回退也遵循投递能力：forward + 白名单平台 → 逐段节点，与正常结果同构。"""
         evt = TestDeliverEpilogue._evt()
-        d = Deliverer(300, "")
+        d = Deliverer(300, "【免责声明】")
 
         async def collect():
             return [x async for x in d.deliver(
@@ -159,10 +159,13 @@ class TestNoAiFallback:
         assert len(out) == 1
         nodes_result = out[0]
         assert len(nodes_result) == 1 and isinstance(nodes_result[0], Nodes)
-        node = nodes_result[0].nodes[0]
-        assert node.uin == "12345"
-        assert any(getattr(c, "file", "") == "img.png" for c in node.content)
-        assert any("失败说明" in getattr(c, "text", "") for c in node.content)
+        nodes = nodes_result[0].nodes
+        assert [type(n.content[0]).__name__ for n in nodes] == ["Image", "Plain", "Plain"]
+        assert nodes[0].content[0].file == "img.png"
+        assert "✨ 星羽塔罗 · 牌面" in nodes[0].content[1].text
+        assert nodes[1].content[0].text == "失败说明"
+        assert nodes[2].content[0].text == "【免责声明】"  # 独立节点，不再与结果同节点
+        assert all(n.uin == "12345" for n in nodes)
 
     def test_no_ai_fallback_plain_when_platform_unsupported(self):
         """平台不在白名单时，即使 send_mode=forward 也回退普通链消息。"""

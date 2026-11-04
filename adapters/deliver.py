@@ -113,31 +113,37 @@ class Deliverer:
         工具入口收尾由 Agent Loop 的 LLM 回复承担——本分发器只发结果本体。
         """
         if not interp:
-            chain = []
+            # 每段一个内容组：forward 下每组一个节点，普通链下拍平成一条消息。
+            groups: list[tuple[bool, list]] = []
             if img:
-                chain.append(Image(file=img))
+                groups.append((True, [Image(file=img)]))
             if preface:
-                chain.append(Plain(preface))
+                groups.append((False, [Plain(preface)]))
             if not img:
                 # 独立 if 而非 elif：preface 恒非空时（spirit_cached 在 picks 非空必返非空），
                 # elif 分支在生产路径不可达 → send_mode=text_only + AI 失败时逐牌牌义整段丢失
                 # 只补 text_only / 图片渲染失败：图片模式有卡面两行关键词，再叠完整牌义会抹平
                 # 两种模式的区别，也让用户误以为「AI 其实说了、只是排版乱」；想看逐张详义的
                 # 请切纯文字模式（2026-09-10 定案，那是配置项的职责，不是渲染路径该兜的）。
-                chain.append(Plain(plain_text(formation, positions, picks)))
+                groups.append((False, [Plain(plain_text(formation, positions, picks))]))
             if fail_note:
-                chain.append(Plain(fail_note))
+                groups.append((False, [Plain(fail_note)]))
             if self.disclaimer:
-                chain.append(Plain(self.disclaimer))
-            if not chain:
+                groups.append((False, [Plain(self.disclaimer)]))
+            if not groups:
                 return
-            # 回退也遵循本次投递能力：forward + 平台白名单 → 合并转发；
-            # 否则维持普通链消息（plain / text_only / 非白名单平台）。
+            # 回退也遵循本次投递能力：forward + 平台白名单 → 与正常结果同构的逐段节点
+            # （免责声明是最后一个独立节点）；否则维持普通链消息。
             if self.forward_for(caps):
-                node = Node(content=chain, name="星羽塔罗", uin=caps.self_id)
-                yield messenger.chain_result([Nodes([node])])
+                nodes = []
+                for is_image, content in groups:
+                    if is_image:
+                        content = content + [Plain(FORWARD_IMAGE_LABEL)]
+                    nodes.append(Node(content=content, name="星羽塔罗", uin=caps.self_id))
+                yield messenger.chain_result([Nodes(nodes)])
             else:
-                yield messenger.chain_result(chain)
+                yield messenger.chain_result(
+                    [component for _, group in groups for component in group])
             return
         # 结构化切分只做一次：AI 返回时已解析成 Interpretation，这里不再重新切；
         # 只有旧版字符串才回退 split_sections。随后仍按 segment_size 防止单段超长。
