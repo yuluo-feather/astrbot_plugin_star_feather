@@ -12,6 +12,7 @@
 | [prompt-hardening.md](prompt-hardening.md) | 提示词防护：归一化、截断与越狱句式剥除 |
 | [ai-chain-and-budget.md](ai-chain-and-budget.md) | AI 候选链与总预算 |
 | [kv-degradation.md](kv-degradation.md) | KV 降级契约：存储故障与无记录的区分 |
+| [host-decoupling.md](host-decoupling.md) | 宿主解耦任务书：日志 / Event DTO / LLM 网关三阶段与第二宿主准入条件 |
 
 约定：
 
