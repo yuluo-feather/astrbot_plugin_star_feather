@@ -18,14 +18,22 @@ import weakref
 
 from ..adapters.clock import Clock
 from ..adapters.kv_utils import kv_delete, kv_get, kv_put
-from ..ai.parse import interpretation_from_record, parse_interpretation
+from ..ai.parse import (
+    interpretation_from_record,
+    parse_interpretation,
+    validate_interpret_structure_strict,
+)
 from ..ai.prompts import READING_PROMPT_V, SPIRIT_PROMPT_V
 from ..core.dailylines import pick_signature
 from ..core.draw import render_detail
 from ..core.intent import norm_topic
 from ..core.log import log
 from ..core.models import Interpretation
-from ..core.settings import DEFAULT_AI_PERSONA
+from ..core.settings import (
+    DEFAULT_AI_PERSONA,
+    DEFAULT_STRUCTURE_CHECK,
+    STRUCTURE_CHECK_STRICT,
+)
 from ..core.tarot_data import TAROT_CARDS
 from .daily_store import DailyRecord
 from .singleflight import SingleFlight
@@ -115,18 +123,35 @@ class DailyFortune:
 
     依赖全部显式注入：kv_store（须提供 get_kv_data/put_kv_data）、clock（日期边界）、
     persona（人设配置，缓存指纹用）、interpreter（AI 解释器）、
-    ai_enabled（ai.enable_ai：缓存命中同样受它约束）。
+    ai_enabled（ai.enable_ai：缓存命中同样受它约束）、
+    structure_check（ai.structure_check：缓存命中同样按当前口径复检）。
     """
 
     def __init__(self, kv_store, clock=None, persona: str = DEFAULT_AI_PERSONA,
-                 interpreter=None, ai_enabled: bool = True):
+                 interpreter=None, ai_enabled: bool = True,
+                 structure_check: str = DEFAULT_STRUCTURE_CHECK):
         self.kv_store = kv_store
         self.clock = clock or Clock()
         self.persona = str(persona or "")
         self.interpreter = interpreter
         self.ai_enabled = ai_enabled
+        self.structure_check = structure_check
         # 旧版 sf_spirit_* 键只删一次：合并成单键后它们不会再被读，但会永久占着
         self._legacy_cleaned: set[str] = set()
+
+    def _structure_ok(self, text: str, n_positions: int) -> bool:
+        """缓存命中也复检结构：strict 下旧缓存不能绕过结构闸。
+
+        只对 strict 复检：loose 是更宽的旧口径，缓存里可能还有升级前的纯文本记录，
+        那是文档承诺可读的兼容路径；当次生成本来就经过了 loose 校验。
+        """
+        if self.structure_check != STRUCTURE_CHECK_STRICT:
+            return True
+        ok, why = validate_interpret_structure_strict(text, n_positions)
+        if not ok:
+            log.warning(
+                f"每日牌运缓存结构不合严格口径（{'/'.join(why)}），按未命中重新生成")
+        return ok
 
     def _key(self, uid: str) -> str:
         return f"sf_daily_{uid}"
@@ -215,11 +240,12 @@ class DailyFortune:
                 not cached.structured
                 or bool(cached.summary.strip())
                 or any(seg.strip() for seg in cached.sections))
-            if deliverable:
+            if deliverable and self._structure_ok(cached.text, len(positions)):
                 return cached
-            # 桶内容损坏或为空：KV 是持久化边界，外层上下文合法不代表内容有效。
-            # 当未命中重新生成，写回时覆盖该桶。
-            log.warning(f"每日牌运解读缓存内容无效（{uid}），按未命中重新生成")
+            if not deliverable:
+                # 桶内容损坏或为空：KV 是持久化边界，外层上下文合法不代表内容有效。
+                # 当未命中重新生成，写回时覆盖该桶。
+                log.warning(f"每日牌运解读缓存内容无效（{uid}），按未命中重新生成")
 
         async def generate():
             return await _ai_output(

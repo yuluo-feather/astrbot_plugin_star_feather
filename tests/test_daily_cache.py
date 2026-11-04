@@ -1214,6 +1214,66 @@ class TestAiDisabledIgnoresCache:
 _REGENERATED_TEXT = "【第1张·你的当下】新解读。"
 
 
+class TestCachedInterpHonorsStructureCheck:
+    """strict 下缓存命中也要复检：loose 遗留的不合格缓存视为未命中。"""
+
+    @staticmethod
+    def _fortune(kv, structure_check):
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
+
+        class _Ctx:
+            async def get_kv_data(self, key, default=None):
+                return kv.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                kv[key] = value
+
+        calls = []
+
+        class _Interp:
+            async def interpret(self, *a, **kw):
+                calls.append("interpret")
+                return _REGENERATED_TEXT
+
+            async def spirit_line(self, *a, **kw):
+                return "牌灵"
+
+        return DailyFortune(_Ctx(), persona="", interpreter=_Interp(),
+                            structure_check=structure_check), calls
+
+    def test_strict_rejects_loose_cached_text(self):
+        from data.plugins.astrbot_plugin_star_feather.core.intent import norm_topic
+        from data.plugins.astrbot_plugin_star_feather.core.settings import (
+            STRUCTURE_CHECK_STRICT,
+        )
+
+        day = "20260827"
+        bad = "【第1张·】没有位置名的旧解读"
+        kv = {"sf_daily_u1": _rec(date=day,
+                                  interps={norm_topic("事业运势"): bad})}
+        df, calls = self._fortune(kv, STRUCTURE_CHECK_STRICT)
+        out = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK],
+                                           "事业运势", today=day))
+        assert _text(out) == _REGENERATED_TEXT, "strict 下不合格缓存必须重新生成"
+        assert calls == ["interpret"]
+
+    def test_loose_still_serves_cached_text(self):
+        from data.plugins.astrbot_plugin_star_feather.core.intent import norm_topic
+        from data.plugins.astrbot_plugin_star_feather.core.settings import (
+            STRUCTURE_CHECK_LOOSE,
+        )
+
+        day = "20260827"
+        text = "【第1张·】没有位置名的旧解读"
+        kv = {"sf_daily_u1": _rec(date=day,
+                                  interps={norm_topic("事业运势"): text})}
+        df, calls = self._fortune(kv, STRUCTURE_CHECK_LOOSE)
+        out = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK],
+                                           "事业运势", today=day))
+        assert _text(out) == text
+        assert calls == []
+
+
 class TestCorruptInterpBucket:
     """KV 是持久化边界：外层上下文合法、桶内容无效时不能当成命中。"""
 
