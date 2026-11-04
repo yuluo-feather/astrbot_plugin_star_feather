@@ -315,6 +315,10 @@ class DailyFortune:
                 return fresh.spirit_line
             if fresh.date != today:
                 fresh = DailyRecord()
+            elif fresh.prompt_v != _PROMPT_V:
+                # 牌灵写回也会刷新 prompt_v：旧版本生成的解读分桶不跟着作废，
+                # 就会在新版本号下被当成有效缓存命中（普通占卜先于今日牌运时必现）。
+                fresh.interps = {}
             # 只写牌灵字段：普通占卜的牌灵写回不许碰今日固定牌的 card_id/upright
             fresh.put_spirit(line, sig, today, _PROMPT_V, self.persona)
             await kv_put(self.kv_store, key, fresh.to_raw(), "牌灵的话缓存")

@@ -1049,6 +1049,56 @@ class TestInterpRebuildKeepsPickAndSpirit:
         assert record["prompt_v"] == "v-next"
 
 
+class TestPromptBumpViaSpiritWriteBack:
+    """提示词换版后先走普通占卜：牌灵写回刷新 prompt_v 时，旧解读分桶必须一起作废。
+
+    牌灵与每日解读共用一条记录与一个 prompt_v；只刷新版本号不清分桶，
+    旧解读会顶着新版本号被当成有效缓存命中。
+    """
+
+    def test_spirit_writeback_clears_stale_interps(self, monkeypatch):
+        from data.plugins.astrbot_plugin_star_feather.services import daily as daily_mod
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
+
+        kv = {}
+        calls = []
+
+        class _Ctx:
+            async def get_kv_data(self, key, default=None):
+                return kv.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                kv[key] = value
+
+        class _Interp:
+            async def interpret(self, *a, **kw):
+                calls.append("interpret")
+                return "新解读"
+
+            async def spirit_line(self, *a, **kw):
+                return "新牌灵"
+
+        day = "20260827"
+        df = DailyFortune(_Ctx(), persona="", interpreter=_Interp())
+        asyncio.run(df.pick_cached("u1", day))
+        asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK],
+                                     "事业运势", today=day))
+        assert kv["sf_daily_u1"]["interps"]
+
+        monkeypatch.setattr(daily_mod, "_PROMPT_V", "v-next")
+        asyncio.run(df.spirit_cached(None, "u1", [PICK], "事业运势", None, today=day))
+
+        record = kv["sf_daily_u1"]
+        assert record["prompt_v"] == "v-next"
+        assert record["spirit_line"] == "新牌灵"
+        assert record["interps"] == {}, "旧提示词生成的解读必须一起作废"
+
+        out = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK],
+                                           "事业运势", today=day))
+        assert _text(out) == "新解读"
+        assert calls == ["interpret", "interpret"], "换版后必须重新生成，不能命中旧桶"
+
+
 # ---------- 主题桶内容损坏：当未命中，不静默丢解读 ----------
 _REGENERATED_TEXT = "【第1张·你的当下】新解读。"
 
