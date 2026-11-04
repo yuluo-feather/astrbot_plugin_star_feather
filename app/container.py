@@ -46,7 +46,8 @@ def build_container(context, plugin, config) -> Container:
         max_concurrency=settings.ai.max_concurrency,
         all_providers_fallback=settings.ai.all_providers_fallback,
     )
-    daily = DailyFortune(kv, clock, settings.ai.persona, interpreter)
+    daily = DailyFortune(kv, clock, settings.ai.persona, interpreter,
+                         ai_enabled=settings.ai.enable_ai)
     gate = LimitGate(kv, settings.tool.cmd_rate_limit, settings.limit.daily_count, clock)
     renderer = Renderer(new_instance_image_dir(), settings.output.send_mode)
     reading = ReadingService(

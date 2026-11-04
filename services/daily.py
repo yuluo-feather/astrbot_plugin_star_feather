@@ -114,15 +114,17 @@ class DailyFortune:
     """今日固定牌运的缓存与判定：给入口层提供「当天固定牌 + 当天解读」。
 
     依赖全部显式注入：kv_store（须提供 get_kv_data/put_kv_data）、clock（日期边界）、
-    persona（人设配置，缓存指纹用）、interpreter（AI 解释器）。
+    persona（人设配置，缓存指纹用）、interpreter（AI 解释器）、
+    ai_enabled（ai.enable_ai：缓存命中同样受它约束）。
     """
 
     def __init__(self, kv_store, clock=None, persona: str = DEFAULT_AI_PERSONA,
-                 interpreter=None):
+                 interpreter=None, ai_enabled: bool = True):
         self.kv_store = kv_store
         self.clock = clock or Clock()
         self.persona = str(persona or "")
         self.interpreter = interpreter
+        self.ai_enabled = ai_enabled
         # 旧版 sf_spirit_* 键只删一次：合并成单键后它们不会再被读，但会永久占着
         self._legacy_cleaned: set[str] = set()
 
@@ -190,6 +192,9 @@ class DailyFortune:
         today 由调用方传入本次占卜固定的日期（不传则取当前日期），
         写回端的跨天判定也用它，整条流水线不会各算各的日期。
         """
+        if not self.ai_enabled:
+            # 缓存里只有 AI 产物：关闭 AI 时按未命中处理，交给本地牌义。
+            return None
         topic = norm_topic(clean)
         today = today or self.clock.today()
         key = self._key(uid)
@@ -272,7 +277,8 @@ class DailyFortune:
             return ""
         card, upright = picks[0]["card"], picks[0]["upright"]
         fallback = pick_signature(card, upright, uid, today)
-        if not uid:
+        if not uid or not self.ai_enabled:
+            # 关闭 AI 时牌灵直接回退池内签文：历史 AI 缓存不能绕过配置开关。
             return fallback
         await self._cleanup_legacy_spirit(uid)
         key, sig = self._key(uid), _spirit_sign(picks)

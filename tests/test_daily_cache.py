@@ -1148,6 +1148,68 @@ class TestPromptBumpViaSpiritWriteBack:
         assert record["prompt_v"] == "v-next"
 
 
+class TestAiDisabledIgnoresCache:
+    """ai.enable_ai=false：缓存里的历史 AI 产物不许继续返回。
+
+    README 的承诺是「关闭则仅使用内置牌义，牌灵的话一并回退池内签文」；
+    缓存命中若绕过这个开关，就等于配置没生效。两条入口分别验。
+    """
+
+    @staticmethod
+    def _df(kv):
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
+
+        class _Ctx:
+            async def get_kv_data(self, key, default=None):
+                return kv.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                kv[key] = value
+
+        calls = []
+
+        class _Interp:
+            async def interpret(self, *a, **kw):
+                calls.append("interpret")
+                return "不该被调用"
+
+            async def spirit_line(self, *a, **kw):
+                calls.append("spirit")
+                return "不该被调用"
+
+        return DailyFortune(_Ctx(), persona="", interpreter=_Interp(),
+                            ai_enabled=False), calls
+
+    def test_cached_interpretation_is_not_served(self):
+        from data.plugins.astrbot_plugin_star_feather.core.intent import norm_topic
+
+        day = "20260827"
+        kv = {"sf_daily_u1": _rec(date=day,
+                                  interps={norm_topic("事业运势"): "旧 AI 解读"})}
+        df, calls = self._df(kv)
+        out = asyncio.run(df.interp_cached(None, "u1", "羽签", ["你的当下"], [PICK],
+                                           "事业运势", today=day))
+        assert out is None, "关闭 AI 后应回退本地牌义，不返回历史缓存"
+        assert calls == []
+        assert kv["sf_daily_u1"]["interps"][norm_topic("事业运势")] == "旧 AI 解读"
+
+    def test_cached_spirit_falls_back_to_pool(self):
+        from data.plugins.astrbot_plugin_star_feather.core.dailylines import (
+            pick_signature,
+        )
+
+        day = "20260827"
+        kv = {"sf_daily_u1": _rec(
+            date=day, spirit_line="旧 AI 牌灵",
+            spirit_sign=f"{PICK['card']['cn']}:1", spirit_persona="")}
+        df, calls = self._df(kv)
+        line = asyncio.run(df.spirit_cached(None, "u1", [PICK], "事业运势", None,
+                                            today=day))
+        assert line == pick_signature(PICK["card"], True, "u1", day)
+        assert line != "旧 AI 牌灵"
+        assert calls == []
+
+
 # ---------- 主题桶内容损坏：当未命中，不静默丢解读 ----------
 _REGENERATED_TEXT = "【第1张·你的当下】新解读。"
 
