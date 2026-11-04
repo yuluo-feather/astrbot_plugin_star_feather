@@ -1,6 +1,6 @@
 # 宿主解耦任务书：AstrBot 作为可替换适配器
 
-> 状态：草案 v0.1（2026-11-05）· 未开工 · 等主人点头后按阶段立 issue / 分支 / PR。
+> 状态：草案 v0.2（2026-11-05）· 接口语义按源码核对后补全，仍待主人确认 · 未开工 · 点头后按阶段立 issue / 分支 / PR。
 > 目标不是「消灭 AstrBot 依赖」，而是把 AstrBot 从应用核心的**隐性依赖**变成**可替换的宿主适配器**。
 > 现有 `core / services / ai / render` 与 `adapters` 的分层保留，不重写、不重排目录。
 
@@ -27,10 +27,17 @@
 
 | 文件 | 动作 |
 |---|---|
-| `core/log.py` | 改为 stdlib `logging` 门面：`getLogger("star_feather")` + `NullHandler`，保留 `log` 名字，调用点不动 |
-| 新增 `adapters/log.py` | 把中立 logger 的记录转发到 `astrbot.api.logger`，保持 `astrbot.plugin.<插件名>` 路由；绑定幂等，防热重载重复加 handler |
-| `main.py` | 插件实例化最早处完成绑定；绑定失败只退回 stdlib 默认，不许让插件加载失败 |
+| `core/log.py` | 改为**稳定的门面对象**（`__getattr__` 委托给当前目标），默认 stdlib `getLogger("star_feather")` + `NullHandler`；`from core.log import log` 的引用在绑定后仍然有效 |
+| 新增 `adapters/log.py` | 解析并绑定宿主 logger；首选把 `astrbot.api.logger` 代理**注入**门面，不重发记录 |
+| `main.py` | 插件实例化最早处 `bind()`；未绑定或绑定失败时 stdlib 照常工作，插件加载不依赖它 |
 | `ai/hardening.py` · `services/render.py` · `render/store.py` | 改从 `core.log` 取 logger，删掉直连框架的 import |
+
+**接口契约（草案）**
+
+- **记录归属**：业务模块统一走 `star_feather` 门面；宿主侧仍落在 `astrbot.plugin.<插件名>`；一次调用只产生一条记录。
+- **首选注入，不重发**：`astrbot.api.logger` 是按调用模块名路由的代理，注入后 `levelno` / `args` / `exc_info` / `stack_info` 原样保留，调用位置不漂移；核心模块位于插件包内，路由与级别不变。
+- **若必须用 handler 转发**：只在适配器内实现；幂等（重复绑定不重复输出）；不增删宿主 logger 的 handler、不改写级别与异常参数；只走公开 logger 接口，不碰宿主内部 handler 或私有属性；绑定失败退回 stdlib。
+- **绑定顺序**：`main.py` 在第一次业务日志之前完成绑定；导入期不产生业务日志，绑定前万一有记录也只走 stdlib，不许抛。
 
 **验收**
 
@@ -46,14 +53,33 @@
 
 | 文件 | 动作 |
 |---|---|
-| 新增 `app/dto.py` | `IncomingEvent`：`user_id`（已解析，含平台前缀口径）、`platform_id`、`conversation_id`、`message_text`、`platform_name`。不含原始事件 |
-| 新增 `adapters/event.py` | `incoming(event)` 构造 DTO；`mark_handled(event)` 承接 `should_call_llm(True)` 这类宿主动作；`core/identity.py` 的二级降级（int 型 ID、`message_obj.sender.user_id`、平台前缀）移到这里，纯转义逻辑可留在 core |
-| `app/handlers.py` | 入口签名改为 `(container, incoming, messenger, …)`；移除 `getattr(event, …)` 与 `should_call_llm`；`note_entry_binding` 移到 `main.py`（宿主侧诊断） |
-| `services/gating.py` | `check(incoming, for_command)`；键值口径不变：`sf_cmd_cd_{umo}` / `sf_tool_cd_{umo}` / `sf_cmd_cnt_{platform_id}:{uid}` |
+| 新增 `app/dto.py` | `IncomingEvent`（输入）与 `DeliveryCapabilities`（投递能力）；都不含原始事件 |
+| 新增 `adapters/event.py` | `incoming(event)` 构造 DTO；`mark_handled(event)` 承接 `should_call_llm(True)`；`capabilities(event, forward_result)` 计算 `can_forward` / `self_id`；`core/identity.py` 的二级降级（int 型 ID、`message_obj.sender.user_id`、平台前缀）移到这里，纯转义逻辑可留在 core |
+| `app/handlers.py` | 入口签名改为 `(container, incoming, capabilities, messenger, …)`；移除 `getattr(event, …)` 与 `should_call_llm`；`note_entry_binding` 移到 `main.py`（宿主侧诊断） |
+| `services/gating.py` | `check(incoming, for_command)`；键值口径不变：`sf_cmd_cd_{conversation_key}` / `sf_tool_cd_{conversation_key}` / `sf_cmd_cnt_{user_id}` |
 | `services/reading.py` | `ReadingContext` 收 DTO（或继续收 uid/umo 两字段；倾向前者，保持只有一种输入形状） |
-| `adapters/deliver.py` · `adapters/presenter.py` | `present` / `deliver` 去掉 `event`，改收 `can_forward: bool`；`supports_forward(platform_name)` 留在适配器内 |
-| `app/container.py` | 只负责装配；DTO 转换与 messenger 构造由 `main.py` 调适配器完成 |
-| `main.py` | 先 `mark_handled` + `note_entry_binding`，再构造 DTO / messenger 调 handlers |
+| `adapters/deliver.py` · `adapters/presenter.py` | `present` / `deliver` 去掉 `event`，改收 `DeliveryCapabilities`；`supports_forward(platform_name)` 留在适配器内 |
+| `app/container.py` | 只负责装配；DTO / capabilities / messenger 由 `main.py` 调适配器构造 |
+| `main.py` | 先 `mark_handled` + `note_entry_binding`，再构造 DTO、capabilities、messenger 调 handlers |
+
+**职责边界（草案）**
+
+- `IncomingEvent` 只描述输入；`Messenger` 只负责发送（`send_text` / `send_result`，返回 bool）；`DeliveryCapabilities` 只描述本次投递能力。三者不合并，也不互相替代。
+- 应用层所有发送都经由 `messenger`；不得出现 `event.send` / `event.chain_result`。
+- `Presenter` / `Deliverer` 属于适配器，由 `Container` 注入；它们只接收 `DeliveryCapabilities`，不再接收 `event`。
+- `can_forward = send_mode == "forward" and supports_forward(platform_name)`；`self_id = event.get_self_id() or "0"`——与现状取值一致（转发节点 uin 用它）。
+
+**DTO 字段语义（逐字节契约）**
+
+| 字段 | 取值与语义 |
+|---|---|
+| `user_id` | 已由适配器按 `resolve_sender_uid` 解析：平台前缀 + 转义后的最终 uid；直接拼 `sf_cmd_cnt_{user_id}`，不得二次加工 |
+| `platform_id` | `event.get_platform_id()` 原值——**平台适配器实例 ID，不是平台类型名**；取不到为 `""` |
+| `conversation_id` | `event.unified_msg_origin` 原值（可能为 `None`）；限流键必须用 `conversation_key = conversation_id or "global"`，与现状完全同义 |
+| `message_text` | `event.message_str` 原值（可能为空串）；`.strip()` 仍留在调用点，保持“空文本”分支 |
+| `platform_name` | `event.get_platform_name()` 原值（可能为空串）；白名单比较时才 `strip().lower()` |
+
+阶段二先写一条**键值快照**回归：固定事件桩下断言 `sf_cmd_cd_*` / `sf_tool_cd_*` / `sf_cmd_cnt_*` 与改造前逐字节相同，再动签名。
 
 **测试面**：`tests/stubs.py` 补 DTO 与 Messenger 假件；`test_entries`、`test_tool_entry`、`test_gating`、`test_identity`、`test_deliver`、`test_fault_injection`、`test_config_freshness` 跟签名。
 
@@ -76,6 +102,13 @@
 | 新增 `adapters/llm.py` | 包 `context.get_using_provider_async` / `context.get_all_providers` / `provider.meta().id` / `provider.text_chat` |
 | `ai/chain.py` | `AiInterpreter(context, …)` → `AiInterpreter(gateway, …)`；删掉 `self.context`；时钟继续可注入 |
 | `app/container.py` | 构造网关并注入 |
+
+**错误语义（草案）**
+
+- 网关只做适配，**不重新定义错误处理策略**：Provider 不可用、查询失败、请求超时、返回结构异常、请求抛异常，都按原样向上抛；`AiInterpreter` 现有的 try/except、来源名告警、候选跳过与失败冷却一律不动。
+- `identify(handle)` 保持 `provider.meta().id`，异常时 `obj:{id(handle)}`；同一句柄必须得到同一 id（冷却 map 的键）。
+- `chat(handle, prompt, system_prompt)`：适配器按现有参数调用 `provider.text_chat(prompt=…, session_id=None, contexts=[], image_urls=[], system_prompt=…)`，只取 `completion_text`；取不到或为空 → 返回空串，由解释器现有的 `(text or "").strip() or None` 归一；读取属性时抛异常 → 视为请求失败向上抛，由现有失败路径处理。**不得把异常吞成空串**。
+- 超时不进网关：`asyncio.wait_for` 仍由解释器按预算施加；网关不得自加重试、超时、并发闸或日志。
 
 **测试面**：`tests/stubs.py` 提供 FakeGateway；`test_core`、`test_ai_budget`、`test_fault_injection`、`test_structure_check`、`test_spirit` 共 28 处构造跟着换。
 
@@ -110,3 +143,9 @@
 - 阶段一碰全局日志绑定：幂等必须显式处理，绑定失败只能降级，不能带走插件加载。
 - 阶段二碰三入口与限流 / 身份键：最容易出的是「看起来没变、键值悄悄变了」，回归测试要钉字段值。
 - 阶段三碰预算与冷却：错了通常不是测试红，而是线上行为慢慢变；放最后，且以现有用例为契约。
+
+## 7. 实施节奏
+
+- **一个阶段 = 一个 issue = 一个 PR**；不把三阶段合成一个大 PR——任一段行为回归要能单独定位与回退。
+- 每个阶段合并前：全量 pytest + `finish_check` 六项绿 + 对应的实机验证（阶段一/二各跑一次命令与工具入口，阶段三看一次 AI 解读与回退路径）。
+- 阶段顺序不并行：后一阶段复用前一阶段的 DTO / 装配，同时开工会让签名冲突变成日常。
