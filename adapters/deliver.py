@@ -129,7 +129,14 @@ class Deliverer:
                 chain.append(Plain(fail_note))
             if self.disclaimer:
                 chain.append(Plain(self.disclaimer))
-            if chain:
+            if not chain:
+                return
+            # 回退也遵循本次投递能力：forward + 平台白名单 → 合并转发；
+            # 否则维持普通链消息（plain / text_only / 非白名单平台）。
+            if self.forward_for(caps):
+                node = Node(content=chain, name="星羽塔罗", uin=caps.self_id)
+                yield messenger.chain_result([Nodes([node])])
+            else:
                 yield messenger.chain_result(chain)
             return
         # 结构化切分只做一次：AI 返回时已解析成 Interpretation，这里不再重新切；

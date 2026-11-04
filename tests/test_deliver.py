@@ -145,6 +145,38 @@ class TestNoAiFallback:
         texts = [getattr(c, "text", "") for c in chain]
         assert texts == ["本地牌义", "失败说明", "【免责声明】"]
 
+    def test_no_ai_fallback_honors_forward(self):
+        """回退也遵循投递能力：forward + 白名单平台 → 单个合并转发节点。"""
+        evt = TestDeliverEpilogue._evt()
+        d = Deliverer(300, "")
+
+        async def collect():
+            return [x async for x in d.deliver(
+                _msg(evt), _caps(evt, True), None, "img.png", "羽签", ["当下"], [PICK],
+                lambda *a: "本地牌义", fail_note="失败说明")]
+
+        out = asyncio.run(collect())
+        assert len(out) == 1
+        nodes_result = out[0]
+        assert len(nodes_result) == 1 and isinstance(nodes_result[0], Nodes)
+        node = nodes_result[0].nodes[0]
+        assert node.uin == "12345"
+        assert any(getattr(c, "file", "") == "img.png" for c in node.content)
+        assert any("失败说明" in getattr(c, "text", "") for c in node.content)
+
+    def test_no_ai_fallback_plain_when_platform_unsupported(self):
+        """平台不在白名单时，即使 send_mode=forward 也回退普通链消息。"""
+        evt = TestForwardPlatformFallback._evt("webchat")
+        d = Deliverer(300, "")
+
+        async def collect():
+            return [x async for x in d.deliver(
+                _msg(evt), _caps(evt, True), None, "img.png", "羽签", ["当下"], [PICK],
+                lambda *a: "本地牌义", fail_note="失败说明")]
+
+        out = asyncio.run(collect())
+        assert out and not any(isinstance(c, Nodes) for c in out[0])
+
 
 class TestForwardPlatformFallback:
     """平台收不下 Nodes 时要自动回退普通链消息，不能静默把结果丢掉。"""
