@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-<img src="https://img.shields.io/badge/version-v0.9.5-f8a5c2" alt="v0.9.5"/>
+<img src="https://img.shields.io/badge/version-v0.10.0-f8a5c2" alt="v0.10.0"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -268,6 +268,14 @@
 
 ## 📜 更新记录
 
+#### v0.10.0
+
+- 新增：`ai.spirit_line` 开关——关闭后不再生成、发送牌灵的话（`/今日牌运` 海报的签文与署名一并隐藏），深度解读不受影响
+- 修复：会话冷却不再提前放行——剩余时间向上取整、时间戳保留小数，冷却没真正走完就至少再等 1 秒
+- 修复：免责声明在三种发送方式下都作为独立一条消息发送，AI 不可用时也遵循 `output.send_mode`；留空则整条不发送
+- 修复：自然语言入口的前置步骤（意图解析 / 节流 / 每日计数）异常不再漏给 Agent Loop，统一回一句失败提示
+- 重构：核心与宿主解耦——日志、事件与模型网关收口到适配层，行为与配置不变
+
 #### v0.9.5
 
 - 修复：Pillow 安全下限提升到 13.0.0，fonttools 提升到 4.68.0，tzdata 更新到 2026.6
@@ -290,17 +298,7 @@
 - 修复：AI 本地排队超时不再被记成 Provider 失败，日志按「本地资源不足」归因
 - 变更：设计取舍按主题移入 `docs/design-notes/`，代码注释只留规则与指路
 
-#### v0.9.0
-
-- 新增：`/单抽` 与今日牌运解绑——单抽每次现抽、解读现场生成不缓存；「一天一张固定牌」交给新的 `/今日牌运`（别名 `/运势`、`/每日一签`）
-- 重构：入口 / 编排 / 纯逻辑 / 适配 / AI / 渲染分层收口，`ReadingService` 串起抽牌、两段 AI、渲染与发送；`sf_daily_*` 收敛为单键 `DailyRecord`，牌、解读与牌灵的话共用日期边界
-- 优化：牌灵的话与解读共用一笔 AI 总预算，改用 `TaskGroup` 并发——任一段抛出未兜底异常会取消另一段，AI 服务失败仍各自降级；新增 `ai.parallel_stages` 与 `ai.max_concurrency`
-- 修复：请求跨过午夜时牌面、缓存与海报日期各算各的；旧日期快照晚到不再覆盖新一天的缓存
-- 修复：用户问题改用分隔标签包裹，标签关键词循环剥除到不动点；注入过滤不再误伤正常问句与自述
-- 修复：牌灵缓存按人设隔离，缓存二次读失败不再清空记录；图片退路目录只回收空壳
-- 变更：日志统一走框架 logger；帮助行补上 `/单抽 帮助` 与 `/今日牌运 帮助`
-
-> 更早版本（v0.8.1 及以前）的逐条明细见 [CHANGELOG.md](CHANGELOG.md) 与 `changelogs/` 目录——这里只保留最近 6 个版本的摘要。
+> 更早版本（v0.9.0 及以前）的逐条明细见 [CHANGELOG.md](CHANGELOG.md) 与 `changelogs/` 目录——这里只保留最近 6 个版本的摘要。
 
 ---
 

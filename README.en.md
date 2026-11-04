@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-<img src="https://img.shields.io/badge/version-v0.9.5-f8a5c2" alt="v0.9.5"/>
+<img src="https://img.shields.io/badge/version-v0.10.0-f8a5c2" alt="v0.10.0"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -282,6 +282,14 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 
 ## 📜 Changelog
 
+#### v0.10.0
+
+- Added: `ai.spirit_line` — turn it off to skip the spirit's opening line entirely (the `/今日牌运` poster drops its quote and sign-off too) without touching the deep reading
+- Fixed: session cooldowns no longer release early — remaining time rounds up and the stored timestamp keeps sub-second precision, so a cooldown that is not truly over always reports at least one more second
+- Fixed: the disclaimer is now its own message in all three send modes, AI-less fallbacks also follow `output.send_mode`, and an empty disclaimer sends nothing
+- Fixed: failures in the natural-language entry's front steps (intent parsing, throttling, daily counter) no longer escape to the Agent Loop and instead send the usual failure note
+- Refactored: the core is decoupled from the host — logging, events and the provider gateway now sit behind adapters, with no behaviour or config change
+
 #### v0.9.5
 
 - Fixed: the Pillow security floor is now 13.0.0, fonttools is 4.68.0, and tzdata is 2026.6
@@ -304,17 +312,7 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 - Fixed: an AI queue timeout on the local concurrency gate is no longer recorded as a provider failure — the log names the local cause instead
 - Changed: design rationale now lives in `docs/design-notes/` (one file per topic); code comments keep only the rules and a pointer
 
-#### v0.9.0
-
-- Added: `/单抽` is unbound from the daily fortune — every call draws a fresh Feather Sign and generates its reading live; the new `/今日牌运` (aliases `/运势`, `/每日一签`) owns the one-fixed-card-a-day role
-- Refactored: entry / orchestration / pure logic / adapters / AI / rendering are separate layers, with `ReadingService` running draw → both AI stages → render → send; `sf_daily_*` is a single `DailyRecord` sharing one date boundary
-- Improved: the spirit's line and the reading share one AI budget and run under `TaskGroup`, so an uncaught failure in one cancels the other while AI service failures keep their own fallbacks; new `ai.parallel_stages` and `ai.max_concurrency`
-- Fixed: a request crossing midnight no longer splits the card, cache and poster across two dates, and a late older snapshot no longer overwrites the new day's record
-- Fixed: user questions are fenced with loop-stripped markers, and the injection filter no longer mangles ordinary questions or self-descriptions
-- Fixed: the spirit-line cache is isolated per persona, a failed second read no longer wipes the record, and stale image directories are reaped only when empty
-- Changed: logging goes through the framework logger; the help row lists `/单抽 帮助` and `/今日牌运 帮助`
-
-> Full per-version details for v0.8.1 and earlier live in [CHANGELOG.md](CHANGELOG.md) and the `changelogs/` directory — this page keeps only the six most recent releases.
+> Full per-version details for v0.9.0 and earlier live in [CHANGELOG.md](CHANGELOG.md) and the `changelogs/` directory — this page keeps only the six most recent releases.
 
 ---
 
