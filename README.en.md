@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-<img src="https://img.shields.io/badge/version-v0.9.3-f8a5c2" alt="v0.9.3"/>
+<img src="https://img.shields.io/badge/version-v0.9.4-f8a5c2" alt="v0.9.4"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -281,6 +281,10 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 
 ## 📜 Changelog
 
+#### v0.9.4
+
+- Fixed: a failed delivery no longer claims the reading was sent; the disclaimer is no longer skipped when the AI returns no reading or delivery falls back to plain text
+
 #### v0.9.3
 
 - Changed: card art resolves by trying the same file name with .png, .webp and .jpg in that order; PNG art dropped in place works without editing the manifest
@@ -313,10 +317,6 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 - Improved: the spirit's line and the reading run concurrently on one shared budget; cards are delivered as JPEG at roughly a quarter of the previous size
 - Fixed: unverified platforms, and events whose platform name cannot be read, fall back to plain messages instead of risking a silently dropped result
 - Changed: the `/单抽` description matches its behaviour, and framework imports are explicit so a misspelled name is a static error
-
-#### v0.8.2
-
-- Fixed: a cache hit no longer writes anything back — on a KV store without compare-and-swap, the read-modify-write trim could overwrite a concurrently generated topic and could also pin the cache lock; hits are now read-only, and an oversized legacy bucket bag is trimmed to 20 on the next new topic (a real write)
 
 > Full per-version details for v0.8.1 and earlier live in [CHANGELOG.md](CHANGELOG.md) and the `changelogs/` directory — this page keeps only the six most recent releases.
 

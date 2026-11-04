@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-<img src="https://img.shields.io/badge/version-v0.9.3-f8a5c2" alt="v0.9.3"/>
+<img src="https://img.shields.io/badge/version-v0.9.4-f8a5c2" alt="v0.9.4"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -267,6 +267,10 @@
 
 ## 📜 更新记录
 
+#### v0.9.4
+
+- 修复：结果没发出去时不再提示「已发送」；AI 未返回解读或转纯文字补发时，免责声明不再漏发
+
 #### v0.9.3
 
 - 变更：素材加载按同名扩展名取第一个存在的（`.png` → `.webp` → `.jpg`），自备 PNG 素材无需改清单即可生效
@@ -299,10 +303,6 @@
 - 优化：牌灵的话与解读并发执行、共用同一笔预算；牌面图改用 JPEG，体积约为原来的四分之一
 - 修复：未验证平台或取不到平台名时回退普通消息，结果不再可能被静默丢弃
 - 变更：`/单抽` 的说明与实际一致；框架导入改为显式导入，框架名字写错会被静态检查抓到
-
-#### v0.8.2
-
-- 修复：命中缓存时不再做任何写回——无 CAS 的 KV 上「读-改-写」维护可能覆盖并发生成的新主题，也会占住缓存锁；现在命中只读，超限的旧分桶在下一次问新主题（真正写入）时收口到 20 条
 
 > 更早版本（v0.8.1 及以前）的逐条明细见 [CHANGELOG.md](CHANGELOG.md) 与 `changelogs/` 目录——这里只保留最近 6 个版本的摘要。
 
