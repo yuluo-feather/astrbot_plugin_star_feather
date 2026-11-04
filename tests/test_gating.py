@@ -3,6 +3,7 @@
 import asyncio
 import types
 
+from data.plugins.astrbot_plugin_star_feather.services import gating as gating_mod
 from data.plugins.astrbot_plugin_star_feather.services.gating import LimitGate
 
 
@@ -110,6 +111,20 @@ class TestSessionThrottle:
     def test_kv_exception_passes(self):
         g = _gate(BrokenKV(), cmd=10)
         assert asyncio.run(g.session_throttle("k", 10)) == 0  # 写失败：放行
+
+    def test_cooldown_counts_real_elapsed_time(self, monkeypatch):
+        """冷却按真实经过时间判定：时间戳截整秒或剩余向下取整都会提前放行。"""
+        kv = FakeKV()
+        g = _gate(kv, cmd=10)
+        clock = types.SimpleNamespace(time=lambda: 1000.7)
+        monkeypatch.setattr(gating_mod, "time", clock)
+
+        assert asyncio.run(g.session_throttle("sf_cmd_cd_x", 10)) == 0
+        assert kv.store["sf_cmd_cd_x"] == 1000.7  # 子秒精度不能丢
+        clock.time = lambda: 1009.2  # 经过 8.5 秒，还剩 1.5 秒
+        assert asyncio.run(g.session_throttle("sf_cmd_cd_x", 10)) == 2
+        clock.time = lambda: 1010.8
+        assert asyncio.run(g.session_throttle("sf_cmd_cd_x", 10)) == 0
 
 
     def test_bad_timestamp_treated_as_no_record(self):

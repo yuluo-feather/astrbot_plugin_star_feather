@@ -57,7 +57,8 @@ class LimitGate:
             remain = cooldown_remaining(last_ts, time.time(), cooldown)
             if remain > 0:
                 return remain
-            await kv_put(self.kv_store, key, int(time.time()), "会话节流")
+            # 存浮点时间戳：截成整秒会让实测经过时间偏大，实际冷却提前不到 1 秒结束
+            await kv_put(self.kv_store, key, time.time(), "会话节流")
             return 0
 
     async def check(self, event, for_command: bool) -> str | None:

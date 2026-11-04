@@ -9,6 +9,7 @@
 
 说人话：牌灵不小气，但也经不起连刷——规矩就这三条，记好了。
 """
+import math
 
 
 def cooldown_remaining(last_ts: float, now: float, cooldown: int) -> int:
@@ -22,7 +23,8 @@ def cooldown_remaining(last_ts: float, now: float, cooldown: int) -> int:
         # 服务器时钟被回拨：把负的 elapsed 当成「已过期」，别让用户被冻结
         # cooldown + 回拨量那么久。KV 里存的是墙钟时间戳，这里只做防御性归一。
         return 0
-    remain = int(cooldown - (now - last_ts))
+    # 向上取整：没真正走完就至少报 1 秒，别让 int() 把 0.8 秒截成 0 提前放行
+    remain = math.ceil(cooldown - (now - last_ts))
     return max(0, remain)
 
 

@@ -16,6 +16,14 @@ class TestCooldownRemaining:
     def test_remaining_seconds(self):
         assert cooldown_remaining(1000, 1003, 10) == 7
 
+    def test_partial_second_counts_as_one(self):
+        # 冷却没真正走完就至少报 1 秒，不能截成 0 提前放行
+        assert cooldown_remaining(1000.0, 1009.2, 10) == 1
+        assert cooldown_remaining(1000.0, 1000.1, 10) == 10
+
+    def test_exact_boundary_releases(self):
+        assert cooldown_remaining(1000.0, 1010.0, 10) == 0
+
     def test_expired_returns_zero(self):
         assert cooldown_remaining(1000, 1010, 10) == 0
         assert cooldown_remaining(1000, 1100, 10) == 0
