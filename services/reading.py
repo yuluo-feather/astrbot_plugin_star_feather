@@ -141,8 +141,9 @@ class ReadingService:
         if (prepared.is_daily and prepared.uid and picks
                 and self.settings.output.daily_card
                 and self.settings.output.send_mode != "text_only"):
-            image = await self.renderer.daily_card(picks, prepared.uid,
-                                                   prepared.today, prepared.date_text)
+            image = await self.renderer.daily_card(
+                picks, prepared.uid, prepared.today, prepared.date_text,
+                with_spirit=self.settings.ai.spirit_line)
         if not image:
             image = await self.renderer.card(prepared.formation, positions, picks)
         image = await self.renderer.ensure_image(

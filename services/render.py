@@ -46,19 +46,21 @@ class Renderer:
         return img
 
     async def daily_card(self, picks: list[Pick], uid: str,
-                         today: str, date_text: str) -> str | None:
+                         today: str, date_text: str, *,
+                         with_spirit: bool = True) -> str | None:
         """今日牌运海报卡：牌面 + 日期 + 池内当日签文 + 署名。
 
         today / date_text 由调用方在本次占卜开始时固定一次：牌面与卡面日期用同一个
         日期，请求跨过午夜也不会对不上。失败返回 None，调用方回退普通牌面图；
-        清理走同一条保险丝。
+        清理走同一条保险丝。with_spirit=False（ai.spirit_line 关闭）时
+        签文与署名留空，海报其余部分照常渲染。
         """
         if not picks:
             return None
         try:
             card = picks[0]["card"]
             upright = bool(picks[0]["upright"])
-            signature = pick_signature(card, upright, uid, today)
+            signature = pick_signature(card, upright, uid, today) if with_spirit else ""
             async with self._lock:
                 img = await asyncio.to_thread(render_daily_card, card, upright,
                                               signature, date_text, self.image_dir)

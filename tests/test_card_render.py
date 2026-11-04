@@ -159,6 +159,22 @@ class TestAssetExtensionFallback:
             assert im.mode == "RGB"
             assert im.format == "JPEG"
 
+    def test_daily_card_poster_without_signature_skips_quote(self, tmp_path, monkeypatch):
+        drawn = []
+
+        def spy(d, cx, y, text, *a, **kw):
+            drawn.append(text)
+
+        monkeypatch.setattr(render_draw, "_text_center", spy)
+        path = render_draw.render_daily_card(
+            _mk("major", "19", "太阳", "The Sun", "成功喜悦", "乌云遮日"), False,
+            "", "8月27日·周四", save_dir=str(tmp_path))
+        assert os.path.isfile(path)
+        joined = "".join(drawn)
+        assert "『" not in joined and "』" not in joined
+        assert render_draw.DAILY_SIGNATURE not in drawn
+        assert "8月27日·周四" in drawn and render_draw.DAILY_WATERMARK in drawn
+
     def test_daily_card_poster_missing_asset_raises(self, tmp_path):
         # 素材缺失：向调用方抛异常（编排层负责回退，渲染层只保证 fail loudly）
         import pytest

@@ -97,13 +97,15 @@ class FakeRenderer:
         self.daily_image = daily_image
         self.cards = []
         self.daily_cards = []
+        self.daily_with_spirit = True
 
     async def card(self, formation, positions, picks):
         self.cards.append((formation, positions, picks))
         return self.image
 
-    async def daily_card(self, picks, uid, today, date_text):
+    async def daily_card(self, picks, uid, today, date_text, *, with_spirit=True):
         self.daily_cards.append((picks, uid, today, date_text))
+        self.daily_with_spirit = with_spirit
         return self.daily_image
 
     async def ensure_image(self, img, formation, positions, picks):
@@ -796,3 +798,22 @@ class TestSpiritLineSwitch:
         reading = self._read(_settings(ai={"spirit_line": False}), daily)
         assert reading.spirit == ""
         assert daily.spirit_calls == 0
+
+    @staticmethod
+    def _read_daily(settings, renderer):
+        svc = _service(daily=FakeDaily(cached=("羽签", ["你的当下"], [PICK])),
+                       renderer=renderer, settings=settings)
+        prepared = asyncio.run(svc.prepare(build_request("daily", "今日运势"), "u1"))
+        return asyncio.run(svc.run(prepared, ReadingContext("u1", "umo", FakeMessenger()),
+                                   question="今日运势"))
+
+    def test_daily_poster_follows_the_switch(self):
+        renderer = FakeRenderer(daily_image="poster.jpg")
+        reading = self._read_daily(_settings(ai={"spirit_line": False}), renderer)
+        assert reading.spirit == ""
+        assert renderer.daily_with_spirit is False
+
+    def test_daily_poster_keeps_the_signature_by_default(self):
+        renderer = FakeRenderer(daily_image="poster.jpg")
+        self._read_daily(_settings(), renderer)
+        assert renderer.daily_with_spirit is True

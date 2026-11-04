@@ -320,7 +320,8 @@ def render_daily_card(card, upright, signature, date_text, save_dir=None) -> str
 
     自上而下：标题胶囊「星羽塔罗·今日牌运」/ 日期（如「8月27日·周四」）/
     白边卡牌（_draw_card 同款，逆位卡内旋转而背景不转）/ 签文引用「『…』」/
-    署名「—— 牌灵·星羽塔罗」/ 底部水印。同步函数：编排在 daily.render_daily_card
+    署名「—— 牌灵·星羽塔罗」/ 底部水印。signature 为空时跳过签文与署名
+    （ai.spirit_line=false：海报上也不出现牌灵的话）。同步函数：编排在 daily.render_daily_card
     经 to_thread 调用；素材缺失抛异常，由编排层兜底回退普通牌面图。
     """
     W, H = DAILY_CARD_W, DAILY_CARD_H
@@ -338,15 +339,16 @@ def render_daily_card(card, upright, signature, date_text, save_dir=None) -> str
     _draw_card(canvas, card_x, card_y, card, upright)
 
     # 签文引用：24px 常规体（秀气，旧卡同款观感），按标点分行最多两行；
-    # 署名与底部水印固定留白
-    quote = f"『{signature}』"
-    q_font = _load_font(24, text=quote)
-    qy = DAILY_CARD_QUOTE_Y
-    for line in _split_signature_lines(d, quote, q_font, W - 200)[:2]:
-        _text_center(d, W / 2, qy, line, q_font, DAILY_SIG_TEXT)
-        qy += 38
-    _text_center(d, W / 2, qy + 12, DAILY_SIGNATURE,
-                 _load_font(23, text=DAILY_SIGNATURE), DAILY_SIGN_TEXT)
+    # 署名与底部水印固定留白。signature 为空 = 牌灵的话已关闭：两行都不画。
+    if signature:
+        quote = f"『{signature}』"
+        q_font = _load_font(24, text=quote)
+        qy = DAILY_CARD_QUOTE_Y
+        for line in _split_signature_lines(d, quote, q_font, W - 200)[:2]:
+            _text_center(d, W / 2, qy, line, q_font, DAILY_SIG_TEXT)
+            qy += 38
+        _text_center(d, W / 2, qy + 12, DAILY_SIGNATURE,
+                     _load_font(23, text=DAILY_SIGNATURE), DAILY_SIGN_TEXT)
     _text_center(d, W / 2, H - 58, DAILY_WATERMARK,
                  _load_font(21, text=DAILY_WATERMARK), DAILY_FOOT_TEXT)
 
