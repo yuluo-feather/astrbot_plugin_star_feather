@@ -8,9 +8,8 @@ text_only 不渲染、渲染丢线程池、并发上限、失败一律降级为 
 import asyncio
 import os
 
-from astrbot.api import logger
-
 from ..core.dailylines import pick_signature
+from ..core.log import log as logger
 from ..core.models import Pick
 from ..render.draw import render_cards, render_daily_card
 from ..render.store import _schedule_image_cleanup

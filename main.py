@@ -3,7 +3,7 @@
 模块说明：
 - 装配：app/container.py（唯一装配处）
 - 入口：app/handlers.py（命令 / 工具）
-- 纯逻辑：core/（除日志出口 core/log.py 外不 import astrbot）
+- 纯逻辑：core/（不 import astrbot；日志走 core/log.py 的中立门面）
 - 编排：services/（占卜流水线、渲染）
 - 适配：adapters/（KV、消息、呈现）
 """
@@ -13,6 +13,7 @@ from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 
+from .adapters.log import bind_host_logger
 from .app import handlers
 from .app.container import build_container
 from .app.diagnostics import image_dir_of, register_instance
@@ -26,6 +27,7 @@ VERSION = "0.9.5"
 class StarFeatherPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         super().__init__(context)
+        bind_host_logger()  # 核心层的中立日志出口从这里接上宿主；失败只降级
         self.container = build_container(context, self, config)
 
     async def initialize(self):

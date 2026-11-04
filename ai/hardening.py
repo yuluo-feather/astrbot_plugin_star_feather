@@ -7,8 +7,7 @@
 """
 import re
 
-from astrbot.api import logger
-
+from ..core.log import log as logger
 from ..core.settings import DEFAULT_QUESTION_MAX_LEN
 
 # AI 解读的问题长度上限：防超长输入（费 token + 扩大 Prompt 注入面），

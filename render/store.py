@@ -8,7 +8,7 @@ import shutil
 import tempfile
 import time
 
-from astrbot.api import logger
+from ..core.log import log as logger
 
 # ---------- 产物生命周期：渲染出的临时图片由本模块统一管理 ----------
 IMAGE_TTL_SECONDS = 600

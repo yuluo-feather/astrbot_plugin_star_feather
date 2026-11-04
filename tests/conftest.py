@@ -6,6 +6,7 @@ test_gating（限流闸门）/ test_card_render（渲染与清理）/ test_clock
 test_fonts（字体子系统）/ test_deliver（分段与分发）/ test_limiter / test_config /
 test_dailylines（每日签文池与确定性挑选）/ test_integrity（数据完整性域）/
 test_kv_utils（KV 读写降级）/ test_fault_injection（故障注入矩阵：存储故障与降级契约）/
+test_log_port（日志门面：宿主注入、引用稳定与参数原样转发）/
 test_ai_budget（AI 总预算：单次占卜的 AI 花费上界与回退）/
 test_structure_check（解读结构校验：宽松/严格两档行为与严格判据）/
 test_judgement_corpus（判定语料回归）/
