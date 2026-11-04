@@ -57,8 +57,9 @@ def _imports_from_framework(path: str) -> dict:
     with open(path, encoding="utf-8") as f:
         tree = ast.parse(f.read(), filename=path)
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module \
-                and node.module.startswith("astrbot"):
+        if (isinstance(node, ast.ImportFrom) and node.level == 0
+                and node.module
+                and (node.module == "astrbot" or node.module.startswith("astrbot."))):
             names = {a.name for a in node.names if a.name != "*"}
             if names:
                 want.setdefault(node.module, set()).update(names)
@@ -206,6 +207,8 @@ def test_surface_sources_are_parsable():
     assert any(p.endswith(os.path.join("adapters", "deliver.py")) for p in paths), (
         "运行时扫描没走到适配器子包，契约守卫会漏掉子包导入：" + str(paths))
     want = required_surface()
+    bad = [m for m in want if m != "astrbot" and not m.startswith("astrbot.")]
+    assert not bad, "非框架模块混进契约清单（相对导入误判？）：" + str(bad)
     assert "astrbot.api.star" in want, "插件根没解析出框架导入？口径来源失效：" + str(want)
     assert "astrbot.api.message_components" in want, (
         "子包里的 message_components 导入没进清单：" + str(want))
