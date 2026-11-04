@@ -11,13 +11,7 @@ from ..core.identity import resolve_sender_uid
 from ..core.intent import build_request
 from ..core.log import log
 from ..core.models import KIND_HELP
-from ..core.texts import (
-    FAIL_NOTE_TOOL,
-    HELP_TEXT,
-    TOOL_EPILOGUE,
-    TOOL_FAILED_SENT,
-    TOOL_SEND_FAILED,
-)
+from ..core.texts import FAIL_NOTE_TOOL, HELP_TEXT, TOOL_EPILOGUE
 from ..services.reading import ReadingContext
 from .diagnostics import note_entry_binding
 
@@ -75,9 +69,7 @@ async def tool_entry(plugin, event, formation: str = "", *, version: str) -> str
     container = plugin.container
     messenger = messenger_for(event)
     if not container.settings.tool.llm_enabled:
-        if not await messenger.send_text(
-                "星羽塔罗的自然语言占卜未开启～ 试试 /占卜 感情 这样的命令。"):
-            return TOOL_SEND_FAILED
+        await messenger.send_text("星羽塔罗的自然语言占卜未开启～ 试试 /占卜 感情 这样的命令。")
         return "已告知用户自然语言占卜未开启。请自然回应一句，不必再调用工具。"
     text = (getattr(event, "message_str", "") or "").strip()
     if not text:
@@ -87,21 +79,18 @@ async def tool_entry(plugin, event, formation: str = "", *, version: str) -> str
         "auto", text, daily_enabled=container.settings.output.daily_fixed,
         source="tool", formation_hint=formation)
     if request.kind == KIND_HELP:
-        if not await messenger.send_text(help_text(version)):
-            return TOOL_SEND_FAILED
+        await messenger.send_text(help_text(version))
         return "帮助页已发送。请自然回应一句，不必再调用工具。"
     umo = getattr(event, "unified_msg_origin", None) or "global"
     remain = await container.gate.session_throttle(
         f"sf_tool_cd_{umo}", container.settings.tool.llm_cooldown)
     if remain > 0:
-        if not await messenger.send_text(
-                f"牌灵刚忙完一卦，让它歇 {remain} 秒，或者用 /占卜 再来一卦~"):
-            return TOOL_SEND_FAILED
+        await messenger.send_text(
+            f"牌灵刚忙完一卦，让它歇 {remain} 秒，或者用 /占卜 再来一卦~")
         return f"已提示用户节流中（剩 {remain} 秒）。请自然回应一句，不必再调用工具。"
     block = await container.gate.check(event, for_command=False)
     if block:
-        if not await messenger.send_text(block):
-            return TOOL_SEND_FAILED
+        await messenger.send_text(block)
         return "已提示用户今日次数限制。请自然回应一句，不必再调用工具。"
     # 收尾引导放在所有早退分支之后取：早退路径不该白耗一次全局随机状态。
     note = random.choice(TOOL_EPILOGUE)
@@ -112,10 +101,9 @@ async def tool_entry(plugin, event, formation: str = "", *, version: str) -> str
             prepared, ReadingContext(uid, getattr(event, "unified_msg_origin", None),
                                      messenger),
             question=request.question, fail_note=FAIL_NOTE_TOOL, epilogue=False)
-        delivered = await container.presenter.present(reading, messenger, event)
-        return note if delivered else TOOL_SEND_FAILED
+        await container.presenter.present(reading, messenger, event)
+        return note
     except Exception as e:
         log.error(f"自然语言占卜失败: {_exc_detail(e)}")
-        if await messenger.send_text("这卦起得有点乱……牌灵需要缓缓，换个时候再来问。"):
-            return TOOL_FAILED_SENT
-        return TOOL_SEND_FAILED
+        await messenger.send_text("这卦起得有点乱……牌灵需要缓缓，换个时候再来问。")
+        return note
