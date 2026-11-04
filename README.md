@@ -239,10 +239,10 @@
 - **代码结构（分层，依赖单向，无回边；每个模块一句话说清职责，纯逻辑均可独立单测）**：
   - 入口层：`main.py`（≤150 行，只注册命令/工具）→ `app/`（`container.py` 唯一装配、`handlers.py` 三入口、`diagnostics.py` 配置新鲜度）
   - 编排层：`services/`（`reading.py` 占卜流水线、`render.py` 渲染与图片生命周期、`daily.py` 今日缓存、`gating.py` 限流闸门、`daily_store.py` 单键记录、`singleflight.py` 同键去重）
-  - 适配层：`adapters/`（`astrbot_io.py` KV 与消息、`presenter.py` 有序发送、`deliver.py` 分段、`clock.py` 日期边界、`kv_utils.py` KV 原语）
-  - AI 层：`ai/`（`chain.py` 候选链、`budget.py` 预算、`prompts.py` / `persona.py` / `parse.py` / `hardening.py`）
+  - 适配层：`adapters/`（`astrbot_io.py` KV 与消息、`event.py` 事件 DTO / 投递能力、`deliver.py` 分段、`presenter.py` 有序发送、`llm.py` Provider 网关、`clock.py` 日期边界、`kv_utils.py` KV 原语、`log.py` 中立日志绑定）
+  - AI 层：`ai/`（`chain.py` 候选链、`gateway.py` Provider 端口、`budget.py` 预算、`prompts.py` / `persona.py` / `parse.py` / `hardening.py`）
   - 渲染实现：`render/`（`layout` / `assets` / `draw` / `store` / `fonts`）
-  - 纯逻辑层：`core/`（`models` / `draw` / `ports` / `intent` / `identity` / `limiter` / `spreads` / `dailylines` / `tarot_data` / `texts` / `config` / `settings`，除日志出口 `log.py` 外不 import astrbot；判据是「能否独立单测」）
+  - 纯逻辑层：`core/`（`dto` / `models` / `draw` / `ports` / `intent` / `identity` / `limiter` / `spreads` / `dailylines` / `tarot_data` / `texts` / `config` / `settings`，不 import astrbot——日志走中立门面 `log.py`；判据是「能否独立单测」）
 - **设计原则（本羽给自己定下的三条）**：① 任何存储/渲染/模型失败都不阻塞主流程（`adapters/kv_utils` 吞异常、渲染回退文字版、AI 回退本地牌义，逐级降级）；② 确定性优先——今日固定牌/解读/签文同人同日同牌相同，惊喜感由 AI 人设化口吻承担；③ 解读格式协议（【第N张·位置】标记）单源在 `ai/prompts`，`adapters/deliver` 切段与 `ai/hardening` 校验共用同一正则
 - **取舍与踩坑记录**：为什么这么实现、当初踩过什么，按主题记在 [`docs/design-notes/`](docs/design-notes/README.md)（一个主题一个文件）；代码注释只保留当前规则与该主题的指路
 - 牌库完整内置于 `core/tarot_data.py`，牌面图片素材位于 `assets/`（幻星集 78 张牌；牌背 `Extra/背景.png` 在素材包里保留，当前渲染以本签牌面做底、不读这张；素材以 WebP 格式内置，同名 `.png` 存在时优先用 PNG，其次 `.webp` / `.jpg`）

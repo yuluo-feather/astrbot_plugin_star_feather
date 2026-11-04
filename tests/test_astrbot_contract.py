@@ -7,7 +7,8 @@
 conftest，import 到的才是真框架。
 
 **口径来源（不许手抄名单，两处都是现成事实）**：
-- 运行时依赖：插件根 `*.py` 里 `from astrbot... import ...` 的每一条（我们真正要的面）；
+- 运行时依赖：插件目录下所有运行时 `.py`（排除 `tests` / `tools` / `scripts`）里
+  `from astrbot... import ...` 的每一条（我们真正要的面）；
 - 打桩面：conftest 里 `_mk_module("astrbot...", 名字=...)` 的名单。2026-11-01 起插件
   不再用 `from astrbot.api.all import *`，运行时依赖已能逐条解析，桩名单只作补充。
 
@@ -34,10 +35,21 @@ import pytest
 
 _TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 _PLUGIN_ROOT = os.path.dirname(_TESTS_DIR)
+_SKIP_DIRS = {"tests", "scripts", "tools", "__pycache__", ".git", ".ruff_cache",
+              ".pytest_cache", ".mypy_cache"}
+
+
+def _runtime_sources():
+    """插件目录下所有运行时 .py（测试/工具/缓存目录不算我们依赖框架的面）。"""
+    for cur, dirs, files in os.walk(_PLUGIN_ROOT):
+        dirs[:] = sorted(d for d in dirs if d not in _SKIP_DIRS)
+        for name in sorted(files):
+            if name.endswith(".py"):
+                yield os.path.join(cur, name)
 
 
 def _imports_from_framework(path: str) -> dict:
-    """插件根模块里 `from astrbot... import X` 的点名要求：{模块: {名字}}。
+    """插件运行时模块里 `from astrbot... import X` 的点名要求：{模块: {名字}}。
 
     星导入（`import *`）没有名字可列，跳过——那份面由 conftest 桩名单兜（见文件头）。
     """
@@ -76,13 +88,11 @@ def _stubbed_surface(path: str) -> dict:
 
 
 def required_surface() -> dict:
-    """守全面：插件根所有 .py 的框架导入 ∪ conftest 的桩名单。"""
+    """守全面：插件目录下所有运行时 .py 的框架导入 ∪ conftest 的桩名单。"""
     want: dict[str, set[str]] = {}
-    for name in sorted(os.listdir(_PLUGIN_ROOT)):
-        if name.endswith(".py"):
-            for mod, names in _imports_from_framework(
-                    os.path.join(_PLUGIN_ROOT, name)).items():
-                want.setdefault(mod, set()).update(names)
+    for path in _runtime_sources():
+        for mod, names in _imports_from_framework(path).items():
+            want.setdefault(mod, set()).update(names)
     for mod, names in _stubbed_surface(os.path.join(_TESTS_DIR, "conftest.py")).items():
         want.setdefault(mod, set()).update(names)
     return want
@@ -192,8 +202,13 @@ def _probe_report() -> dict:
 
 def test_surface_sources_are_parsable():
     """口径来源解析得出东西（解析失效=守卫空转，直接红）。本机无需框架即可跑。"""
+    paths = list(_runtime_sources())
+    assert any(p.endswith(os.path.join("adapters", "deliver.py")) for p in paths), (
+        "运行时扫描没走到适配器子包，契约守卫会漏掉子包导入：" + str(paths))
     want = required_surface()
     assert "astrbot.api.star" in want, "插件根没解析出框架导入？口径来源失效：" + str(want)
+    assert "astrbot.api.message_components" in want, (
+        "子包里的 message_components 导入没进清单：" + str(want))
     assert sum(len(v) for v in want.values()) >= 5, "框架面太少，解析多半失效了：" + str(want)
     assert declared_range(), "metadata.yaml 里没取到 astrbot_version"
 

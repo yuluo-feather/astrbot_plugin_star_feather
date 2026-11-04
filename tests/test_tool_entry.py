@@ -1,6 +1,6 @@
 """工具入口单测：自然语言入口的直发约定与早退分支。
 
-工具入口仍保持「event.send 直发 + 结尾 yield 字符串」：yield MessageEventResult
+工具入口仍保持「适配器直发 + 结尾 yield 字符串」：yield MessageEventResult
 或 None 会让 Agent Loop 判无返回值，收口钩子不触发、群聊防并发门闩死锁。
 """
 import asyncio

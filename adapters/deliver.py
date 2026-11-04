@@ -105,10 +105,9 @@ class Deliverer:
         """发送占卜结果。plain_text: callable(formation, positions, picks) -> str，
         生成无 AI 解读时的本地牌义兜底文案。
         preface: 牌面之后的独立前置行（正常路径是「牌灵的话」；亦承接洗牌提示
-        独立发送失败时的降级并入），排在图片之后、解读段之前。产出统一为单次
-        yield——两个入口的消费方式不同：工具入口只取最后一个 yield 的值
-        （asyncgen 取末值），命令入口则在 handlers.command_entry 里经 Presenter 直发；
-        单次 yield 保证两边都只发一份结果。
+        独立发送失败时的降级并入），排在图片之后、解读段之前。
+        产出可能不止一条：正文一条，免责声明单独一条（forward 下是卡片里的独立节点）；
+        两个入口都经 Presenter 消费全部 yield，发送顺序由 await 保证。
         收尾句不带在这里：命令入口在 ReadingService.run 之后独立直发（不入合并转发），
         工具入口收尾由 Agent Loop 的 LLM 回复承担——本分发器只发结果本体。
         """

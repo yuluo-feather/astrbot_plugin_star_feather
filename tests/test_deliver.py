@@ -74,7 +74,7 @@ class TestSplitSections:
 
 
 class TestDeliverEpilogue:
-    """Deliverer 不再承接收尾句（收尾改由 handlers.command_entry 独立直发 / LLM 回复承担），
+    """Deliverer 不再承接收尾句（收尾改由 Presenter 在结果后独立发送 / LLM 回复承担），
     本类只验证：不传收尾时结果内容不受影响、无 ✨ 收尾句混入。"""
 
     @staticmethod
@@ -131,7 +131,7 @@ class TestDeliverEpilogue:
 
 
 class TestNoAiFallback:
-    """没有 AI 解读时也走同一套末尾规则：本地牌义之后追加免责声明。"""
+    """没有 AI 解读时也走同一套末尾规则：本地牌义之后单独发送免责声明。"""
 
     def test_no_ai_fallback_appends_disclaimer(self):
         evt = TestDeliverEpilogue._evt()
