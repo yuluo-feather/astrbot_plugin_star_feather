@@ -11,6 +11,8 @@ const state = {
   listIndexedTotal: 0, listShown: 0, listTruncated: false,
 };
 const thumbCache = new Map();
+const CARD_BACK_ID = "__back__";
+let cardBackURL = "";
 
 const SUIT_NAMES = {
   major: "大阿卡纳", wands: "权杖", cups: "圣杯", swords: "宝剑", pentacles: "星币",
@@ -245,7 +247,29 @@ const observer = new IntersectionObserver((entries) => {
   }
 }, { rootMargin: "160px" });
 
+function demoBackURL(width) {
+  const w = width;
+  const h = Math.round(width * 2);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"
+      viewBox="0 0 ${w} ${h}">
+    <defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#171532"/><stop offset="1" stop-color="#3a2440"/>
+    </linearGradient></defs>
+    <rect width="${w}" height="${h}" rx="${Math.round(w * 0.08)}" fill="url(#bg)"/>
+    <rect x="${w * 0.06}" y="${h * 0.03}" width="${w * 0.88}" height="${h * 0.94}"
+          rx="${Math.round(w * 0.05)}" fill="none" stroke="#e2b85f"
+          stroke-opacity="0.55" stroke-width="${Math.max(1, Math.round(w * 0.012))}"/>
+    <path d="M ${w / 2} ${h * 0.34} L ${w * 0.60} ${h * 0.50}
+             L ${w / 2} ${h * 0.66} L ${w * 0.40} ${h * 0.50} Z"
+          fill="#e2b85f" opacity="0.85"/>
+    <circle cx="${w / 2}" cy="${h * 0.50}" r="${Math.round(w * 0.035)}"
+            fill="#171532" opacity="0.6"/>
+  </svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
 function demoThumbURL(cardId, upright, width) {
+  if (cardId === CARD_BACK_ID) return demoBackURL(width);
   const name = (DEMO_CARDS.find((card) => card.id === cardId) || {}).cn || cardId;
   const text = String(name).replace(/[<>&]/g, (c) =>
     ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
@@ -288,10 +312,24 @@ async function thumbURL(cardId, upright, width) {
   return url;
 }
 
+async function ensureCardBack(width = 150) {
+  if (cardBackURL) return cardBackURL;
+  const url = await thumbURL(CARD_BACK_ID, true, width);
+  if (!url) return "";
+  await new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = resolve;
+    img.onerror = reject;
+    img.src = url;
+  });
+  cardBackURL = url;
+  return url;
+}
 async function loadThumb(img) {
   if (img.dataset.loaded) return;
   img.dataset.loaded = "1";
   const holder = img.closest(".pick-thumb");
+  const card = img.closest(".pick-card");
   try {
     const url = await thumbURL(img.dataset.cardId, img.dataset.upright === "1",
                               Number(img.dataset.width));
@@ -300,11 +338,13 @@ async function loadThumb(img) {
     // 解码完成后再揭开：预览卡的占位层只在真正能画出图时退场
     await img.decode();
     holder?.classList.add("thumb-ready");
+    card?.classList.add("card-ready");
   } catch (error) {
     console.warn("card-image failed", img.dataset.cardId, error);
     img.classList.add("thumb-error");
     img.alt = "图片加载失败";
     holder?.classList.add("thumb-ready");
+    card?.classList.add("card-ready");
   }
 }
 
@@ -573,6 +613,7 @@ async function loadPreviewForm() {
     select.append(option);
   }
   select.dataset.ready = "1";
+  ensureCardBack().catch(() => {});
 }
 
 async function drawPreview() {
@@ -662,12 +703,25 @@ function renderPreview({ animate = false } = {}) {
   preview.picks.forEach((pick, index) => {
     const card = el("article", "pick-card");
     if (animate) {
-      card.classList.add("pick-card-reveal");
-      card.style.animationDelay = `${index * 90}ms`;
+      card.classList.add("flip-animate");
+      card.style.setProperty("--flip-delay", `${index * 90}ms`);
     }
     const figure = el("div", "pick-figure");
     const thumb = el("div", "pick-thumb");
-    thumb.append(makeThumb(pick.id, pick.upright, 150, pick.cn));
+    const flip = el("div", "pick-flip");
+    const back = el("div", "pick-face pick-back");
+    if (cardBackURL) back.style.backgroundImage = `url("${cardBackURL}")`;
+    const front = el("div", "pick-face pick-front");
+    front.append(makeThumb(pick.id, pick.upright, 150, pick.cn));
+    flip.append(back, front);
+    thumb.append(flip);
+    if (animate) {
+      if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        card.classList.add("card-flipped");
+      } else {
+        front.addEventListener("animationend", () => card.classList.add("card-flipped"), { once: true });
+      }
+    }
     figure.append(thumb);
     figure.append(el("span", "pick-pos",
                      `${index + 1} · ${preview.positions[index] || ""}`));
@@ -692,6 +746,14 @@ function renderPreview({ animate = false } = {}) {
   });
   box.append(grid);
   box.append(buildAiBlock(preview, false));
+  if (animate) {
+    ensureCardBack().then((url) => {
+      if (!url) return;
+      box.querySelectorAll(".pick-back").forEach((node) => {
+        node.style.backgroundImage = `url("${url}")`;
+      });
+    }).catch(() => {});
+  }
 }
 
 function buildAiBlock(preview, animate = false) {

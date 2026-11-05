@@ -201,6 +201,22 @@ def test_card_image_is_webp_and_reversed_differs():
     assert ui.card_image(PICK["card"]["id"], True, 120) is upright  # 同尺寸只编码一次
 
 
+def test_card_back_image_uses_the_webp_asset():
+    from data.plugins.astrbot_plugin_star_feather.render.assets import card_back_path
+
+    path = card_back_path()
+    assert path.endswith("背景.webp")
+    _, ui = _make({})
+    back = ui.card_image("__back__", True, 120)
+    assert back["mime"] == "image/webp"
+    assert back["width"] == 120
+    raw = base64.b64decode(back["base64"])
+    with Image.open(io.BytesIO(raw)) as img:
+        assert img.size == (120, back["height"])
+    # 牌背不随正逆位旋转，且同尺寸复用同一份缓存
+    assert ui.card_image("__back__", False, 120) is back
+
+
 def test_card_image_rejects_unknown_card():
     _, ui = _make({})
     with pytest.raises(FileNotFoundError):

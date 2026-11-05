@@ -8,6 +8,7 @@ import os
 
 _ASSET_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
 _MANIFEST_PATH = os.path.join(_ASSET_ROOT, "manifest.json")
+_CARD_BACK_STEM = os.path.join(_ASSET_ROOT, "Extra", "背景")
 
 
 def _load_manifest() -> dict:
@@ -49,6 +50,19 @@ def _asset_path_by_id(card_id: str | None) -> str:
 def asset_path_by_id(card_id: str) -> str:
     """公开入口：牌 id -> 素材绝对路径（可视化视图的缩略图也走这一处）。"""
     return _asset_path_by_id(card_id)
+
+
+def card_back_path() -> str:
+    """牌背素材绝对路径：优先 WebP（约 59 KB），没有才退 PNG（约 2.1 MB）。
+
+    牌背不在 manifest 的牌 id 表里，单独按文件名解析；顺序刻意与牌面相反——
+    同名的 PNG 是高清原图，WebUI 缩略图不需要它。
+    """
+    for ext in (".webp", ".png"):
+        candidate = _CARD_BACK_STEM + ext
+        if os.path.isfile(candidate):
+            return candidate
+    raise FileNotFoundError("牌背素材缺失: assets/Extra/背景.webp")
 
 
 def _asset_path(card) -> str:

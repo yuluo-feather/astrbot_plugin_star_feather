@@ -22,10 +22,11 @@ from ..core.draw import draw, render_detail
 from ..core.settings import STRUCTURE_CHECK_STRICT
 from ..core.spreads import FORMATIONS
 from ..core.tarot_data import TAROT_CARDS
-from ..render.assets import asset_path_by_id
+from ..render.assets import asset_path_by_id, card_back_path
 
 PLUGIN_NAME = "astrbot_plugin_star_feather"
 _CARDS_BY_ID = {c["id"]: c for c in TAROT_CARDS}
+_CARD_BACK_ID = "__back__"
 _MAX_LIST = 200
 _MAX_WIDTH = 640
 _THUMB_CACHE_MAX = 96
@@ -321,16 +322,20 @@ class WebUI:
         }
 
     def card_image(self, card_id: str, upright: bool = True, width: int = 180) -> dict:
-        """牌面缩略图（WebP base64）；同一尺寸只编码一次。"""
-        if card_id not in _CARDS_BY_ID:
+        """牌面缩略图（WebP base64）；同一尺寸只编码一次。`__back__` 返回牌背。"""
+        is_back = card_id == _CARD_BACK_ID
+        if not is_back and card_id not in _CARDS_BY_ID:
             raise FileNotFoundError(f"没有这张牌: {card_id!r}")
+        if is_back:
+            upright = True  # 牌背不随正逆位旋转
         width = max(60, min(int(width or 180), _MAX_WIDTH))
         key = (card_id, bool(upright), width)
         cached = self._thumbs.get(key)
         if cached is not None:
             self._thumbs.move_to_end(key)
             return cached
-        with Image.open(asset_path_by_id(card_id)) as src:
+        path = card_back_path() if is_back else asset_path_by_id(card_id)
+        with Image.open(path) as src:
             img = src.convert("RGBA")
         if not upright:
             img = img.rotate(180)

@@ -825,7 +825,7 @@ h1 {
   .card-cell:active, .seg button:active, .modal-close:active { transform: none; }
 }
 
-/* ---- 预览揭示：错峰淡入 + 缩略图占位（PR 2） ---- */
+/* ---- 预览揭示：3D 翻牌 + 缩略图占位（PR 3） ---- */
 
 .pick-thumb {
   position: relative;
@@ -834,6 +834,7 @@ h1 {
   border-radius: 8px;
   overflow: hidden;
   background: var(--panel-2);
+  perspective: 720px;
 }
 
 .pick-thumb .thumb {
@@ -859,11 +860,94 @@ h1 {
   to { background-position: -200% 0; }
 }
 
-.pick-card-reveal { animation: pick-in 300ms ease-out both; }
+.pick-flip {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+}
 
-@keyframes pick-in {
-  from { opacity: 0; transform: translateY(6px); }
+.pick-face {
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.pick-back {
+  transform: rotateY(-90deg);
+  opacity: 0;
+  background: linear-gradient(145deg, #171532, #3a2440) center / cover no-repeat;
+}
+
+.pick-front {
+  transform: rotateY(0deg);
+  opacity: 1;
+}
+
+.pick-card.flip-animate .pick-back {
+  transform: rotateY(0deg);
+  opacity: 1;
+}
+
+.pick-card.flip-animate .pick-front {
+  transform: rotateY(90deg);
+  opacity: 0;
+}
+
+.pick-card.flip-animate .pick-thumb.thumb-ready .pick-back {
+  animation: back-out 300ms ease-in both;
+  animation-delay: var(--flip-delay, 0ms);
+}
+
+.pick-card.flip-animate .pick-thumb.thumb-ready .pick-front {
+  animation: front-in 300ms ease-out both;
+  animation-delay: var(--flip-delay, 0ms);
+}
+
+@keyframes back-out {
+  from { transform: rotateY(0deg); opacity: 1; }
+  to { transform: rotateY(-90deg); opacity: 0; }
+}
+
+@keyframes front-in {
+  from { transform: rotateY(90deg); opacity: 0; }
+  to { transform: rotateY(0deg); opacity: 1; }
+}
+
+.pick-card.flip-animate .pick-body { opacity: 0; }
+
+.pick-card.flip-animate.card-ready .pick-body {
+  animation: body-in 200ms ease-out both;
+  animation-delay: calc(var(--flip-delay, 0ms) + 300ms);
+}
+
+@keyframes body-in {
+  from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: none; }
+}
+
+.pick-card.flip-animate .pick-thumb:not(.thumb-ready) { animation: none; }
+
+/* 翻牌结束后拍平成普通 2D 图层：背面退场，正面不再留在 3D 合成上下文里 */
+.pick-card.flip-animate.card-flipped .pick-thumb { perspective: none; }
+
+.pick-card.flip-animate.card-flipped .pick-flip { transform-style: flat; }
+
+.pick-card.flip-animate.card-flipped .pick-face {
+  backface-visibility: visible;
+  -webkit-backface-visibility: visible;
+}
+
+.pick-card.flip-animate.card-flipped .pick-thumb.thumb-ready .pick-front {
+  transform: none;
+  opacity: 1;
+  animation: none;
+}
+
+.pick-card.flip-animate.card-flipped .pick-thumb.thumb-ready .pick-back {
+  display: none;
 }
 
 .ai-result.ai-reveal { animation: ai-in 200ms ease-out; }
@@ -874,7 +958,24 @@ h1 {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pick-card-reveal, .ai-result.ai-reveal { animation: none; }
+  .pick-card.flip-animate .pick-back,
+  .pick-card.flip-animate .pick-thumb.thumb-ready .pick-back {
+    transform: rotateY(-90deg);
+    opacity: 0;
+    animation: none;
+  }
+  .pick-card.flip-animate .pick-front,
+  .pick-card.flip-animate .pick-thumb.thumb-ready .pick-front {
+    transform: rotateY(0deg);
+    opacity: 1;
+    animation: none;
+  }
+  .pick-card.flip-animate .pick-body,
+  .pick-card.flip-animate.card-ready .pick-body {
+    opacity: 1;
+    animation: none;
+  }
   .pick-thumb:not(.thumb-ready) { animation: none; }
   .pick-thumb .thumb { transition: none; }
+  .ai-result.ai-reveal { animation: none; }
 }
