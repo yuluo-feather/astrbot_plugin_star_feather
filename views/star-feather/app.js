@@ -432,6 +432,7 @@ function renderCards() {
 }
 
 let cardDetailSeq = 0;
+let cardImageSeq = 0;
 
 async function openCardDetail(card) {
   const seq = ++cardDetailSeq;
@@ -463,12 +464,16 @@ function renderCardDetail() {
     button.classList.toggle("active", button.dataset.upright === (upright ? "1" : "0"));
   }
 
+  const imageSeq = ++cardImageSeq;
   const img = $("card-modal-img");
   img.alt = detail.cn;
   img.removeAttribute("src");
   thumbURL(detail.id, upright, 240).then((url) => {
+    if (imageSeq !== cardImageSeq) return;  // 已被新的牌/朝向/关闭取代
     if (url) img.src = url;
-  }).catch(() => showToast("牌面加载失败"));
+  }).catch(() => {
+    if (imageSeq === cardImageSeq) showToast("牌面加载失败");
+  });
 
   const body = $("card-modal-body");
   body.replaceChildren();
@@ -492,6 +497,7 @@ function renderCardDetail() {
 
 function closeCardDetail() {
   cardDetailSeq += 1;  // 关掉后，未返回的详情请求作废
+  cardImageSeq += 1;   // 未返回的缩略图请求同样作废
   $("card-modal").classList.add("hidden");
   state.cardDetail = null;
 }
@@ -516,6 +522,7 @@ async function loadSpreads() {
 
 // ---- 占卜预览：本地抽牌，AI 解读只在点击后请求 ----
 let previewBusy = false;
+let previewAiSeq = 0;
 
 async function loadPreviewForm() {
   const spreads = await ensureSpreads();
@@ -552,6 +559,7 @@ async function drawPreview() {
       ai: null,
       aiError: "",
     };
+    previewAiSeq += 1;  // 新抽牌作废上一轮还在跑的 AI 请求
     renderPreview();
   } catch (error) {
     showToast(error.message || "抽牌失败");
@@ -565,6 +573,7 @@ async function drawPreview() {
 async function requestPreviewAI() {
   const preview = state.preview;
   if (!preview || !preview.picks.length) return;
+  const seq = ++previewAiSeq;
   const button = $("preview-ai");
   button.disabled = true;
   button.textContent = "解读中…";
@@ -575,13 +584,17 @@ async function requestPreviewAI() {
       question: preview.question,
       picks: preview.picks.map((pick) => ({ id: pick.id, upright: pick.upright })),
     });
+    if (seq !== previewAiSeq || state.preview !== preview) return;
     preview.ai = data;
   } catch (error) {
+    if (seq !== previewAiSeq || state.preview !== preview) return;
     preview.aiError = error.message || "AI 解读失败";
   } finally {
-    button.textContent = "AI 深度解读";
-    renderPreview();
-    updatePreviewAIButton();
+    if (seq === previewAiSeq) {
+      button.textContent = "AI 深度解读";
+      renderPreview();
+      updatePreviewAIButton();
+    }
   }
 }
 
