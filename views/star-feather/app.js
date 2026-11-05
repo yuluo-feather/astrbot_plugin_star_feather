@@ -291,14 +291,20 @@ async function thumbURL(cardId, upright, width) {
 async function loadThumb(img) {
   if (img.dataset.loaded) return;
   img.dataset.loaded = "1";
+  const holder = img.closest(".pick-thumb");
   try {
     const url = await thumbURL(img.dataset.cardId, img.dataset.upright === "1",
                               Number(img.dataset.width));
-    if (url) img.src = url;
+    if (!url) throw new Error("empty thumbnail");
+    img.src = url;
+    // 解码完成后再揭开：预览卡的占位层只在真正能画出图时退场
+    await img.decode();
+    holder?.classList.add("thumb-ready");
   } catch (error) {
     console.warn("card-image failed", img.dataset.cardId, error);
     img.classList.add("thumb-error");
     img.alt = "图片加载失败";
+    holder?.classList.add("thumb-ready");
   }
 }
 
@@ -588,7 +594,7 @@ async function drawPreview() {
       ai: null,
       aiError: "",
     };
-    renderPreview();
+    renderPreview({ animate: true });
   } catch (error) {
     showToast(error.message || "抽牌失败");
   } finally {
@@ -620,7 +626,7 @@ async function requestPreviewAI() {
   } finally {
     if (seq === previewAiSeq) {
       button.textContent = "AI 深度解读";
-      renderPreview();
+      updateAiBlock({ animate: true });
       updatePreviewAIButton();
     }
   }
@@ -637,7 +643,7 @@ function updatePreviewAIButton() {
     : "AI 已关闭，预览只显示内置牌义；不消耗次数、不写入缓存、不会发送到聊天";
 }
 
-function renderPreview() {
+function renderPreview({ animate = false } = {}) {
   const box = $("preview-result");
   box.replaceChildren();
   const preview = state.preview;
@@ -655,8 +661,14 @@ function renderPreview() {
   const grid = el("div", "preview-cards");
   preview.picks.forEach((pick, index) => {
     const card = el("article", "pick-card");
+    if (animate) {
+      card.classList.add("pick-card-reveal");
+      card.style.animationDelay = `${index * 90}ms`;
+    }
     const figure = el("div", "pick-figure");
-    figure.append(makeThumb(pick.id, pick.upright, 150, pick.cn));
+    const thumb = el("div", "pick-thumb");
+    thumb.append(makeThumb(pick.id, pick.upright, 150, pick.cn));
+    figure.append(thumb);
     figure.append(el("span", "pick-pos",
                      `${index + 1} · ${preview.positions[index] || ""}`));
     card.append(figure);
@@ -679,8 +691,12 @@ function renderPreview() {
     grid.append(card);
   });
   box.append(grid);
+  box.append(buildAiBlock(preview, false));
+}
 
+function buildAiBlock(preview, animate = false) {
   const ai = el("section", "ai-result");
+  if (animate) ai.classList.add("ai-reveal");
   if (preview.ai) {
     ai.append(el("h3", "", "AI 深度解读"));
     ai.append(el("p", "ai-text", preview.ai.text || ""));
@@ -691,7 +707,14 @@ function renderPreview() {
       ? "点上方「AI 深度解读」获取结构化解读。"
       : "AI 深度解读已在配置中关闭，以上是内置牌义。"));
   }
-  box.append(ai);
+  return ai;
+}
+
+function updateAiBlock({ animate = false } = {}) {
+  const box = $("preview-result");
+  const old = box.querySelector(".ai-result");
+  if (!old || !state.preview) return;
+  old.replaceWith(buildAiBlock(state.preview, animate));
 }
 
 function renderSpreads() {

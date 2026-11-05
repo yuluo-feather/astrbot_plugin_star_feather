@@ -824,3 +824,57 @@ h1 {
   .ghost:active, .tab:active, .primary:active:not(:disabled), .user:active,
   .card-cell:active, .seg button:active, .modal-close:active { transform: none; }
 }
+
+/* ---- 预览揭示：错峰淡入 + 缩略图占位（PR 2） ---- */
+
+.pick-thumb {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 2;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--panel-2);
+}
+
+.pick-thumb .thumb {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.pick-thumb.thumb-ready .thumb { opacity: 1; }
+
+.pick-thumb:not(.thumb-ready) {
+  background: linear-gradient(100deg,
+    var(--panel-2) 30%, rgba(226, 184, 95, 0.10) 50%, var(--panel-2) 70%);
+  background-size: 200% 100%;
+  animation: thumb-shimmer 1.4s linear infinite;
+}
+
+@keyframes thumb-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+.pick-card-reveal { animation: pick-in 300ms ease-out both; }
+
+@keyframes pick-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+.ai-result.ai-reveal { animation: ai-in 200ms ease-out; }
+
+@keyframes ai-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pick-card-reveal, .ai-result.ai-reveal { animation: none; }
+  .pick-thumb:not(.thumb-ready) { animation: none; }
+  .pick-thumb .thumb { transition: none; }
+}
