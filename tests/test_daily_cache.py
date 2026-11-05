@@ -1668,3 +1668,12 @@ class TestDailyUserIndex:
         asyncio.run(df.pick_cached("u1", "20260828"))
         assert asyncio.run(df.users_for("20260828")) == ["u1"]
         assert ctx.index_puts == 2
+
+    def test_in_memory_index_is_pruned_on_rollover(self):
+        """跨天后旧日期的内存记账必须清掉，避免长期运行越攒越多。"""
+        kv = {}
+        df = self._df(kv)
+        asyncio.run(df.pick_cached("u1", "20260827"))
+        assert df._indexed == {"u1"}
+        asyncio.run(df.pick_cached("u2", "20260828"))
+        assert df._indexed == {"u2"}

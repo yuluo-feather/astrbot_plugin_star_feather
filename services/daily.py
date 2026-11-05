@@ -143,8 +143,9 @@ class DailyFortune:
         self.structure_check = structure_check
         # 旧版 sf_spirit_* 键只删一次：合并成单键后它们不会再被读，但会永久占着
         self._legacy_cleaned: set[str] = set()
-        # 本进程已登记进日索引的（日期, 用户）：跨天要重新登记，故障不记账
-        self._indexed: set[tuple[str, str]] = set()
+        # 本进程今天已登记进日索引的用户：跨天清空，避免 (日期, 用户) 永久累积
+        self._indexed: set[str] = set()
+        self._indexed_day: str = ""
 
     @property
     def prompt_version(self) -> str:
@@ -176,8 +177,12 @@ class DailyFortune:
         写回会把当天名单缩成一个人；写故障则留到下次调用再试——两种情况
         都不记账。
         """
-        stamp = (today, uid)
-        if not uid or stamp in self._indexed:
+        if not uid:
+            return
+        if self._indexed_day != today:
+            self._indexed.clear()
+            self._indexed_day = today
+        if uid in self._indexed:
             return
         raw, ok = await kv_get(self.kv_store, _INDEX_KEY, None, "每日牌运用户索引")
         if not ok:
@@ -191,7 +196,7 @@ class DailyFortune:
             if not await kv_put(self.kv_store, _INDEX_KEY,
                                 {"date": today, "uids": known}, "每日牌运用户索引"):
                 return
-        self._indexed.add(stamp)
+        self._indexed.add(uid)
 
     async def users_for(self, today: str | None = None) -> list[str]:
         """今天有牌运记录的用户（只读；索引缺失或跨天时为空）。"""

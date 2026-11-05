@@ -515,6 +515,11 @@ async function loadPreviewForm() {
   const spreads = await ensureSpreads();
   const select = $("preview-spread");
   if (select.dataset.ready === "1") return;
+  if (!spreads.length) {
+    // 加载失败时不标记 ready，下次进标签页可以重试
+    showToast("牌阵清单加载失败，稍后再试");
+    return;
+  }
   for (const spread of spreads) {
     const option = el("option", "", `${spread.name} · ${spread.positions.length} 张`);
     option.value = spread.name;
