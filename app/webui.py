@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import io
 import random
+from typing import TypedDict
 
 from PIL import Image
 
@@ -28,7 +29,12 @@ _MAX_WIDTH = 640
 
 # 牌阵的适用场景与牌位说明是视图文案：牌位名只从 core/spreads.py 取，
 # 这里只补「这个阵拿来问什么」和每个牌位的一句话含义。
-SPREAD_INFO = {
+class SpreadInfo(TypedDict):
+    scenario: str
+    positions: dict[str, str]
+
+
+SPREAD_INFO: dict[str, SpreadInfo] = {
     "羽签": {
         "scenario": "一句话、一件小事、此刻的状态。抽一张，看当下最关键的那点。",
         "positions": {"你的当下": "此刻最需要被看见的状态"},
@@ -207,11 +213,11 @@ class WebUI:
         """牌阵清单：牌位名只从 FORMATIONS 取，场景说明在这里补。"""
         result = []
         for name, positions in FORMATIONS.items():
-            info = SPREAD_INFO.get(name, {})
-            notes = info.get("positions", {})
+            info = SPREAD_INFO.get(name)
+            notes = info["positions"] if info else {}
             result.append({
                 "name": name,
-                "scenario": info.get("scenario", ""),
+                "scenario": info["scenario"] if info else "",
                 "positions": [{"name": p, "meaning": notes.get(p, "")}
                               for p in positions],
             })
