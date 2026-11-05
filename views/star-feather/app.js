@@ -168,22 +168,343 @@ function showToast(message) {
   if (message) setTimeout(() => toast.classList.remove("show"), 4200);
 }
 
+// 粒子本色是白的；近流星再乘上场景层的 colorn（层 131 青、层 13872 红，其余层没有就是白）
+const METEOR_TINTS = [
+  { rgb: [255, 255, 255], weight: 5 },
+  { rgb: [0, 255, 255], weight: 3 },
+  { rgb: [255, 0, 0], weight: 2 },
+];
+
+function pickMeteorTint() {
+  const total = METEOR_TINTS.reduce((sum, t) => sum + t.weight, 0);
+  let roll = Math.random() * total;
+  for (const t of METEOR_TINTS) {
+    roll -= t.weight;
+    if (roll <= 0) return t.rgb;
+  }
+  return METEOR_TINTS[0].rgb;
+}
+
+// 头部两层：透明度直接就是绘制 alpha（亮度 1 = 贴图原样）
+const GLOW_ALPHA = 0;    // 头部柔光（0 = 关闭）
+const CROSS_ALPHA = 0.3; // 十字
+
+// 预渲染的柔光贴图，按颜色缓存
+const glowCache = new Map();
+
+function glowSprite(rgb) {
+  const key = rgb.join(",");
+  if (glowCache.has(key)) return glowCache.get(key);
+  const canvas = document.createElement("canvas");
+  canvas.width = 64;
+  canvas.height = 64;
+  const g = canvas.getContext("2d");
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, "rgba(255,255,255,1)");
+  grad.addColorStop(0.3, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.6)`);
+  grad.addColorStop(1, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0)`);
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  glowCache.set(key, canvas);
+  return canvas;
+}
+
 function spawnMeteor() {
   const sky = document.querySelector(".sky");
   if (!sky) return;
+  const xPct = 24 + Math.random() * 58;
+  const yPct = Math.random() * 38;
+  const duration = 0.9 + Math.random() * 0.7;
+
   const meteor = el("span", "meteor");
-  meteor.style.left = `${24 + Math.random() * 58}%`;
-  meteor.style.top = `${Math.random() * 38}%`;
-  meteor.style.animationDuration = `${0.9 + Math.random() * 0.7}s`;
+  meteor.style.left = `${xPct}%`;
+  meteor.style.top = `${yPct}%`;
+  meteor.style.animationDuration = `${duration}s`;
   meteor.addEventListener("animationend", () => meteor.remove());
   sky.append(meteor);
+
+  // 金色余晖：沿轨迹撒几颗火星，各自飘散淡出
+  const rad = (32 * Math.PI) / 180;
+  const dirX = Math.cos(rad);
+  const dirY = Math.sin(rad);
+  const startX = (xPct / 100) * window.innerWidth;
+  const startY = (yPct / 100) * window.innerHeight;
+  for (let i = 0; i < 5; i += 1) {
+    const at = 0.12 + i * 0.14;
+    setTimeout(() => {
+      const along = 140 + 320 * at;
+      const ember = el("span", "ember");
+      const size = 2 + Math.random() * 2.5;
+      ember.style.width = `${size}px`;
+      ember.style.height = `${size}px`;
+      ember.style.left = `${startX + dirX * along + (Math.random() - 0.5) * 16}px`;
+      ember.style.top = `${startY + dirY * along + (Math.random() - 0.5) * 16}px`;
+      ember.style.setProperty("--ex", `${(Math.random() - 0.5) * 18}px`);
+      ember.style.setProperty("--ey", `${-14 - Math.random() * 20}px`);
+      ember.style.animationDuration = `${0.8 + Math.random() * 0.6}s`;
+      ember.addEventListener("animationend", () => ember.remove());
+      // 后台标签页里动画不推进时兜底清理
+      setTimeout(() => ember.remove(), 1800);
+      sky.append(ember);
+    }, at * duration * 1000);
+  }
+
+  const pool = $("water-meteors");
+  if (!pool) return;
+  const horizonY = parseFloat(
+    getComputedStyle(document.documentElement).getPropertyValue("--horizon-y"),
+  ) || window.innerHeight * 0.7;
+  const waterH = window.innerHeight - horizonY;
+  if (waterH <= 0) return;
+  // 倒影：以水线为界做垂直镜像并按水面高度压缩，越高的流星倒影越贴近水线
+  const echo = el("span", "meteor reflect");
+  echo.style.left = `${xPct}%`;
+  echo.style.top = `${(waterH * (1 - yPct / 68)).toFixed(1)}px`;
+  echo.style.animationDuration = `${duration}s`;
+  echo.addEventListener("animationend", () => echo.remove());
+  pool.append(echo);
 }
 
-function scheduleMeteor() {
+// 近流星的星芒贴图（对应原场景 star_shine 子粒子）
+const starSprite = new Image();
+starSprite.src = "./assets/star.webp";
+
+// 近流星：canvas 渲染。按「重力 + 阻力」逐帧积分，尾迹沿真实路径撒柔光精灵
+// （原场景 ropetrail 的做法：精灵重叠、加法混合累积出亮芯）。
+class NearMeteors {
+  constructor(skyCanvas, waterCanvas) {
+    this.sky = skyCanvas;
+    this.water = waterCanvas;
+    this.ctx = skyCanvas.getContext("2d");
+    this.wctx = waterCanvas ? waterCanvas.getContext("2d") : null;
+    this.list = [];
+    this.dpr = 1;
+    this.vw = 0;
+    this.vh = 0;
+    this.horizon = 0;
+    this.waterH = 0;
+    this.running = false;
+    this.last = 0;
+    this.resize();
+  }
+
+  resize() {
+    this.dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.vw = window.innerWidth;
+    this.vh = window.innerHeight;
+    const hz = parseFloat(
+      getComputedStyle(document.documentElement).getPropertyValue("--horizon-y"),
+    );
+    this.horizon = Number.isFinite(hz) ? hz : this.vh * 0.7;
+    this.waterH = Math.max(0, this.vh - this.horizon);
+    this.fit(this.sky, this.vw, this.vh);
+    if (this.water) this.fit(this.water, this.vw, this.waterH);
+    this.paint();
+  }
+
+  fit(canvas, w, h) {
+    canvas.width = Math.round(w * this.dpr);
+    canvas.height = Math.round(h * this.dpr);
+    canvas.getContext("2d").setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+  }
+
+  spawn() {
+    if (!this.vw || !this.vh) this.resize();
+    if (!this.vw || !this.vh) return;
+    if (this.list.length > 5) return;
+    const angle = ((8 + Math.random() * 6) * Math.PI) / 180;
+    const speed = 220 + Math.random() * 30;
+    this.list.push({
+      x: this.vw * (0.16 + Math.random() * 0.56),
+      y: this.vh * (0.02 + Math.random() * 0.12),
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      age: 0,
+      life: 2.3 + Math.random() * 0.3,
+      tint: pickMeteorTint(),
+      trail: [],
+      spin: Math.random() * Math.PI * 2,
+    });
+    this.start();
+  }
+
+  start() {
+    if (this.running) return;
+    this.running = true;
+    this.last = performance.now();
+    requestAnimationFrame((t) => this.frame(t));
+  }
+
+  frame(now) {
+    const dt = Math.min((now - this.last) / 1000, 0.05);
+    this.last = now;
+    this.step(dt);
+    this.paint();
+    if (this.list.length) {
+      requestAnimationFrame((t) => this.frame(t));
+    } else {
+      this.running = false;
+    }
+  }
+
+  step(dt) {
+    const k = 0.1;
+    const g = 70;
+    for (const m of this.list) {
+      m.age += dt;
+      const damp = 1 - k * dt;
+      m.vx *= damp;
+      m.vy = m.vy * damp + g * dt;
+      m.x += m.vx * dt;
+      m.y += m.vy * dt;
+      m.trail.push({ x: m.x, y: m.y });
+      // 尾迹只保留最近 255px
+      let acc = 0;
+      let cut = 0;
+      for (let i = m.trail.length - 1; i > 0; i -= 1) {
+        acc += Math.hypot(
+          m.trail[i].x - m.trail[i - 1].x,
+          m.trail[i].y - m.trail[i - 1].y,
+        );
+        if (acc > 255) {
+          cut = i;
+          break;
+        }
+      }
+      if (cut > 0) m.trail.splice(0, cut);
+    }
+    this.list = this.list.filter(
+      (m) => m.age < m.life && m.x < this.vw + 300 && m.y < this.horizon - 4,
+    );
+  }
+
+  paint() {
+    const ctx = this.ctx;
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.clearRect(0, 0, this.vw, this.vh);
+    ctx.globalCompositeOperation = "lighter";
+    this.paintMeteors(ctx, 1);
+
+    if (this.wctx && this.waterH > 0) {
+      const w = this.wctx;
+      const ratio = this.waterH / Math.max(this.horizon, 1);
+      w.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      w.clearRect(0, 0, this.vw, this.waterH);
+      w.setTransform(this.dpr, 0, 0, -this.dpr * ratio, 0, this.dpr * this.waterH);
+      w.globalCompositeOperation = "lighter";
+      this.paintMeteors(w, 0.4);
+    }
+
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    if (this.wctx) {
+      this.wctx.globalAlpha = 1;
+      this.wctx.globalCompositeOperation = "source-over";
+    }
+  }
+
+  paintMeteors(ctx, alphaScale) {
+    for (const m of this.list) {
+      const n = m.trail.length;
+      const fade = Math.min(1, m.age / 0.1)
+        * Math.min(1, Math.max(0, (m.life - m.age) / 0.5));
+
+      // 截掉光晕半径（10px）内的点
+      let end = n - 1;
+      while (end > 0) {
+        const dx = m.trail[end].x - m.x;
+        const dy = m.trail[end].y - m.y;
+        if (dx * dx + dy * dy >= 100) break;
+        end -= 1;
+      }
+      if (end > 1) {
+        // 沿路径每 3px 撒一颗柔光精灵，加法混合累积出亮芯
+        const spacing = 3;
+        const dots = [];
+        let carry = 0;
+        for (let i = 1; i <= end; i += 1) {
+          const p0 = m.trail[i - 1];
+          const p1 = m.trail[i];
+          const seg = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+          if (seg <= 0) continue;
+          let at = carry;
+          while (at < seg) {
+            const k = at / seg;
+            dots.push({
+              x: p0.x + (p1.x - p0.x) * k,
+              y: p0.y + (p1.y - p0.y) * k,
+            });
+            at += spacing;
+          }
+          carry = at - seg;
+        }
+        const total = dots.length;
+        if (total > 0) {
+          const sprite = glowSprite(m.tint);
+          for (let i = 0; i < total; i += 1) {
+            const f = total > 1 ? i / (total - 1) : 1;
+            const size = 2.2 + 2.6 * f;
+            const ends = Math.min(1, f / 0.08);
+            ctx.globalAlpha = fade * ends * (0.14 + 0.3 * f) * alphaScale;
+            ctx.drawImage(
+              sprite,
+              dots[i].x - size / 2,
+              dots[i].y - size / 2,
+              size,
+              size,
+            );
+          }
+        }
+      }
+
+      // 头部柔光（GLOW_ALPHA = 0 时跳过）
+      if (GLOW_ALPHA > 0) {
+        const radius = 18;
+        ctx.globalAlpha = fade * GLOW_ALPHA * alphaScale;
+        ctx.drawImage(glowSprite(m.tint), m.x - radius, m.y - radius, radius * 2, radius * 2);
+      }
+
+      // 星芒
+      if (CROSS_ALPHA > 0 && starSprite.complete && starSprite.naturalWidth) {
+        const size = 32;
+        ctx.globalAlpha = fade * CROSS_ALPHA * alphaScale;
+        ctx.save();
+        ctx.translate(m.x, m.y);
+        ctx.rotate(m.spin + m.age * 0.8);
+        ctx.drawImage(starSprite, -size / 2, -size / 2, size, size);
+        ctx.restore();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+let nearField = null;
+
+function initNearMeteors() {
+  const sky = $("meteor-canvas");
+  const water = $("meteor-water");
+  if (!sky || !water) return;
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  nearField = new NearMeteors(sky, water);
+}
+
+function scheduleMeteor(near) {
+  // 近流星停用后，原流星的间隔减半来补数量
+  const delay = near
+    ? 900 + Math.random() * 1100
+    : 800 + Math.random() * 1100;
   setTimeout(() => {
-    spawnMeteor();
-    scheduleMeteor();
-  }, 3600 + Math.random() * 5200);
+    if (near) {
+      if (nearField) nearField.spawn();
+    } else {
+      const bursts = Math.random() < 0.3 ? 2 : 1;
+      for (let i = 0; i < bursts; i += 1) {
+        setTimeout(() => spawnMeteor(), i * (140 + Math.random() * 220));
+      }
+    }
+    scheduleMeteor(near);
+  }, delay);
 }
 
 // 地平线在视口里的位置：与背景 cover 的缩放/居中保持一致，倒影层据此翻转
@@ -197,6 +518,72 @@ function layoutBackdrop() {
   const dy = (vh - imgH * scale) / 2;
   const hy = dy + horizon * scale;
   document.documentElement.style.setProperty("--horizon-y", `${hy.toFixed(1)}px`);
+}
+
+// 星尘：不落，只在原地附近缓慢漂荡，明暗各自呼吸
+function initDust() {
+  const box = $("dust");
+  if (!box || box.childElementCount) return;
+  const count = 56;
+  for (let i = 0; i < count; i += 1) {
+    const mote = el("span", "dust-mote");
+    const size = 1.6 + Math.random() * 2.6;
+    const roll = Math.random();
+    if (roll < 0.12) mote.classList.add("gold");
+    else if (roll < 0.24) mote.classList.add("cyan");
+    mote.style.left = `${Math.random() * 100}%`;
+    mote.style.top = `${Math.random() * 96}%`;
+    mote.style.width = `${size}px`;
+    mote.style.height = `${size}px`;
+    mote.style.setProperty("--dx", `${(Math.random() * 2 - 1) * 4}vw`);
+    mote.style.setProperty("--dy", `${(Math.random() * 2 - 1) * 3}vh`);
+    mote.style.animationDuration = `${16 + Math.random() * 24}s`;
+    mote.style.animationDelay = `${-Math.random() * 30}s`;
+    mote.style.setProperty("--twinkle-duration", `${2.6 + Math.random() * 3.4}s`);
+    mote.style.setProperty("--twinkle-delay", `${-Math.random() * 6}s`);
+    box.append(mote);
+  }
+}
+
+// 风：几道横风带从左侧扫过，配合被吹斜的雪
+function initWind() {
+  const box = $("wind");
+  if (!box || box.childElementCount) return;
+  const count = 10;
+  for (let i = 0; i < count; i += 1) {
+    const gust = el("span", "gust");
+    const duration = 6 + Math.random() * 6;
+    gust.style.top = `${4 + Math.random() * 62}%`;
+    gust.style.width = `${24 + Math.random() * 34}vw`;
+    gust.style.setProperty("--gust-opacity", (0.08 + Math.random() * 0.14).toFixed(2));
+    gust.style.animationDuration = `${duration}s`;
+    gust.style.animationDelay = `${-Math.random() * duration}s`;
+    box.append(gust);
+  }
+}
+
+// 风雪：雪片整体被风往右下吹，途中沿风向摆动
+function initSnow() {
+  const box = $("snow");
+  if (!box || box.childElementCount) return;
+  const count = 72;
+  for (let i = 0; i < count; i += 1) {
+    const flake = el("span", "snowflake");
+    // 近处的雪片更大更亮、落得更快，远处更小更淡，拉开纵深
+    const depth = Math.random();
+    const size = 1.4 + depth * depth * 4.4;
+    flake.style.left = `${Math.random() * 100}%`;
+    flake.style.width = `${size}px`;
+    flake.style.height = `${size}px`;
+    flake.style.setProperty("--drift", `${14 + Math.random() * 26 + depth * 12}vw`);
+    flake.style.setProperty("--sway", `${1 + Math.random() * 3}vw`);
+    flake.style.setProperty(
+      "--flake-opacity", (0.2 + depth * 0.65).toFixed(2),
+    );
+    flake.style.animationDuration = `${16.5 - depth * 8 + Math.random() * 2}s`;
+    flake.style.animationDelay = `${-Math.random() * 18}s`;
+    box.append(flake);
+  }
 }
 
 function initSky() {  const box = $("sky-stars");
@@ -223,8 +610,9 @@ function initSky() {  const box = $("sky-stars");
     for (const star of box.children) mirror.append(star.cloneNode(true));
   }
   if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    // 近流星不做（NearMeteors 类保留但不再启动）
     spawnMeteor();
-    scheduleMeteor();
+    scheduleMeteor(false);
   }
 }
 
@@ -905,9 +1293,15 @@ async function boot() {
     $("subtitle").classList.add("demo");
   }
   $("version").textContent = "";
-  initSky();
   layoutBackdrop();
-  window.addEventListener("resize", layoutBackdrop);
+  initSky();
+  initDust();
+  initWind();
+  initSnow();
+  window.addEventListener("resize", () => {
+    layoutBackdrop();
+    if (nearField) nearField.resize();
+  });
   for (const button of document.querySelectorAll(".tab")) {
     button.addEventListener("click", () => switchTab(button.dataset.tab));
   }

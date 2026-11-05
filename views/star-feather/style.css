@@ -108,6 +108,18 @@ body {
 
 .water-nebula { opacity: 0.75; }
 
+/* 水面上的流星倒影：单独一层，位置由 JS 按水线压缩后给出 */
+.water-meteors {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .water-meteors { filter: url(#water-ripple); }
+}
+
 .svg-defs { position: absolute; width: 0; height: 0; overflow: hidden; }
 
 /* 星云流动层：参考原场景 cloudmotion 的缓慢漂移 + 轻微色相呼吸 */
@@ -121,13 +133,13 @@ body {
     radial-gradient(30% 24% at 52% 52%, rgba(112, 80, 200, 0.15), transparent 75%);
   filter: blur(28px);
   mix-blend-mode: screen;
-  animation: nebula-drift 38s ease-in-out infinite alternate,
+  animation: nebula-drift 24s ease-in-out infinite alternate,
              nebula-hue 46s ease-in-out infinite;
 }
 
 @keyframes nebula-drift {
-  from { transform: translate3d(-2%, 0, 0) scale(1); }
-  to { transform: translate3d(2%, -1%, 0) scale(1.06); }
+  from { transform: translate3d(-3.5%, 0, 0) scale(1); }
+  to { transform: translate3d(3.5%, -1.6%, 0) scale(1.07); }
 }
 
 @keyframes nebula-hue {
@@ -136,6 +148,112 @@ body {
 }
 
 .sky-stars { position: absolute; inset: 0; z-index: 2; }
+
+/* 风：几道横向风带从左侧扫过，雪的横向漂移也一并加大 */
+.wind {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.gust {
+  position: absolute;
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(90deg,
+    rgba(198, 224, 255, 0) 0%, rgba(222, 240, 255, 0.7) 48%, rgba(198, 224, 255, 0) 100%);
+  filter: blur(3px);
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: gust-sweep linear infinite;
+}
+
+@keyframes gust-sweep {
+  0% { transform: translate3d(-45vw, 0, 0) rotate(1.6deg) scaleX(0.65); opacity: 0; }
+  18% { opacity: var(--gust-opacity, 0.16); }
+  78% { opacity: var(--gust-opacity, 0.16); }
+  100% { transform: translate3d(125vw, 1.2vh, 0) rotate(1.6deg) scaleX(1.2); opacity: 0; }
+}
+
+/* 星尘层：不坠落，只在空中缓慢漂荡，明暗各自呼吸 */
+.dust {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.dust-mote {
+  position: absolute;
+  will-change: transform;
+  animation: dust-drift ease-in-out infinite alternate;
+}
+
+.dust-mote::before {
+  content: "";
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: radial-gradient(circle,
+    rgba(255, 255, 255, 0.95) 0%, rgba(206, 228, 255, 0.55) 42%, rgba(180, 210, 255, 0) 72%);
+  animation: dust-twinkle ease-in-out infinite;
+  animation-duration: var(--twinkle-duration, 4s);
+  animation-delay: var(--twinkle-delay, 0s);
+}
+
+.dust-mote.gold::before {
+  background: radial-gradient(circle,
+    rgba(255, 244, 214, 0.95) 0%, rgba(240, 210, 150, 0.5) 42%, rgba(240, 200, 130, 0) 72%);
+}
+
+.dust-mote.cyan::before {
+  background: radial-gradient(circle,
+    rgba(214, 246, 255, 0.95) 0%, rgba(150, 220, 245, 0.5) 42%, rgba(120, 200, 235, 0) 72%);
+}
+
+@keyframes dust-drift {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(var(--dx, 2vw), var(--dy, -1.5vh), 0); }
+}
+
+@keyframes dust-twinkle {
+  0%, 100% { opacity: 0.12; transform: scale(0.72); }
+  50% { opacity: 0.9; transform: scale(1.12); }
+}
+
+/* 风雪层：雪片整体被风往右下吹，飘落途中沿风向轻微摆动 */
+.snow {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.snowflake {
+  position: absolute;
+  top: -6vh;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 45%,
+    #ffffff 0%, rgba(226, 242, 255, 0.9) 42%, rgba(190, 220, 255, 0) 74%);
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: snow-fall linear infinite;
+}
+
+@keyframes snow-fall {
+  0% { transform: translate3d(0, -6vh, 0); opacity: 0; }
+  8% { opacity: var(--flake-opacity, 0.6); }
+  26% { transform: translate3d(calc(var(--drift) * 0.26 + var(--sway)), 21vh, 0); }
+  50% { transform: translate3d(calc(var(--drift) * 0.52 - var(--sway)), 48vh, 0); }
+  74% { transform: translate3d(calc(var(--drift) * 0.76 + var(--sway)), 74vh, 0); }
+  90% { opacity: var(--flake-opacity, 0.6); }
+  100% { transform: translate3d(var(--drift), 104vh, 0); opacity: 0; }
+}
 
 .star {
   position: absolute;
@@ -177,15 +295,66 @@ body {
   100% { opacity: 0; transform: rotate(32deg) translate3d(320px, 0, 0); }
 }
 
+/* 倒影流星：沿水线做垂直镜像，方向与运动都反过来，整体压暗做虚 */
+.meteor.reflect {
+  width: 120px;
+  transform: rotate(-32deg);
+  filter: blur(0.4px) drop-shadow(0 0 3px rgba(180, 220, 255, 0.45));
+  animation-name: shoot-reflect;
+}
+
+.meteor.reflect::after {
+  filter: drop-shadow(0 0 4px rgba(200, 230, 255, 0.5));
+}
+
+@keyframes shoot-reflect {
+  0% { opacity: 0; transform: rotate(-32deg) translate3d(0, 0, 0); }
+  14% { opacity: 0.55; }
+  100% { opacity: 0; transform: rotate(-32deg) translate3d(240px, 0, 0); }
+}
+
+/* 近流星：更长更粗、头部带辉光，沿弧线匀速飞（不做减速模拟） */
+/* 近流星：canvas 渲染，重力 + 阻力逐帧积分，尾迹沿真实路径逐帧生成 */
+.meteor-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* 水面那块倒影画布：同一套流星按水线翻转压缩后重绘，再叠水波扭曲 */
+.meteor-water { filter: url(#water-ripple); }
+
+/* 金色余晖：流星沿途掉落的火星 */
+.ember {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(circle,
+    rgba(255, 238, 196, 0.95) 0%,
+    rgba(242, 198, 122, 0.55) 45%,
+    rgba(232, 172, 92, 0) 72%);
+  animation: ember-fade 1s ease-out forwards;
+}
+
+@keyframes ember-fade {
+  0% { opacity: 0; transform: translate3d(0, 0, 0) scale(0.6); }
+  20% { opacity: 1; }
+  100% { opacity: 0; transform: translate3d(var(--ex, 0px), var(--ey, -18px), 0) scale(1.15); }
+}
+
 @keyframes twinkle {
   0%, 100% { opacity: 0.12; transform: scale(0.85); }
   50% { opacity: 0.85; transform: scale(1.08); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .star, .meteor, .sky-nebula { animation: none; }
+  .star, .meteor, .sky-nebula, .snowflake, .gust, .dust-mote, .ember { animation: none; }
   .sky { animation: none; }
-  .meteor { display: none; }
+  .meteor, .snow, .wind, .dust, .meteor-canvas, .ember { display: none; }
 }
 
 .hidden { display: none !important; }
