@@ -713,11 +713,18 @@ async function refresh() {
   try {
     const data = await apiGet("daily/list");
     state.items = data.items || [];
-    if (state.selected && !state.items.some((item) => item.uid === state.selected)) {
-      state.selected = null;
-    }
+    const stillSelected = Boolean(state.selected)
+      && state.items.some((item) => item.uid === state.selected);
     renderDailyList();
-    if (!state.selected && state.items.length) await openDaily(state.items[0].uid);
+    if (stillSelected) {
+      await openDaily(state.selected);  // 记录可能已变，刷新时重拉详情
+    } else if (state.items.length) {
+      await openDaily(state.items[0].uid);
+    } else {
+      state.selected = null;
+      renderDailyList();
+      $("daily-detail").replaceChildren(el("p", "empty", "今天还没有牌运记录。"));
+    }
   } catch (error) {
     showToast(error.message || "牌运列表加载失败");
   }
