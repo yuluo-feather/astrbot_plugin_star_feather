@@ -251,3 +251,32 @@ def test_preview_interpret_rejects_tampered_picks():
     with pytest.raises(ValueError):
         asyncio.run(ui.interpret_preview(
             "羽时三刻", "", [{"id": "major_00", "upright": True}]))
+
+
+def test_persona_change_is_marked_stale_everywhere():
+    kv = {}
+    daily, ui = _make(kv)
+    _seed(daily, "u1")
+    kv["sf_daily_u1"]["persona"] = "gentle"  # 当前实例 persona 是 ""
+    detail = asyncio.run(ui.daily_detail("u1"))
+    assert detail["stale"] is True
+    listing = asyncio.run(ui.daily_list())
+    assert listing["items"][0]["stale"] is True
+    overview = asyncio.run(ui.overview())
+    assert overview["stale"] == 1
+
+
+def test_overview_counts_beyond_the_list_cap():
+    kv = {}
+    daily, ui = _make(kv)
+    for index in range(201):
+        asyncio.run(daily.pick_cached(f"u{index}", DAY))
+    data = asyncio.run(ui.overview())
+    assert data["users"] == 201
+
+
+def test_card_image_cache_stays_bounded():
+    _, ui = _make({})
+    for width in range(60, 160):
+        ui.card_image(PICK["card"]["id"], True, width)
+    assert len(ui._thumbs) == 96

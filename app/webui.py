@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import io
 import random
+from collections import OrderedDict
 from typing import TypedDict
 
 from PIL import Image
@@ -26,6 +27,7 @@ PLUGIN_NAME = "astrbot_plugin_star_feather"
 _CARDS_BY_ID = {c["id"]: c for c in TAROT_CARDS}
 _MAX_LIST = 200
 _MAX_WIDTH = 640
+_THUMB_CACHE_MAX = 96
 
 # 牌阵的适用场景与牌位说明是视图文案：牌位名只从 core/spreads.py 取，
 # 这里只补「这个阵拿来问什么」和每个牌位的一句话含义。
@@ -75,7 +77,7 @@ class WebUI:
         self.settings = settings
         self.clock = clock
         self.version = version
-        self._thumbs: dict[tuple, dict] = {}
+        self._thumbs: OrderedDict[tuple, dict] = OrderedDict()
 
     def register(self, context) -> bool:
         """把接口挂到宿主；老版本 AstrBot 没有这个能力时静默跳过。"""
@@ -110,7 +112,8 @@ class WebUI:
 
     async def overview(self) -> dict:
         today = self.clock.today()
-        users = (await self.daily.users_for(today))[:_MAX_LIST]
+        # 统计覆盖整个索引（最多 500），列表才截到 _MAX_LIST
+        users = await self.daily.users_for(today)
         active = 0
         with_spirit = 0
         stale = 0
@@ -122,7 +125,7 @@ class WebUI:
             active += 1
             if record.spirit_line:
                 with_spirit += 1
-            if record.prompt_v != self.daily.prompt_version:
+            if self._record_stale(record):
                 stale += 1
             topics += len(record.interps)
         return {
@@ -150,7 +153,7 @@ class WebUI:
                 "upright": record.upright,
                 "spirit": record.spirit_line,
                 "topics": len(record.interps),
-                "stale": record.prompt_v != self.daily.prompt_version,
+                "stale": self._record_stale(record),
             })
         items.sort(key=lambda item: item["uid"])
         return {"date": today, "items": items}
@@ -183,9 +186,14 @@ class WebUI:
             "spirit": record.spirit_line,
             "sign": record.sign,
             "persona": record.persona,
-            "stale": record.prompt_v != self.daily.prompt_version,
+            "stale": self._record_stale(record),
             "topics": topics,
         }
+
+    def _record_stale(self, record) -> bool:
+        """缓存是否已过期：提示词版本或人设任一与当前配置不一致。"""
+        return (record.prompt_v != self.daily.prompt_version
+                or record.persona != self.daily.persona)
 
     def cards(self) -> list[dict]:
         return [
@@ -296,6 +304,7 @@ class WebUI:
         key = (card_id, bool(upright), width)
         cached = self._thumbs.get(key)
         if cached is not None:
+            self._thumbs.move_to_end(key)
             return cached
         with Image.open(asset_path_by_id(card_id)) as src:
             img = src.convert("RGBA")
@@ -313,6 +322,8 @@ class WebUI:
             "base64": base64.b64encode(buf.getvalue()).decode("ascii"),
         }
         self._thumbs[key] = payload
+        while len(self._thumbs) > _THUMB_CACHE_MAX:
+            self._thumbs.popitem(last=False)
         return payload
 
     # ---- HTTP 入口（薄壳，参数解析只在这里） ----

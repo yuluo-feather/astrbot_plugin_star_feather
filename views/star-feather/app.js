@@ -354,9 +354,11 @@ async function openDaily(uid) {
   box.replaceChildren(el("p", "empty", "读取中…"));
   try {
     const data = await apiGet("daily/detail", { uid });
+    if (state.selected !== uid) return;  // 已被新的选择取代，别把旧响应画到新选中项下
     if (!data) throw new Error("没有这条记录");
     renderDetail(data);
   } catch (error) {
+    if (state.selected !== uid) return;
     box.replaceChildren(el("p", "empty", error.message || "读取失败"));
   }
 }
@@ -422,7 +424,7 @@ function renderCards() {
   for (const card of state.cards) {
     const cell = el("button", "card-cell");
     cell.type = "button";
-    cell.append(makeThumb(card.id, state.reversed, 150, card.cn));
+    cell.append(makeThumb(card.id, !state.reversed, 150, card.cn));
     cell.append(el("span", "card-name", card.cn));
     cell.addEventListener("click", () => openCardDetail(card));
     grid.append(cell);
@@ -664,7 +666,7 @@ function renderSpreads() {
   }
 }
 
-async function openLightbox(card, upright = state.reversed) {
+async function openLightbox(card, upright = !state.reversed) {
   const box = $("lightbox");
   const img = $("lightbox-img");
   img.removeAttribute("src");
