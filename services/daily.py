@@ -173,9 +173,10 @@ class DailyFortune:
         """把今天有牌运记录的用户记进日索引（调用方须持有 _shared_kv_lock）。
 
         索引坏了最多让可视化视图少列一个人，不影响牌运主流程。本进程内每个
-        （日期, 用户）只成功写一次；跨天会重新登记。读故障不知道旧名单，
-        写回会把当天名单缩成一个人；写故障则留到下次调用再试——两种情况
-        都不记账。
+        （日期, 用户）只成功写一次；跨天会重新登记。名单满员后淘汰最早登记的
+        用户，被淘汰者同时从内存记账里移除，再次活跃时能重新进索引。读故障
+        不知道旧名单，写回会把当天名单缩成一个人；写故障则留到下次调用再
+        试——两种情况都不记账。
         """
         if not uid:
             return
@@ -196,7 +197,12 @@ class DailyFortune:
         known = [u for u in uids if isinstance(u, str)] if isinstance(uids, list) else []
         if uid not in known:
             known.append(uid)
-            del known[:-_INDEX_MAX]
+            overflow = len(known) - _INDEX_MAX
+            if overflow > 0:
+                # 名单满员按最早登记淘汰；被淘汰的也要从内存记账里去掉，
+                # 否则他再次活跃会被当成「今天已登记」直接跳过，永远回不到索引里。
+                self._indexed.difference_update(known[:overflow])
+                del known[:overflow]
             if not await kv_put(self.kv_store, _INDEX_KEY,
                                 {"date": today, "uids": known}, "每日牌运用户索引"):
                 return

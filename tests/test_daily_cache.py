@@ -1678,6 +1678,25 @@ class TestDailyUserIndex:
         asyncio.run(df.pick_cached("u2", "20260828"))
         assert df._indexed == {"u2"}
 
+    def test_evicted_user_can_reenter_the_index(self):
+        """索引满员后被淘汰的用户再次活跃，必须能重新登记。（SF-WEB-01）"""
+        from data.plugins.astrbot_plugin_star_feather.services.daily import _INDEX_MAX
+
+        kv = {}
+        df = self._df(kv)
+        asyncio.run(df.pick_cached("u0", "20260827"))
+        for i in range(1, _INDEX_MAX + 1):
+            asyncio.run(df.pick_cached(f"u{i}", "20260827"))
+        uids = kv["sf_daily_index"]["uids"]
+        assert len(uids) == _INDEX_MAX
+        assert "u0" not in uids
+        assert "u0" not in df._indexed
+
+        asyncio.run(df.pick_cached("u0", "20260827"))
+        uids = kv["sf_daily_index"]["uids"]
+        assert len(uids) == _INDEX_MAX
+        assert uids[-1] == "u0"
+
     def test_index_write_does_not_regress_to_an_older_day(self):
         """延迟到达的旧日期请求不能把索引写回更早的一天。"""
         kv = {"sf_daily_index": {"date": "20260829", "uids": ["u9"]}}
