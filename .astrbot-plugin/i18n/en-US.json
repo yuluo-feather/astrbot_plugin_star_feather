@@ -1,0 +1,8 @@
+{
+  "views": {
+    "star-feather": {
+      "title": "Star Feather · Observer",
+      "description": "Read-only view of today's daily readings, topic interpretations, and card art."
+    }
+  }
+}

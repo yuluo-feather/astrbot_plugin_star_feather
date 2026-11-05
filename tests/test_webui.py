@@ -1,0 +1,152 @@
+"""可视化视图后端（app/webui.py）：今日列表、详情序列化、牌面缩略图与注册守卫。
+
+视图本身是静态页（views/star-feather）；这一域只锁后端数据面，不测 JS。
+宿主 KV 不能枚举，今日名单依赖 DailyFortune 的日索引（另一条红线在 test_daily_cache）。
+"""
+import asyncio
+import base64
+import io
+import types
+
+from data.plugins.astrbot_plugin_star_feather.app.webui import WebUI
+from data.plugins.astrbot_plugin_star_feather.core.settings import STRUCTURE_CHECK_LOOSE
+from data.plugins.astrbot_plugin_star_feather.core.tarot_data import TAROT_CARDS
+from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
+from PIL import Image
+from stubs import PICK
+
+DAY = "20260827"
+TOPIC = "事业运势"
+
+
+class _Ctx:
+    def __init__(self, kv):
+        self.kv = kv
+
+    async def get_kv_data(self, key, default=None):
+        return self.kv.get(key, default)
+
+    async def put_kv_data(self, key, value):
+        self.kv[key] = value
+
+
+class _Interp:
+    async def interpret(self, *a, **kw):
+        return "【第1张·你的当下】新解读。"
+
+    async def spirit_line(self, *a, **kw):
+        return "牌灵的一句话"
+
+
+def _make(kv):
+    daily = DailyFortune(_Ctx(kv), persona="", interpreter=_Interp())
+    settings = types.SimpleNamespace(
+        ai=types.SimpleNamespace(enable_ai=True, spirit_line=True,
+                                 structure_check=STRUCTURE_CHECK_LOOSE,
+                                 persona="random"),
+        output=types.SimpleNamespace(send_mode="forward", daily_card=True),
+    )
+    clock = types.SimpleNamespace(today=lambda: DAY)
+    return daily, WebUI(daily, settings, clock, version="0.10.0")
+
+
+def _seed(daily, uid):
+    picks = asyncio.run(daily.pick_cached(uid, DAY))[2]
+    asyncio.run(daily.spirit_cached(None, uid, picks, TOPIC, None, today=DAY))
+    asyncio.run(daily.interp_cached(None, uid, "羽签", ["你的当下"], picks,
+                                    TOPIC, today=DAY))
+    return picks
+
+
+def test_daily_list_lists_indexed_users():
+    kv = {}
+    daily, ui = _make(kv)
+    picks = _seed(daily, "u1")
+    data = asyncio.run(ui.daily_list())
+    assert data["date"] == DAY
+    assert [item["uid"] for item in data["items"]] == ["u1"]
+    item = data["items"][0]
+    assert item["card_cn"] == picks[0]["card"]["cn"]
+    assert item["upright"] is picks[0]["upright"]
+    assert item["topics"] == 1
+    assert item["stale"] is False
+
+
+def test_detail_serializes_topics_and_stale_flag():
+    kv = {}
+    daily, ui = _make(kv)
+    picks = _seed(daily, "u1")
+    kv["sf_daily_u1"]["prompt_v"] = "old-version"
+    data = asyncio.run(ui.daily_detail("u1"))
+    assert data["stale"] is True
+    assert data["card"]["id"] == picks[0]["card"]["id"]
+    assert data["spirit"] == "牌灵的一句话"
+    assert [topic["topic"] for topic in data["topics"]] == [TOPIC]
+    assert "新解读" in data["topics"][0]["text"]
+
+
+def test_detail_missing_user_is_none():
+    _, ui = _make({})
+    assert asyncio.run(ui.daily_detail("nobody")) is None
+
+
+def test_overview_counts_today_records():
+    kv = {}
+    daily, ui = _make(kv)
+    _seed(daily, "u1")
+    _seed(daily, "u2")
+    data = asyncio.run(ui.overview())
+    assert data["users"] == 2
+    assert data["with_spirit"] == 2
+    assert data["topics"] == 2
+    assert data["stale"] == 0
+    assert data["version"] == "0.10.0"
+    assert data["settings"]["send_mode"] == "forward"
+
+
+def test_cards_returns_the_whole_deck():
+    _, ui = _make({})
+    cards = ui.cards()
+    assert len(cards) == len(TAROT_CARDS) == 78
+    assert len({card["id"] for card in cards}) == 78
+
+
+def test_card_image_is_webp_and_reversed_differs():
+    _, ui = _make({})
+    upright = ui.card_image(PICK["card"]["id"], True, 120)
+    reversed_ = ui.card_image(PICK["card"]["id"], False, 120)
+    assert upright["mime"] == "image/webp"
+    assert upright["width"] == 120
+    raw = base64.b64decode(upright["data"])
+    with Image.open(io.BytesIO(raw)) as img:
+        assert img.size == (120, upright["height"])
+    assert upright["data"] != reversed_["data"]
+    assert ui.card_image(PICK["card"]["id"], True, 120) is upright  # 同尺寸只编码一次
+
+
+def test_card_image_rejects_unknown_card():
+    import pytest
+
+    _, ui = _make({})
+    with pytest.raises(FileNotFoundError):
+        ui.card_image("not-a-card")
+
+
+class _Host:
+    def __init__(self):
+        self.routes = []
+
+    def register_web_api(self, route, handler, methods, desc):
+        self.routes.append((route, methods, desc))
+
+
+def test_register_needs_host_api_and_uses_plugin_prefix():
+    _, ui = _make({})
+    assert ui.register(types.SimpleNamespace()) is False
+
+    host = _Host()
+    assert ui.register(host) is True
+    routes = [route for route, _methods, _desc in host.routes]
+    assert len(routes) == 5
+    assert all(route.startswith("/astrbot_plugin_star_feather/") for route in routes)
+    assert "/astrbot_plugin_star_feather/daily/list" in routes

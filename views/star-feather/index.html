@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>星羽塔罗 · 观测台</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="mark" aria-hidden="true">✦</span>
+      <div>
+        <h1 id="heading">星羽塔罗 · 观测台</h1>
+        <p id="subtitle" class="sub">今日牌运与牌面，只读</p>
+      </div>
+    </div>
+    <div class="top-right">
+      <span id="version" class="pill"></span>
+      <button id="refresh" class="ghost" type="button">刷新</button>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="daily" type="button">今日牌运</button>
+    <button class="tab" data-tab="cards" type="button">牌面预览</button>
+  </nav>
+
+  <main>
+    <section id="panel-daily" class="panel">
+      <div id="stats" class="stats"></div>
+      <div class="split">
+        <aside class="list" id="daily-list" aria-label="今日用户"></aside>
+        <article class="detail" id="daily-detail">
+          <p class="empty">选择左侧的用户查看解读</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="panel-cards" class="panel hidden">
+      <div class="cards-toolbar">
+        <label class="switch">
+          <input type="checkbox" id="reversed" />
+          <span>逆位预览</span>
+        </label>
+        <span class="hint">点牌面看大图</span>
+      </div>
+      <div class="card-grid" id="card-grid"></div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status"></div>
+  <div id="lightbox" class="lightbox hidden" role="dialog" aria-modal="true">
+    <img id="lightbox-img" alt="" />
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

@@ -1571,3 +1571,38 @@ class TestSharedKvLockRegistry:
 
         same, count = asyncio.run(go())
         assert same is True and count == 1
+
+
+class TestDailyUserIndex:
+    """可视化视图要列「今天有谁抽过」：宿主 KV 不能枚举，只能维护日索引。"""
+
+    @staticmethod
+    def _df(kv):
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
+
+        class _Ctx:
+            async def get_kv_data(self, key, default=None):
+                return kv.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                kv[key] = value
+
+        return DailyFortune(_Ctx(), persona="")
+
+    def test_pick_cached_indexes_the_user(self):
+        kv = {}
+        df = self._df(kv)
+        asyncio.run(df.pick_cached("u1", "20260827"))
+        assert kv["sf_daily_index"] == {"date": "20260827", "uids": ["u1"]}
+        assert asyncio.run(df.users_for("20260827")) == ["u1"]
+
+    def test_cache_hit_also_indexes_an_existing_record(self):
+        kv = {"sf_daily_u1": _rec(date="20260827")}
+        df = self._df(kv)
+        asyncio.run(df.pick_cached("u1", "20260827"))
+        assert kv["sf_daily_index"]["uids"] == ["u1"]
+
+    def test_index_does_not_leak_across_days(self):
+        kv = {"sf_daily_index": {"date": "20260827", "uids": ["u1"]}}
+        df = self._df(kv)
+        assert asyncio.run(df.users_for("20260828")) == []

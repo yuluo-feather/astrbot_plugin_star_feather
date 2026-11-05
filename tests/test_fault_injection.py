@@ -164,9 +164,11 @@ def test_pick_write_back_is_always_a_healthy_record(mode):
     """
     kv = MODES[mode]()
     _run(_fortune(kv).pick_cached(UID))
-    assert len(kv.puts) == 1
+    # 日索引会另写一条 sf_daily_index；这里只数牌运记录本身
+    writes = [value for key, value in kv.puts if key == DAILY_KEY]
+    assert len(writes) == 1
     # 写故障时存储里读不到，就断言「尝试写入的那份」——两者必须是同一份健康记录
-    rec = kv.store.get(DAILY_KEY) or kv.puts[-1][1]
+    rec = kv.store.get(DAILY_KEY) or writes[-1]
     assert isinstance(rec, dict)
     assert rec["date"] == TODAY
     assert rec["card_id"] == _expected_pick()[2][0]["card"]["id"]

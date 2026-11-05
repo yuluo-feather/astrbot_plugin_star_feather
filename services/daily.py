@@ -92,6 +92,11 @@ _CARDS_BY_ID = {c["id"]: c for c in TAROT_CARDS}
 # 解读分桶上限：当天换主题不回收、跨天才随新记录作废，桶数会线性增长。
 DAILY_INTERP_MAX = 20
 
+# 今日有牌运记录的用户名单：宿主 KV 只能按 key 读、不能枚举，
+# 可视化视图要列「今天有谁抽过」只能自己留一份（只存 uid，不存内容）。
+_INDEX_KEY = "sf_daily_index"
+_INDEX_MAX = 500
+
 
 def _trim_interp_slots(slots: dict) -> None:
     """把解读分桶裁到 DAILY_INTERP_MAX：超出的按「最早插入」逐个丢（原地改）。"""
@@ -138,6 +143,13 @@ class DailyFortune:
         self.structure_check = structure_check
         # 旧版 sf_spirit_* 键只删一次：合并成单键后它们不会再被读，但会永久占着
         self._legacy_cleaned: set[str] = set()
+        # 本进程已登记进日索引的用户：命中路径只补登记一次，别每次读都写 KV
+        self._indexed: set[str] = set()
+
+    @property
+    def prompt_version(self) -> str:
+        """当前解读/牌灵合成指纹（可视化视图拿它判断缓存是否过期）。"""
+        return _PROMPT_V
 
     def _structure_ok(self, text: str, n_positions: int) -> bool:
         """缓存命中也复检结构：strict 下旧缓存不能绕过结构闸。
@@ -155,6 +167,44 @@ class DailyFortune:
 
     def _key(self, uid: str) -> str:
         return f"sf_daily_{uid}"
+
+    async def _note_index(self, uid: str, today: str) -> None:
+        """把今天有牌运记录的用户记进日索引（调用方须持有 _shared_kv_lock）。
+
+        索引坏了最多让可视化视图少列一个人，不影响牌运主流程；本进程内每个
+        用户只写一次，命中路径不会每次读都打一次 KV。
+        """
+        if not uid or uid in self._indexed:
+            return
+        raw, _ok = await kv_get(self.kv_store, _INDEX_KEY, None, "每日牌运用户索引")
+        index = raw if isinstance(raw, dict) else {}
+        uids = index.get("uids") if index.get("date") == today else []
+        known = [u for u in uids if isinstance(u, str)] if isinstance(uids, list) else []
+        if uid not in known:
+            known.append(uid)
+            del known[:-_INDEX_MAX]
+            await kv_put(self.kv_store, _INDEX_KEY,
+                         {"date": today, "uids": known}, "每日牌运用户索引")
+        self._indexed.add(uid)
+
+    async def users_for(self, today: str | None = None) -> list[str]:
+        """今天有牌运记录的用户（只读；索引缺失或跨天时为空）。"""
+        today = today or self.clock.today()
+        raw, ok = await kv_get(self.kv_store, _INDEX_KEY, None, "每日牌运用户索引")
+        if not ok or not isinstance(raw, dict) or raw.get("date") != today:
+            return []
+        uids = raw.get("uids")
+        return [u for u in uids if isinstance(u, str)] if isinstance(uids, list) else []
+
+    async def read_record(self, uid: str):
+        """读某用户当前的牌运记录（只读，给可视化视图用）；坏记录当没有。"""
+        if not uid:
+            return None
+        raw, ok = await kv_get(self.kv_store, self._key(uid), None, "每日牌运记录读取")
+        if not ok or not isinstance(raw, dict):
+            return None
+        record = DailyRecord.from_raw(raw)
+        return record if record.date else None
 
     async def _cleanup_legacy_spirit(self, uid: str) -> None:
         """删掉旧版独立的 sf_spirit_* 键（每个用户一次，删除成功后才记账）。
@@ -186,6 +236,7 @@ class DailyFortune:
             if ok and record.date == today:
                 card = _CARDS_BY_ID.get(record.card_id)
                 if card is not None:
+                    await self._note_index(uid, today)
                     return _daily_result(card, record.upright)
             # 缓存坏掉不丢固定：_daily_pick 是确定性纯函数，同（用户,日期）必然同牌
             card, upright = _daily_pick(uid, today)
@@ -202,6 +253,7 @@ class DailyFortune:
                 if not keep:
                     fresh.interps, fresh.spirit_line, fresh.spirit_sign = {}, "", ""
                 await kv_put(self.kv_store, key, fresh.to_raw(), "每日牌运缓存")
+                await self._note_index(uid, today)
             else:
                 log.warning("每日牌运缓存不可用，改由确定性函数直接出牌")
         return _daily_result(card, upright)

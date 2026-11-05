@@ -19,6 +19,7 @@ from .adapters.log import bind_host_logger
 from .app import handlers
 from .app.container import build_container
 from .app.diagnostics import image_dir_of, note_entry_binding, register_instance
+from .app.webui import register_web_apis
 from .render.assets import asset_manifest
 from .render.store import cleanup_stale_images
 
@@ -31,6 +32,9 @@ class StarFeatherPlugin(Star):
         super().__init__(context)
         bind_host_logger()  # 核心层的中立日志出口从这里接上宿主；失败只降级
         self.container = build_container(context, self, config)
+        # 可视化视图（views/）的只读接口：老版本宿主没有 register_web_api 时
+        # 只是少一个入口，插件加载照旧。
+        register_web_apis(context, self.container, VERSION)
 
     async def initialize(self):
         """实例化后的异步初始化钩子：启动横幅、过期图片回收、配置新鲜度登记。"""

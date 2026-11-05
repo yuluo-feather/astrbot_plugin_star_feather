@@ -46,6 +46,11 @@ def _asset_path_by_id(card_id: str | None) -> str:
     raise FileNotFoundError(f"塔罗素材缺失: {stem}（.png / .webp / .jpg 均不存在）")
 
 
+def asset_path_by_id(card_id: str) -> str:
+    """公开入口：牌 id -> 素材绝对路径（可视化视图的缩略图也走这一处）。"""
+    return _asset_path_by_id(card_id)
+
+
 def _asset_path(card) -> str:
     """tarot_data 牌字典 -> 素材文件绝对路径。"""
     card_id = card.get("id") if isinstance(card, dict) else None

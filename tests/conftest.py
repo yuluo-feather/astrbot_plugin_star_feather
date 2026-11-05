@@ -14,7 +14,8 @@ test_stub_signatures（打桩与真实签名一致性）/ test_docs_consistency�
 test_release_gates（发布红线：版本四件套与市场包体）/
 test_config_freshness（配置新鲜度自证：进门读数与陈旧实例告警）/
 test_astrbot_contract（AstrBot 契约守卫：真框架面存活，没有框架时跳过）/
-test_import_model（导入模型红线：一份文件一个身份、插件根不碰 sys 机关、框架前缀清理删得干净），
+test_import_model（导入模型红线：一份文件一个身份、插件根不碰 sys 机关、框架前缀清理删得干净）/
+test_webui（可视化视图后端：今日列表 / 详情 / 牌面缩略图 / 注册守卫），
 共享桩（FakeProvider / FakeContext / 牌常量）在 stubs.py。
 
 【导入约定】测试文件一律用 AstrBot 运行时的包路径（from data.plugins.
