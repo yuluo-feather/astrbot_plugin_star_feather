@@ -39,6 +39,11 @@ _PLUGIN_ROOT = os.path.dirname(_TESTS_DIR)
 _SKIP_DIRS = {"tests", "scripts", "tools", "__pycache__", ".git", ".ruff_cache",
               ".pytest_cache", ".mypy_cache"}
 
+# 只在更高版本才有的框架面：低于门槛时缺失不算违约。
+# astrbot.api.web 是插件视图的后端接口，README 已注明视图需要 4.24.2+；
+# 更低版本的插件加载与聊天不受影响（app/webui.py 在 handler 内惰性导入）。
+VERSION_GATED_SURFACES = {"astrbot.api.web": "4.24.2"}
+
 
 def _runtime_sources():
     """插件目录下所有运行时 .py（测试/工具/缓存目录不算我们依赖框架的面）。"""
@@ -111,14 +116,29 @@ def declared_range() -> str:
     return m.group(1).strip() if m else ""
 
 
-def _check_surface(want: dict) -> tuple:
-    """逐项查真实框架：返回（检查到的名字数，缺失清单）。"""
+def _below_gate(mod_name: str, framework: str) -> bool:
+    """当前框架低于该面要求的版本时返回 True；版本读不出来时返回 False（宁可报缺）。"""
+    gate = VERSION_GATED_SURFACES.get(mod_name)
+    if not gate:
+        return False
+    try:
+        from packaging.version import Version
+        return Version(framework) < Version(gate)
+    except Exception:
+        return False
+
+
+def _check_surface(want: dict, framework: str = "unknown") -> tuple:
+    """逐项查真实框架：返回（检查到的名字数，缺失清单，按版本门槛跳过的面）。"""
     import importlib
-    checked, missing = 0, []
+    checked, missing, gated = 0, [], []
     for mod_name in sorted(want):
         try:
             mod = importlib.import_module(mod_name)
         except Exception as exc:                      # 模块路径都没了：直接报
+            if _below_gate(mod_name, framework):
+                gated.append(mod_name)
+                continue
             missing.append(mod_name + "（模块导入失败：" + type(exc).__name__ + "）")
             continue
         for name in sorted(want[mod_name]):
@@ -129,7 +149,7 @@ def _check_surface(want: dict) -> tuple:
                 importlib.import_module(mod_name + "." + name)
             except Exception:
                 missing.append(mod_name + "." + name)
-    return checked, missing
+    return checked, missing, gated
 
 
 def _framework_version() -> str:
@@ -176,7 +196,8 @@ def probe() -> dict:
         report["skipped"] = type(exc).__name__
         return report
     report["framework"] = _framework_version()
-    report["checked"], report["missing"] = _check_surface(want)
+    report["checked"], report["missing"], report["gated"] = _check_surface(
+        want, report["framework"])
     report["in_range"] = _in_declared_range(report["framework"], report["declared"])
     return report
 
@@ -213,6 +234,8 @@ def test_surface_sources_are_parsable():
     assert "astrbot.api.star" in want, "插件根没解析出框架导入？口径来源失效：" + str(want)
     assert "astrbot.api.message_components" in want, (
         "子包里的 message_components 导入没进清单：" + str(want))
+    assert "astrbot.api.web" in want, (
+        "views 后端依赖的 astrbot.api.web 没进清单（惰性导入也要扫到）：" + str(want))
     assert sum(len(v) for v in want.values()) >= 5, "框架面太少，解析多半失效了：" + str(want)
     assert declared_range(), "metadata.yaml 里没取到 astrbot_version"
 
@@ -246,3 +269,11 @@ def test_framework_version_in_declared_range():
 
 if __name__ == "__main__":
     print(json.dumps(probe(), ensure_ascii=False))
+
+
+def test_version_gates_match_declared_reality():
+    """4.16 上缺 astrbot.api.web 是预期；4.24.2 起才算违约；版本读不出来按违约报。"""
+    assert _below_gate("astrbot.api.web", "4.16.0") is True
+    assert _below_gate("astrbot.api.web", "4.24.2") is False
+    assert _below_gate("astrbot.api.web", "unknown") is False
+    assert _below_gate("astrbot.api.unknown", "4.16.0") is False
