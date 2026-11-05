@@ -431,14 +431,19 @@ function renderCards() {
   }
 }
 
+let cardDetailSeq = 0;
+
 async function openCardDetail(card) {
+  const seq = ++cardDetailSeq;
   try {
     const detail = await apiGet("card-detail", { id: card.id });
+    if (seq !== cardDetailSeq) return;  // 已被更新的点击或关闭取代
     state.cardDetail = detail;
     state.detailUpright = !state.reversed;
     $("card-modal").classList.remove("hidden");
     renderCardDetail();
   } catch (error) {
+    if (seq !== cardDetailSeq) return;
     showToast(error.message || "牌义加载失败");
   }
 }
@@ -486,6 +491,7 @@ function renderCardDetail() {
 }
 
 function closeCardDetail() {
+  cardDetailSeq += 1;  // 关掉后，未返回的详情请求作废
   $("card-modal").classList.add("hidden");
   state.cardDetail = null;
 }
