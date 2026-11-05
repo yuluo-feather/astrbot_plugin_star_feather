@@ -188,7 +188,11 @@ class DailyFortune:
         if not ok:
             return
         index = raw if isinstance(raw, dict) else {}
-        uids = index.get("uids") if index.get("date") == today else []
+        index_date = index.get("date")
+        if isinstance(index_date, str) and index_date > today:
+            # 延迟到达的旧日期请求：索引已被推进到更晚一天，不能回退
+            return
+        uids = index.get("uids") if index_date == today else []
         known = [u for u in uids if isinstance(u, str)] if isinstance(uids, list) else []
         if uid not in known:
             known.append(uid)

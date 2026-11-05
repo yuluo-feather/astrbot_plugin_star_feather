@@ -11,7 +11,10 @@ import types
 import pytest
 from data.plugins.astrbot_plugin_star_feather.app.webui import WebUI
 from data.plugins.astrbot_plugin_star_feather.core.models import Interpretation
-from data.plugins.astrbot_plugin_star_feather.core.settings import STRUCTURE_CHECK_LOOSE
+from data.plugins.astrbot_plugin_star_feather.core.settings import (
+    STRUCTURE_CHECK_LOOSE,
+    STRUCTURE_CHECK_STRICT,
+)
 from data.plugins.astrbot_plugin_star_feather.core.spreads import FORMATIONS
 from data.plugins.astrbot_plugin_star_feather.core.tarot_data import TAROT_CARDS
 from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
@@ -41,8 +44,9 @@ class _Interp:
         return "牌灵的一句话"
 
 
-def _make(kv):
-    daily = DailyFortune(_Ctx(kv), persona="", interpreter=_Interp())
+def _make(kv, structure_check=STRUCTURE_CHECK_LOOSE):
+    daily = DailyFortune(_Ctx(kv), persona="", interpreter=_Interp(),
+                         structure_check=structure_check)
     settings = types.SimpleNamespace(
         ai=types.SimpleNamespace(enable_ai=True, spirit_line=True,
                                  structure_check=STRUCTURE_CHECK_LOOSE,
@@ -280,3 +284,15 @@ def test_card_image_cache_stays_bounded():
     for width in range(60, 160):
         ui.card_image(PICK["card"]["id"], True, width)
     assert len(ui._thumbs) == 96
+
+
+def test_strict_structure_failure_marks_record_stale():
+    kv = {}
+    daily, ui = _make(kv, structure_check=STRUCTURE_CHECK_STRICT)
+    _seed(daily, "u1")
+    assert asyncio.run(ui.daily_detail("u1"))["stale"] is False
+    topic = next(iter(kv["sf_daily_u1"]["interps"]))
+    kv["sf_daily_u1"]["interps"][topic] = "【第1张·】没有位置名的旧解读"
+    assert asyncio.run(ui.daily_detail("u1"))["stale"] is True
+    assert asyncio.run(ui.daily_list())["items"][0]["stale"] is True
+    assert asyncio.run(ui.overview())["stale"] == 1

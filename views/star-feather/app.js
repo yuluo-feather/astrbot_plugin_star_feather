@@ -690,7 +690,10 @@ function renderSpreads() {
   }
 }
 
+let lightboxSeq = 0;
+
 async function openLightbox(card, upright = !state.reversed) {
+  const seq = ++lightboxSeq;
   const box = $("lightbox");
   const img = $("lightbox-img");
   img.removeAttribute("src");
@@ -699,13 +702,15 @@ async function openLightbox(card, upright = !state.reversed) {
   img.dataset.loaded = "";
   try {
     const url = await thumbURL(card.id, upright, 420);
+    if (seq !== lightboxSeq) return;  // 已关闭或已换牌
     if (url) img.src = url;
   } catch {
-    showToast("大图加载失败");
+    if (seq === lightboxSeq) showToast("大图加载失败");
   }
 }
 
 function closeLightbox() {
+  lightboxSeq += 1;  // 关闭后，未返回的大图请求作废
   $("lightbox").classList.add("hidden");
 }
 

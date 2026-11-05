@@ -16,9 +16,10 @@ from typing import TypedDict
 
 from PIL import Image
 
-from ..ai.parse import interpretation_from_record
+from ..ai.parse import interpretation_from_record, validate_interpret_structure_strict
 from ..ai.persona import resolve_persona
 from ..core.draw import draw, render_detail
+from ..core.settings import STRUCTURE_CHECK_STRICT
 from ..core.spreads import FORMATIONS
 from ..core.tarot_data import TAROT_CARDS
 from ..render.assets import asset_path_by_id
@@ -191,9 +192,17 @@ class WebUI:
         }
 
     def _record_stale(self, record) -> bool:
-        """缓存是否已过期：提示词版本或人设任一与当前配置不一致。"""
-        return (record.prompt_v != self.daily.prompt_version
-                or record.persona != self.daily.persona)
+        """缓存是否已过期：提示词/人设不一致，或 strict 下已有解读不合规。"""
+        if (record.prompt_v != self.daily.prompt_version
+                or record.persona != self.daily.persona):
+            return True
+        if self.daily.structure_check != STRUCTURE_CHECK_STRICT:
+            return False
+        for value in record.interps.values():
+            interp = interpretation_from_record(value)
+            if not validate_interpret_structure_strict(interp.text, 1)[0]:
+                return True
+        return False
 
     def cards(self) -> list[dict]:
         return [

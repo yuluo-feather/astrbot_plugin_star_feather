@@ -1677,3 +1677,10 @@ class TestDailyUserIndex:
         assert df._indexed == {"u1"}
         asyncio.run(df.pick_cached("u2", "20260828"))
         assert df._indexed == {"u2"}
+
+    def test_index_write_does_not_regress_to_an_older_day(self):
+        """延迟到达的旧日期请求不能把索引写回更早的一天。"""
+        kv = {"sf_daily_index": {"date": "20260829", "uids": ["u9"]}}
+        df = self._df(kv)
+        asyncio.run(df.pick_cached("u1", "20260828"))
+        assert kv["sf_daily_index"] == {"date": "20260829", "uids": ["u9"]}
