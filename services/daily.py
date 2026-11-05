@@ -97,6 +97,11 @@ DAILY_INTERP_MAX = 20
 _INDEX_KEY = "sf_daily_index"
 _INDEX_MAX = 500
 
+# 淘汰计数：同一进程里多个 DailyFortune 实例共用一份 KV 时，一次淘汰要让
+# 其他实例的内存记账跟着失效，否则别的实例会把已被移出名单的用户当成
+# 「今天已登记」直接跳过。实例发现计数变了就清空自己的 _indexed 再去 KV 复核。
+_INDEX_EPOCH = 0
+
 
 def _trim_interp_slots(slots: dict) -> None:
     """把解读分桶裁到 DAILY_INTERP_MAX：超出的按「最早插入」逐个丢（原地改）。"""
@@ -146,6 +151,7 @@ class DailyFortune:
         # 本进程今天已登记进日索引的用户：跨天清空，避免 (日期, 用户) 永久累积
         self._indexed: set[str] = set()
         self._indexed_day: str = ""
+        self._indexed_epoch: int = _INDEX_EPOCH
 
     @property
     def prompt_version(self) -> str:
@@ -174,15 +180,22 @@ class DailyFortune:
 
         索引坏了最多让可视化视图少列一个人，不影响牌运主流程。本进程内每个
         （日期, 用户）只成功写一次；跨天会重新登记。名单满员后淘汰最早登记的
-        用户，被淘汰者同时从内存记账里移除，再次活跃时能重新进索引。读故障
-        不知道旧名单，写回会把当天名单缩成一个人；写故障则留到下次调用再
-        试——两种情况都不记账。
+        用户，被淘汰者同时从内存记账里移除，再次活跃时能重新进索引；同一进程里
+        共用一个 KV 的其他实例也会在下一次调用时作废本地记账、回 KV 复核。
+        读故障不知道旧名单，写回会把当天名单缩成一个人；写故障则留到下次调用
+        再试——两种情况都不记账。
         """
+        global _INDEX_EPOCH
         if not uid:
             return
         if self._indexed_day != today:
             self._indexed.clear()
             self._indexed_day = today
+            self._indexed_epoch = _INDEX_EPOCH
+        elif self._indexed_epoch != _INDEX_EPOCH:
+            # 别的实例淘汰过用户：本地记账可能还留着已不在 KV 名单里的 uid
+            self._indexed.clear()
+            self._indexed_epoch = _INDEX_EPOCH
         if uid in self._indexed:
             return
         raw, ok = await kv_get(self.kv_store, _INDEX_KEY, None, "每日牌运用户索引")
@@ -201,6 +214,8 @@ class DailyFortune:
             if overflow > 0:
                 # 名单满员按最早登记淘汰；被淘汰的也要从内存记账里去掉，
                 # 否则他再次活跃会被当成「今天已登记」直接跳过，永远回不到索引里。
+                _INDEX_EPOCH += 1
+                self._indexed_epoch = _INDEX_EPOCH
                 self._indexed.difference_update(known[:overflow])
                 del known[:overflow]
             if not await kv_put(self.kv_store, _INDEX_KEY,

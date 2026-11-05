@@ -1697,6 +1697,23 @@ class TestDailyUserIndex:
         assert len(uids) == _INDEX_MAX
         assert uids[-1] == "u0"
 
+    def test_eviction_in_one_instance_invalidates_the_others(self):
+        """共用同一 KV 的另一个实例淘汰用户后，本实例的记账必须失效。（#118）"""
+        from data.plugins.astrbot_plugin_star_feather.services.daily import _INDEX_MAX
+
+        kv = {}
+        mine = self._df(kv)
+        other = self._df(kv)
+        asyncio.run(mine.pick_cached("u0", "20260827"))
+        assert mine._indexed == {"u0"}
+
+        for i in range(_INDEX_MAX):
+            asyncio.run(other.pick_cached(f"v{i}", "20260827"))
+        assert "u0" not in kv["sf_daily_index"]["uids"]
+
+        asyncio.run(mine.pick_cached("u0", "20260827"))
+        assert kv["sf_daily_index"]["uids"][-1] == "u0"
+
     def test_index_write_does_not_regress_to_an_older_day(self):
         """延迟到达的旧日期请求不能把索引写回更早的一天。"""
         kv = {"sf_daily_index": {"date": "20260829", "uids": ["u9"]}}
