@@ -60,6 +60,29 @@ def _cfg_int(config: dict[str, Any] | None, group: str, key: str, default: int, 
     return max(floor, value) if floor is not None else value
 
 
+def _is_negative_number(raw) -> bool:
+    """原始配置值是不是负数（含 -0.5 这种取整后变 0 的）。坏值 / 布尔不算。"""
+    if isinstance(raw, bool):
+        return False
+    try:
+        return float(raw) < 0
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def _cfg_int_non_negative(config: dict[str, Any] | None, group: str, key: str, default: int) -> int:
+    """非负 int 配置：负数回 default，只有显式 0 才表示「关闭」。
+
+    -0.5 这类取整后变 0 的负数同样回默认——否则它会被 int() 悄悄当成
+    「显式关闭」，让冷却 / 节流 / 每日次数在配置写错时静默失效。
+    """
+    raw = _cfg_get(config, group, key, default)
+    value = _cfg_int(config, group, key, default)
+    if value < 0 or (value == 0 and _is_negative_number(raw)):
+        return default
+    return value
+
+
 def _cfg_bool(config: dict[str, Any] | None, group: str, key: str, default: bool) -> bool:
     """bool 配置读取：严格解析，吻合 JSON Schema 语义。
 

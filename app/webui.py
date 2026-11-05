@@ -163,7 +163,6 @@ class WebUI:
                 "topics": len(record.interps),
                 "stale": self._record_stale(record),
             })
-        items.sort(key=lambda item: item["uid"])
         return {
             "date": today,
             "items": items,
@@ -294,7 +293,10 @@ class WebUI:
             card = _CARDS_BY_ID.get(str(item.get("id", ""))) if isinstance(item, dict) else None
             if card is None:
                 raise ValueError("牌库里没有这张牌")
-            picks.append({"card": card, "upright": bool(item.get("upright", True))})
+            upright = item.get("upright", True)
+            if not isinstance(upright, bool):
+                raise ValueError("正逆位必须是布尔值")
+            picks.append({"card": card, "upright": upright})
         return list(positions), picks
 
     async def interpret_preview(self, spread: str, question, raw_picks) -> dict | None:

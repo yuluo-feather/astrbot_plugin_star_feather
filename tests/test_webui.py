@@ -103,7 +103,8 @@ def test_daily_list_skips_invalid_records_until_the_cap_is_filled(monkeypatch):
     assert data["indexed_total"] == 4
     assert data["shown"] == 2
     assert data["truncated"] is False
-    assert [item["uid"] for item in data["items"]] == ["u0", "u1"]
+    # 保持扫描序（最近登记在前），不按 uid 重排
+    assert [item["uid"] for item in data["items"]] == ["u1", "u0"]
 
 
 def test_daily_list_prefers_the_most_recent_valid_users_past_the_cap(monkeypatch):
@@ -120,7 +121,8 @@ def test_daily_list_prefers_the_most_recent_valid_users_past_the_cap(monkeypatch
     assert data["indexed_total"] == 4
     assert data["shown"] == 2
     assert data["truncated"] is True
-    assert [item["uid"] for item in data["items"]] == ["u2", "u3"]
+    # 展示最近登记的那批，且保持最近在前（前端默认打开第一条）
+    assert [item["uid"] for item in data["items"]] == ["u3", "u2"]
 
 
 def test_detail_serializes_topics_and_stale_flag():
@@ -299,6 +301,18 @@ def test_preview_interpret_rejects_tampered_picks():
     with pytest.raises(ValueError):
         asyncio.run(ui.interpret_preview(
             "羽时三刻", "", [{"id": "major_00", "upright": True}]))
+
+
+def test_preview_rejects_non_boolean_upright():
+    """正逆位只收真布尔：字符串 "false" 不能被 bool() 悄悄转成正位。"""
+    ui, _ = _make_preview({})
+    card_id = ui.draw_preview("羽签")["picks"][0]["id"]
+    for bad in ("false", "true", 0, 1, None):
+        with pytest.raises(ValueError):
+            ui._picks_from_payload("羽签", [{"id": card_id, "upright": bad}])
+    # 字段缺失仍按正位处理（与前端默认一致）
+    _, picks = ui._picks_from_payload("羽签", [{"id": card_id}])
+    assert picks[0]["upright"] is True
 
 
 def test_persona_change_is_marked_stale_everywhere():

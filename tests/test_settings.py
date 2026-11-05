@@ -161,6 +161,28 @@ class TestParsedSettings:
         assert parse({"ai": {"max_concurrency": -3}}).ai.max_concurrency == 2
         assert parse({"ai": {"all_providers_fallback": True}}).ai.all_providers_fallback is True
 
+    def test_negative_cooldown_and_limit_values_fall_back_to_defaults(self):
+        """负数不是「另一种关闭」：只有显式 0 才关闭，负数回默认值。"""
+        from data.plugins.astrbot_plugin_star_feather.core.settings import (
+            DEFAULT_AI_COOLDOWN,
+            DEFAULT_CMD_RATE_LIMIT,
+            DEFAULT_DAILY_COUNT,
+            DEFAULT_TOOL_COOLDOWN,
+        )
+        assert parse({"ai": {"ai_fail_cooldown": 0}}).ai.fail_cooldown == 0
+        assert parse({"ai": {"ai_fail_cooldown": -5}}).ai.fail_cooldown == DEFAULT_AI_COOLDOWN
+        # -0.5 取整后变 0，不能当成显式关闭
+        assert parse({"ai": {"ai_fail_cooldown": -0.5}}).ai.fail_cooldown == DEFAULT_AI_COOLDOWN
+        assert parse({"tool": {"llm_tool_cooldown": 0}}).tool.llm_cooldown == 0
+        assert parse({"tool": {"llm_tool_cooldown": -5}}).tool.llm_cooldown == DEFAULT_TOOL_COOLDOWN
+        assert parse({"tool": {"cmd_rate_limit": 0}}).tool.cmd_rate_limit == 0
+        assert parse({"tool": {"cmd_rate_limit": -7}}).tool.cmd_rate_limit == DEFAULT_CMD_RATE_LIMIT
+        assert parse({"limit": {"daily_count": 0}}).limit.daily_count == 0
+        assert parse({"limit": {"daily_count": -3}}).limit.daily_count == DEFAULT_DAILY_COUNT
+        # 正常值与扁平旧配置照旧
+        s = parse({"ai_fail_cooldown": 12, "tool": {"cmd_rate_limit": 2}})
+        assert s.ai.fail_cooldown == 12 and s.tool.cmd_rate_limit == 2
+
     def test_legacy_flat_still_loads(self):
         # 升级前扁平配置：分组缺失时回退顶层读取
         s = parse({"show_image": False, "forward_result": True})

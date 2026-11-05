@@ -8,7 +8,13 @@ import decimal
 import math
 from dataclasses import dataclass, field
 
-from .config import _cfg_bool, _cfg_get, _cfg_int
+from .config import (
+    _cfg_bool,
+    _cfg_get,
+    _cfg_int,
+    _cfg_int_non_negative,
+    _is_negative_number,
+)
 
 # ---- 默认值常量：集中管理散落的默认值 / 间隔（改默认值只找这一处） ----
 DEFAULT_SEGMENT_SIZE = 300      # 无标记文本兜底分段长度
@@ -175,16 +181,6 @@ def _budget_seconds(raw, default: int = DEFAULT_AI_BUDGET) -> int:
     return max(1, int(num))
 
 
-def _is_negative_number(raw) -> bool:
-    """原始配置值是不是负数（含 -0.5 这种取整后变 0 的）。坏值 / 布尔不算。"""
-    if isinstance(raw, bool):
-        return False
-    try:
-        return float(raw) < 0
-    except (TypeError, ValueError, OverflowError):
-        return False
-
-
 def parse(config) -> Settings:
     """把一份原始配置解析成 Settings：默认值、旧字段迁移与坏值归一都在这里。
 
@@ -225,7 +221,9 @@ def parse(config) -> Settings:
             enable_ai=_cfg_bool(config, "ai", "enable_ai", True),
             provider_id=str(_cfg_get(config, "ai", "ai_provider", "") or "").strip(),
             timeout=ai_timeout,
-            fail_cooldown=_cfg_int(config, "ai", "ai_fail_cooldown", DEFAULT_AI_COOLDOWN),
+            # 冷却 / 节流 / 每日次数：0 是显式关闭，负数属坏值回默认（别让写错的负数关掉保护）
+            fail_cooldown=_cfg_int_non_negative(
+                config, "ai", "ai_fail_cooldown", DEFAULT_AI_COOLDOWN),
             # 预算归一只认显式 0（不限制），其余坏值回默认；别让取整/溢出把保护关掉。
             budget_seconds=_budget_seconds(
                 _cfg_get(config, "ai", "ai_budget_seconds", DEFAULT_AI_BUDGET)),
@@ -241,11 +239,14 @@ def parse(config) -> Settings:
         ),
         tool=ToolSettings(
             llm_enabled=_cfg_bool(config, "tool", "llm_tool_enabled", True),
-            llm_cooldown=_cfg_int(config, "tool", "llm_tool_cooldown", DEFAULT_TOOL_COOLDOWN),
-            cmd_rate_limit=_cfg_int(config, "tool", "cmd_rate_limit", DEFAULT_CMD_RATE_LIMIT),
+            llm_cooldown=_cfg_int_non_negative(
+                config, "tool", "llm_tool_cooldown", DEFAULT_TOOL_COOLDOWN),
+            cmd_rate_limit=_cfg_int_non_negative(
+                config, "tool", "cmd_rate_limit", DEFAULT_CMD_RATE_LIMIT),
         ),
         limit=LimitSettings(
-            daily_count=_cfg_int(config, "limit", "daily_count", DEFAULT_DAILY_COUNT),
+            daily_count=_cfg_int_non_negative(
+                config, "limit", "daily_count", DEFAULT_DAILY_COUNT),
         ),
         output=OutputSettings(
             send_mode=resolve_send_mode(config),
