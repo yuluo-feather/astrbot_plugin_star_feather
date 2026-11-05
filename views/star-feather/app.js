@@ -134,7 +134,7 @@ async function thumbURL(cardId, upright, width) {
     return url;
   }
   const res = await apiGet("card-image", { id: cardId, upright: upright ? 1 : 0, w: width });
-  const url = `data:${res.mime};base64,${res.data}`;
+  const url = `data:${res.mime};base64,${res.base64}`;
   thumbCache.set(key, url);
   return url;
 }
@@ -147,6 +147,7 @@ async function loadThumb(img) {
                               Number(img.dataset.width));
     if (url) img.src = url;
   } catch (error) {
+    console.warn("card-image failed", img.dataset.cardId, error);
     img.classList.add("thumb-error");
     img.alt = "图片加载失败";
   }

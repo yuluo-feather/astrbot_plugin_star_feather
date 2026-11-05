@@ -166,7 +166,8 @@ class WebUI:
             "mime": "image/webp",
             "width": img.width,
             "height": img.height,
-            "data": base64.b64encode(buf.getvalue()).decode("ascii"),
+            # 别叫 data：bridge 会把响应里顶层的 data 当成 {status, data} 包装拆掉
+            "base64": base64.b64encode(buf.getvalue()).decode("ascii"),
         }
         self._thumbs[key] = payload
         return payload

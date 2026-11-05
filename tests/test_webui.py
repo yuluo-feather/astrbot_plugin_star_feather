@@ -117,10 +117,10 @@ def test_card_image_is_webp_and_reversed_differs():
     reversed_ = ui.card_image(PICK["card"]["id"], False, 120)
     assert upright["mime"] == "image/webp"
     assert upright["width"] == 120
-    raw = base64.b64decode(upright["data"])
+    raw = base64.b64decode(upright["base64"])
     with Image.open(io.BytesIO(raw)) as img:
         assert img.size == (120, upright["height"])
-    assert upright["data"] != reversed_["data"]
+    assert upright["base64"] != reversed_["base64"]
     assert ui.card_image(PICK["card"]["id"], True, 120) is upright  # 同尺寸只编码一次
 
 
