@@ -546,6 +546,7 @@ async function drawPreview() {
   const spread = $("preview-spread").value;
   if (!spread) return;
   previewBusy = true;
+  previewAiSeq += 1;  // 抽牌一开始就作废上一轮 AI，不必等抽牌结果返回
   $("preview-draw").disabled = true;
   $("preview-ai").disabled = true;
   try {
@@ -559,7 +560,6 @@ async function drawPreview() {
       ai: null,
       aiError: "",
     };
-    previewAiSeq += 1;  // 新抽牌作废上一轮还在跑的 AI 请求
     renderPreview();
   } catch (error) {
     showToast(error.message || "抽牌失败");
@@ -601,7 +601,7 @@ async function requestPreviewAI() {
 function updatePreviewAIButton() {
   const button = $("preview-ai");
   if (!button) return;
-  const ready = Boolean(state.preview && state.preview.picks.length);
+  const ready = Boolean(state.preview && state.preview.picks.length) && !previewBusy;
   button.disabled = !ready || !state.aiEnabled;
   button.title = state.aiEnabled ? "" : "AI 深度解读已在配置中关闭";
   $("preview-note").textContent = state.aiEnabled
