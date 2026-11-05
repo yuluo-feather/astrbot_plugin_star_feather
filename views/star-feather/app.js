@@ -325,27 +325,31 @@ async function ensureCardBack(width = 150) {
   cardBackURL = url;
   return url;
 }
-async function loadThumb(img) {
-  if (img.dataset.loaded) return;
-  img.dataset.loaded = "1";
-  const holder = img.closest(".pick-thumb");
-  const card = img.closest(".pick-card");
-  try {
-    const url = await thumbURL(img.dataset.cardId, img.dataset.upright === "1",
-                              Number(img.dataset.width));
-    if (!url) throw new Error("empty thumbnail");
-    img.src = url;
-    // 解码完成后再揭开：预览卡的占位层只在真正能画出图时退场
-    await img.decode();
-    holder?.classList.add("thumb-ready");
-    card?.classList.add("card-ready");
-  } catch (error) {
-    console.warn("card-image failed", img.dataset.cardId, error);
-    img.classList.add("thumb-error");
-    img.alt = "图片加载失败";
-    holder?.classList.add("thumb-ready");
-    card?.classList.add("card-ready");
-  }
+function loadThumb(img) {
+  if (img._thumbPromise) return img._thumbPromise;
+  img._thumbPromise = (async () => {
+    if (img.dataset.loaded) return;
+    img.dataset.loaded = "1";
+    const holder = img.closest(".pick-thumb");
+    const card = img.closest(".pick-card");
+    try {
+      const url = await thumbURL(img.dataset.cardId, img.dataset.upright === "1",
+                                Number(img.dataset.width));
+      if (!url) throw new Error("empty thumbnail");
+      img.src = url;
+      // 解码完成后再揭开：预览卡的占位层只在真正能画出图时退场
+      await img.decode();
+      holder?.classList.add("thumb-ready");
+      card?.classList.add("card-ready");
+    } catch (error) {
+      console.warn("card-image failed", img.dataset.cardId, error);
+      img.classList.add("thumb-error");
+      img.alt = "图片加载失败";
+      holder?.classList.add("thumb-ready");
+      card?.classList.add("card-ready");
+    }
+  })();
+  return img._thumbPromise;
 }
 
 function makeThumb(cardId, upright, width, alt) {
@@ -704,7 +708,7 @@ function renderPreview({ animate = false } = {}) {
     const card = el("article", "pick-card");
     if (animate) {
       card.classList.add("flip-animate");
-      card.style.setProperty("--flip-delay", `${index * 90}ms`);
+      card.style.setProperty("--flip-delay", `${index * 130}ms`);
     }
     const figure = el("div", "pick-figure");
     const thumb = el("div", "pick-thumb");
@@ -747,12 +751,22 @@ function renderPreview({ animate = false } = {}) {
   box.append(grid);
   box.append(buildAiBlock(preview, false));
   if (animate) {
-    ensureCardBack().then((url) => {
-      if (!url) return;
-      box.querySelectorAll(".pick-back").forEach((node) => {
-        node.style.backgroundImage = `url("${url}")`;
+    // 等所有正面和牌背都就绪后再统一起跳：否则先 decode 完的牌会抢先翻，
+    // 顺序和间隔都会随图片加载时间漂移。
+    const fronts = [...grid.querySelectorAll(".pick-front .thumb")];
+    Promise.all(fronts.map((img) => loadThumb(img)))
+      .then(() => ensureCardBack())
+      .then((url) => {
+        if (url) {
+          box.querySelectorAll(".pick-back").forEach((node) => {
+            node.style.backgroundImage = `url("${url}")`;
+          });
+        }
+        grid.classList.add("flips-ready");
+      })
+      .catch(() => {
+        grid.classList.add("flips-ready");
       });
-    }).catch(() => {});
   }
 }
 

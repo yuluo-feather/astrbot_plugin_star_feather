@@ -896,13 +896,13 @@ h1 {
   opacity: 0;
 }
 
-.pick-card.flip-animate .pick-thumb.thumb-ready .pick-back {
-  animation: back-out 300ms ease-in both;
+.preview-cards.flips-ready .pick-card.flip-animate .pick-back {
+  animation: back-out 450ms ease-in both;
   animation-delay: var(--flip-delay, 0ms);
 }
 
-.pick-card.flip-animate .pick-thumb.thumb-ready .pick-front {
-  animation: front-in 300ms ease-out both;
+.preview-cards.flips-ready .pick-card.flip-animate .pick-front {
+  animation: front-in 450ms ease-out both;
   animation-delay: var(--flip-delay, 0ms);
 }
 
@@ -918,9 +918,9 @@ h1 {
 
 .pick-card.flip-animate .pick-body { opacity: 0; }
 
-.pick-card.flip-animate.card-ready .pick-body {
+.preview-cards.flips-ready .pick-card.flip-animate .pick-body {
   animation: body-in 200ms ease-out both;
-  animation-delay: calc(var(--flip-delay, 0ms) + 300ms);
+  animation-delay: calc(var(--flip-delay, 0ms) + 450ms);
 }
 
 @keyframes body-in {
@@ -959,19 +959,19 @@ h1 {
 
 @media (prefers-reduced-motion: reduce) {
   .pick-card.flip-animate .pick-back,
-  .pick-card.flip-animate .pick-thumb.thumb-ready .pick-back {
+  .preview-cards.flips-ready .pick-card.flip-animate .pick-back {
     transform: rotateY(-90deg);
     opacity: 0;
     animation: none;
   }
   .pick-card.flip-animate .pick-front,
-  .pick-card.flip-animate .pick-thumb.thumb-ready .pick-front {
+  .preview-cards.flips-ready .pick-card.flip-animate .pick-front {
     transform: rotateY(0deg);
     opacity: 1;
     animation: none;
   }
   .pick-card.flip-animate .pick-body,
-  .pick-card.flip-animate.card-ready .pick-body {
+  .preview-cards.flips-ready .pick-card.flip-animate .pick-body {
     opacity: 1;
     animation: none;
   }
