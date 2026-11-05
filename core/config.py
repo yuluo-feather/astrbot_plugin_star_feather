@@ -7,6 +7,7 @@ AstrBot 按 _conf_schema.json 的 object 分组存储后，子项落在 group di
 （说白了：配置这玩意儿，宁可给默认值，也不能让它炸。）
 """
 
+import math
 from typing import Any
 
 
@@ -65,9 +66,11 @@ def _is_negative_number(raw) -> bool:
     if isinstance(raw, bool):
         return False
     try:
-        return float(raw) < 0
+        num = float(raw)
     except (TypeError, ValueError, OverflowError):
         return False
+    # -0.0 带负号但 `num < 0` 为假：要单独看符号位，否则会被 int() 当成显式 0
+    return num < 0 or (num == 0 and math.copysign(1.0, num) < 0)
 
 
 def _cfg_int_non_negative(config: dict[str, Any] | None, group: str, key: str, default: int) -> int:
