@@ -141,8 +141,12 @@ class WebUI:
 
     async def daily_list(self) -> dict:
         today = self.clock.today()
+        # 索引最多 500 位，列表只取最近 _MAX_LIST 位：把索引数量与展示数量一并返回，
+        # 前端才能说明「还有记录没显示」，也不会把索引数量误报成当天总人数。
+        users = await self.daily.users_for(today)
+        shown = users[-_MAX_LIST:]
         items = []
-        for uid in (await self.daily.users_for(today))[:_MAX_LIST]:
+        for uid in shown:
             record = await self.daily.read_record(uid)
             if record is None or record.date != today:
                 continue
@@ -157,7 +161,13 @@ class WebUI:
                 "stale": self._record_stale(record),
             })
         items.sort(key=lambda item: item["uid"])
-        return {"date": today, "items": items}
+        return {
+            "date": today,
+            "items": items,
+            "indexed_total": len(users),
+            "shown": len(shown),
+            "truncated": len(users) > _MAX_LIST,
+        }
 
     async def daily_detail(self, uid: str) -> dict | None:
         record = await self.daily.read_record(uid)

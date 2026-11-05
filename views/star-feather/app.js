@@ -8,6 +8,7 @@ const state = {
   items: [], selected: null, cards: [], spreads: [], reversed: false,
   overview: null, cardDetail: null, detailUpright: true,
   preview: null, aiEnabled: true,
+  listIndexedTotal: 0, listShown: 0, listTruncated: false,
 };
 const thumbCache = new Map();
 
@@ -109,12 +110,13 @@ function demoApi(endpoint, params = {}) {
     };
   }
   if (endpoint === "daily/list") {
+    const items = Object.values(DEMO_RECORDS).map((r) => ({
+      uid: r.uid, card_id: r.card.id, card_cn: r.card.cn, upright: r.upright,
+      spirit: r.spirit, topics: r.topics.length, stale: r.stale,
+    }));
     return {
-      date: "20261105",
-      items: Object.values(DEMO_RECORDS).map((r) => ({
-        uid: r.uid, card_id: r.card.id, card_cn: r.card.cn, upright: r.upright,
-        spirit: r.spirit, topics: r.topics.length, stale: r.stale,
-      })),
+      date: "20261105", items, indexed_total: items.length,
+      shown: items.length, truncated: false,
     };
   }
   if (endpoint === "daily/detail") return DEMO_RECORDS[params.uid] || null;
@@ -321,6 +323,15 @@ function renderStats(data) {
 function renderDailyList() {
   const list = $("daily-list");
   list.replaceChildren();
+  const note = $("daily-note");
+  if (state.listTruncated) {
+    note.textContent = `当前索引覆盖 ${state.listIndexedTotal} 位用户，`
+      + `页面显示最近 ${state.listShown} 位`;
+    note.classList.remove("hidden");
+  } else {
+    note.textContent = "";
+    note.classList.add("hidden");
+  }
   if (!state.items.length) {
     list.append(el("p", "empty", "今天还没有牌运记录。抽一签后这里会出现。"));
     return;
@@ -742,6 +753,10 @@ async function refresh() {
   try {
     const data = await apiGet("daily/list");
     state.items = data.items || [];
+    state.listIndexedTotal = Number.isFinite(data.indexed_total)
+      ? data.indexed_total : state.items.length;
+    state.listShown = Number.isFinite(data.shown) ? data.shown : state.items.length;
+    state.listTruncated = Boolean(data.truncated);
     const stillSelected = Boolean(state.selected)
       && state.items.some((item) => item.uid === state.selected);
     renderDailyList();

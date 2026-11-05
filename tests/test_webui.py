@@ -79,6 +79,32 @@ def test_daily_list_lists_indexed_users():
     assert item["stale"] is False
 
 
+def test_daily_list_reports_indexed_total_and_no_truncation():
+    kv = {}
+    daily, ui = _make(kv)
+    _seed(daily, "u1")
+    data = asyncio.run(ui.daily_list())
+    assert data["indexed_total"] == 1
+    assert data["shown"] == 1
+    assert data["truncated"] is False
+
+
+def test_daily_list_prefers_the_most_recent_users_past_the_cap():
+    """超出列表上限时展示最近登记的用户，并说清索引覆盖了多少。（SF-WEB-02）"""
+    from data.plugins.astrbot_plugin_star_feather.app.webui import _MAX_LIST
+
+    uids = [f"u{i:03d}" for i in range(_MAX_LIST + 50)]
+    kv = {"sf_daily_index": {"date": DAY, "uids": uids}}
+    daily, ui = _make(kv)
+    _seed(daily, uids[0])    # 最早登记：落在展示窗口外
+    _seed(daily, uids[-1])   # 最近登记：必须被展示
+    data = asyncio.run(ui.daily_list())
+    assert data["indexed_total"] == _MAX_LIST + 50
+    assert data["shown"] == _MAX_LIST
+    assert data["truncated"] is True
+    assert [item["uid"] for item in data["items"]] == [uids[-1]]
+
+
 def test_detail_serializes_topics_and_stale_flag():
     kv = {}
     daily, ui = _make(kv)
