@@ -490,7 +490,9 @@ function initNearMeteors() {
 }
 
 function scheduleMeteor(near) {
-  // 近流星停用后，原流星的间隔减半来补数量
+  // 初版是 3.6–8.8 秒一颗。这里两处都是有意加密：先按「提高流星密度」调到
+  // 1.6–3.8，近流星停用后再减半到 0.8–1.9 补数量。叠加 30% 连发后，
+  // 净频率约为初版的 6 倍——不是单纯的对半补偿。
   const delay = near
     ? 900 + Math.random() * 1100
     : 800 + Math.random() * 1100;
