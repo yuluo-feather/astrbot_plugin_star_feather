@@ -158,7 +158,7 @@ function scheduleMeteor() {
 function initSky() {
   const box = $("sky-stars");
   if (!box || box.childElementCount) return;
-  const count = 140;
+  const count = 80;
   for (let i = 0; i < count; i += 1) {
     const star = el("span", "star");
     const size = Math.random() < 0.82 ? 1.5 : 2.5;

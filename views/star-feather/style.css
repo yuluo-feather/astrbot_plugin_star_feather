@@ -33,70 +33,23 @@ body {
   line-height: 1.55;
 }
 
-/* 夜空背景：深空 + 星云 + 地平线雾带 + 水面倒影，纯 CSS/JS，不引外部素材 */
+/* 夜空背景：创意工坊原画（非商业使用）+ 闪烁星点与流星 */
 .sky {
   position: fixed;
   inset: 0;
   z-index: -1;
   overflow: hidden;
   pointer-events: none;
-  background:
-    radial-gradient(24% 18% at 80% 20%, rgba(206, 92, 146, 0.26) 0%, transparent 72%),
-    radial-gradient(30% 22% at 72% 36%, rgba(96, 198, 240, 0.22) 0%, transparent 70%),
-    radial-gradient(46% 34% at 66% 44%, rgba(52, 132, 226, 0.34) 0%, rgba(34, 74, 168, 0.2) 42%, transparent 74%),
-    radial-gradient(120% 100% at 20% 0%, #04050c 0%, #05081a 38%, #040611 72%, #02030a 100%);
+  background: #04050f url("./assets/bg.webp") center / cover no-repeat;
 }
 
+/* 压暗层：让前景面板上的文字在亮处也读得清（不是倒影） */
 .sky::before {
   content: "";
   position: absolute;
-  left: -10%;
-  right: -10%;
-  top: 50%;
-  height: 20%;
-  background:
-    radial-gradient(58% 100% at 60% 58%, rgba(206, 234, 255, 0.5), transparent 72%),
-    radial-gradient(48% 100% at 38% 58%, rgba(96, 156, 224, 0.35), transparent 76%);
-  filter: blur(16px);
-}
-
-.sky::after {
-  content: "";
-  position: absolute;
-  inset: 62% 0 0 0;
-  background:
-    radial-gradient(50% 70% at 68% 8%, rgba(72, 122, 224, 0.3), transparent 70%),
-    radial-gradient(42% 62% at 50% 30%, rgba(112, 70, 184, 0.18), transparent 76%),
-    repeating-linear-gradient(180deg,
-      rgba(150, 190, 255, 0.05) 0 1px, transparent 1px 9px),
-    linear-gradient(180deg, rgba(18, 44, 96, 0.55), rgba(4, 6, 16, 0.92));
-  -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 54%, transparent);
-  mask-image: linear-gradient(180deg, #000 0%, #000 54%, transparent);
-}
-
-.sky-horizon {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 62%;
-  height: 1px;
-  background: linear-gradient(90deg,
-    transparent 0%, rgba(206, 232, 255, 0.5) 32%,
-    rgba(232, 246, 255, 0.78) 62%, transparent 100%);
-  box-shadow: 0 0 20px 5px rgba(160, 210, 255, 0.22);
-}
-
-.sky-planet {
-  position: absolute;
-  top: 15%;
-  right: 13%;
-  width: min(96px, 22vw);
-  height: min(96px, 22vw);
-  border-radius: 50%;
-  background: radial-gradient(circle at 36% 36%,
-    rgba(240, 140, 166, 0.66), rgba(168, 66, 112, 0.22) 46%, transparent 70%);
-  filter: blur(1px);
-  opacity: 0.8;
+  inset: 0;
+  background: linear-gradient(180deg,
+    rgba(3, 6, 16, 0.38) 0%, rgba(3, 6, 16, 0.16) 45%, rgba(3, 6, 16, 0.58) 100%);
 }
 
 .sky-stars { position: absolute; inset: 0; }
@@ -145,8 +98,16 @@ body {
 }
 
 @keyframes twinkle {
-  0%, 100% { opacity: 0.22; }
-  50% { opacity: 0.95; }
+  0%, 100% { opacity: 0.18; }
+  50% { opacity: 0.8; }
+}
+
+.credit {
+  margin: 30px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+  opacity: 0.7;
 }
 
 @media (prefers-reduced-motion: reduce) {
