@@ -33,14 +33,14 @@ body {
   line-height: 1.55;
 }
 
-/* 夜空背景：创意工坊原画的地平线以上部分（非商业使用，署名见 README） */
+/* 夜空背景：创意工坊原画整图（已修掉人物倒影与波纹；非商业使用，署名见 README） */
 .sky {
   position: fixed;
   inset: 0;
   z-index: -1;
   overflow: hidden;
   pointer-events: none;
-  background: #04050f url("./assets/bg-sky.webp") 65% top / cover no-repeat;
+  background: #04050f url("./assets/bg.webp") 62% center / cover no-repeat;
 }
 
 /* 压暗层：让前景面板上的文字在亮处也读得清（不是倒影） */
