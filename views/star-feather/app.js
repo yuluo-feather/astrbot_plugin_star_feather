@@ -4,8 +4,15 @@ const bridge = window.AstrBotPluginView;
 const DEMO = !bridge;
 
 const $ = (id) => document.getElementById(id);
-const state = { items: [], selected: null, cards: [], reversed: false, overview: null };
+const state = {
+  items: [], selected: null, cards: [], spreads: [], reversed: false,
+  overview: null, cardDetail: null, detailUpright: true,
+};
 const thumbCache = new Map();
+
+const SUIT_NAMES = {
+  major: "大阿卡纳", wands: "权杖", cups: "圣杯", swords: "宝剑", pentacles: "星币",
+};
 
 const DEMO_CARDS = [
   { id: "major_00", cn: "愚者" }, { id: "major_01", cn: "魔术师" },
@@ -45,6 +52,52 @@ const DEMO_RECORDS = {
   },
 };
 
+const DEMO_MEANING = {
+  up: {
+    keywords: ["新的开始", "冒险", "信任直觉"],
+    what: "一条还没被标好的路正等你迈出第一步，未知里藏着机会。",
+    how: "别急着问终点在哪里，先迈一步，路会自己长出来。",
+  },
+  down: {
+    keywords: ["冲动冒险", "缺少规划", "逃避现实"],
+    what: "脚步已经迈出去了，方向却还没准备好。",
+    turn: "停下来核一次方向，别急着用速度盖过犹豫。",
+    energy: "焦躁 ↓ 先把节奏放慢，再看下一步。",
+  },
+};
+
+const DEMO_SPREADS = [
+  { name: "羽签", scenario: "一句话、一件小事、此刻的状态。抽一张，看当下最关键的那点。",
+    positions: [{ name: "你的当下", meaning: "此刻最需要被看见的状态" }] },
+  { name: "羽时三刻", scenario: "想看一件事怎么走到现在、接下来往哪去。三张牌按时间线排开。",
+    positions: [
+      { name: "过去", meaning: "事情的来处" },
+      { name: "现在", meaning: "此刻的落点" },
+      { name: "未来", meaning: "照当前趋势的走向" },
+    ] },
+  { name: "羽镜", scenario: "拿不定主意、想看清卡点与下一步。像照镜子一样照出阻力。",
+    positions: [
+      { name: "现状", meaning: "事情现在的样子" },
+      { name: "阻碍", meaning: "卡住你的那一点" },
+      { name: "建议", meaning: "可以试着挪动的地方" },
+    ] },
+  { name: "恋羽十字", scenario: "两个人的关系：各自的状态、关系本身，以及照当前趋势的走向。",
+    positions: [
+      { name: "你", meaning: "你在这段关系里的状态" },
+      { name: "对方", meaning: "对方此刻的状态" },
+      { name: "关系现状", meaning: "两个人之间的实际温度" },
+      { name: "未来走向", meaning: "照当前趋势的走向" },
+    ] },
+];
+
+function demoCardDetail(cardId) {
+  const card = DEMO_CARDS.find((item) => item.id === cardId) || { id: cardId, cn: cardId };
+  return {
+    id: card.id, cn: card.cn, en: "Demo Card", suit: "major", num: "",
+    up: DEMO_MEANING.up, down: DEMO_MEANING.down,
+  };
+}
+
 function demoApi(endpoint, params = {}) {
   if (endpoint === "overview") {
     return {
@@ -65,6 +118,8 @@ function demoApi(endpoint, params = {}) {
   }
   if (endpoint === "daily/detail") return DEMO_RECORDS[params.uid] || null;
   if (endpoint === "cards") return { items: DEMO_CARDS };
+  if (endpoint === "card-detail") return demoCardDetail(params.id);
+  if (endpoint === "spreads") return { items: DEMO_SPREADS };
   throw new Error("预览模式没有这个接口");
 }
 
@@ -294,12 +349,110 @@ function renderCards() {
     cell.type = "button";
     cell.append(makeThumb(card.id, state.reversed, 150, card.cn));
     cell.append(el("span", "card-name", card.cn));
-    cell.addEventListener("click", () => openLightbox(card));
+    cell.addEventListener("click", () => openCardDetail(card));
     grid.append(cell);
   }
 }
 
-async function openLightbox(card) {
+async function openCardDetail(card) {
+  try {
+    const detail = await apiGet("card-detail", { id: card.id });
+    state.cardDetail = detail;
+    state.detailUpright = !state.reversed;
+    $("card-modal").classList.remove("hidden");
+    renderCardDetail();
+  } catch (error) {
+    showToast(error.message || "牌义加载失败");
+  }
+}
+
+function renderCardDetail() {
+  const detail = state.cardDetail;
+  if (!detail) return;
+  const upright = state.detailUpright;
+  const part = (upright ? detail.up : detail.down) || {};
+
+  $("card-modal-name").textContent = detail.cn;
+  $("card-modal-en").textContent = detail.en || "";
+  const suit = SUIT_NAMES[detail.suit] || detail.suit || "";
+  $("card-modal-meta").textContent = `${suit}${detail.num ? ` · ${detail.num}` : ""}`;
+
+  for (const button of $("card-orient").querySelectorAll("button")) {
+    button.classList.toggle("active", button.dataset.upright === (upright ? "1" : "0"));
+  }
+
+  const img = $("card-modal-img");
+  img.alt = detail.cn;
+  img.removeAttribute("src");
+  thumbURL(detail.id, upright, 240).then((url) => {
+    if (url) img.src = url;
+  }).catch(() => showToast("牌面加载失败"));
+
+  const body = $("card-modal-body");
+  body.replaceChildren();
+  const keywords = Array.isArray(part.keywords) ? part.keywords : [];
+  if (keywords.length) {
+    const row = el("div", "kw-row");
+    for (const keyword of keywords) row.append(el("span", "kw", String(keyword)));
+    body.append(row);
+  }
+  const rows = upright
+    ? [["牌义", part.what], ["建议", part.how]]
+    : [["牌义", part.what], ["提醒", part.turn], ["能量", part.energy]];
+  for (const [label, text] of rows) {
+    if (!text) continue;
+    const section = el("section", "meaning");
+    section.append(el("dt", "meaning-label", label));
+    section.append(el("dd", "meaning-text", String(text)));
+    body.append(section);
+  }
+}
+
+function closeCardDetail() {
+  $("card-modal").classList.add("hidden");
+  state.cardDetail = null;
+}
+
+// ---- 牌阵介绍 ----
+async function loadSpreads() {
+  if (state.spreads.length) {
+    renderSpreads();
+    return;
+  }
+  try {
+    const data = await apiGet("spreads");
+    state.spreads = data.items || [];
+    renderSpreads();
+  } catch (error) {
+    showToast(error.message || "牌阵清单加载失败");
+  }
+}
+
+function renderSpreads() {
+  const box = $("spread-grid");
+  box.replaceChildren();
+  for (const spread of state.spreads) {
+    const card = el("article", "spread-card");
+    const head = el("div", "spread-head");
+    head.append(el("h3", "", spread.name));
+    head.append(el("span", "tag", `${spread.positions.length} 张`));
+    card.append(head);
+    if (spread.scenario) card.append(el("p", "spread-scenario", spread.scenario));
+
+    const layout = el("div", "spread-layout");
+    spread.positions.forEach((position, index) => {
+      const slot = el("div", "spread-slot");
+      slot.append(el("span", "spread-num", String(index + 1)));
+      slot.append(el("strong", "spread-pos", position.name));
+      if (position.meaning) slot.append(el("span", "spread-mean", position.meaning));
+      layout.append(slot);
+    });
+    card.append(layout);
+    box.append(card);
+  }
+}
+
+async function openLightbox(card, upright = state.reversed) {
   const box = $("lightbox");
   const img = $("lightbox-img");
   img.removeAttribute("src");
@@ -307,7 +460,7 @@ async function openLightbox(card) {
   box.classList.remove("hidden");
   img.dataset.loaded = "";
   try {
-    const url = await thumbURL(card.id, state.reversed, 420);
+    const url = await thumbURL(card.id, upright, 420);
     if (url) img.src = url;
   } catch {
     showToast("大图加载失败");
@@ -325,7 +478,9 @@ function switchTab(tab) {
   }
   $("panel-daily").classList.toggle("hidden", tab !== "daily");
   $("panel-cards").classList.toggle("hidden", tab !== "cards");
+  $("panel-spreads").classList.toggle("hidden", tab !== "spreads");
   if (tab === "cards") loadCards();
+  if (tab === "spreads") loadSpreads();
 }
 
 async function refresh() {
@@ -374,8 +529,24 @@ async function boot() {
     renderCards();
   });
   $("lightbox").addEventListener("click", closeLightbox);
+  $("card-modal-close").addEventListener("click", closeCardDetail);
+  $("card-modal").addEventListener("click", (event) => {
+    if (event.target === $("card-modal")) closeCardDetail();
+  });
+  $("card-modal-img").addEventListener("click", () => {
+    if (state.cardDetail) openLightbox(state.cardDetail, state.detailUpright);
+  });
+  for (const button of $("card-orient").querySelectorAll("button")) {
+    button.addEventListener("click", () => {
+      state.detailUpright = button.dataset.upright === "1";
+      renderCardDetail();
+    });
+  }
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") closeLightbox();
+    if (event.key === "Escape") {
+      closeLightbox();
+      closeCardDetail();
+    }
   });
   await refresh();
 }

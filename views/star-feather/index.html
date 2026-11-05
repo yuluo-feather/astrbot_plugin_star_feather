@@ -23,7 +23,8 @@
 
   <nav class="tabs" role="tablist">
     <button class="tab active" data-tab="daily" type="button">今日牌运</button>
-    <button class="tab" data-tab="cards" type="button">牌面预览</button>
+    <button class="tab" data-tab="cards" type="button">牌意图鉴</button>
+    <button class="tab" data-tab="spreads" type="button">牌阵介绍</button>
   </nav>
 
   <main>
@@ -43,11 +44,35 @@
           <input type="checkbox" id="reversed" />
           <span>逆位预览</span>
         </label>
-        <span class="hint">点牌面看大图</span>
+        <span class="hint">点牌面看牌义与关键词</span>
       </div>
       <div class="card-grid" id="card-grid"></div>
     </section>
+
+    <section id="panel-spreads" class="panel hidden">
+      <div class="spread-grid" id="spread-grid"></div>
+    </section>
   </main>
+
+  <div id="card-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-panel">
+      <button id="card-modal-close" class="modal-close" type="button" aria-label="关闭">×</button>
+      <div class="card-modal-head">
+        <img id="card-modal-img" class="thumb card-modal-img" alt="" />
+        <div class="card-modal-info">
+          <h2 id="card-modal-name"></h2>
+          <p id="card-modal-en" class="detail-meta"></p>
+          <p id="card-modal-meta" class="detail-meta"></p>
+          <div class="seg" id="card-orient" role="group" aria-label="正逆位">
+            <button type="button" data-upright="1">正位</button>
+            <button type="button" data-upright="0">逆位</button>
+          </div>
+          <p class="hint">点牌面看大图</p>
+        </div>
+      </div>
+      <div id="card-modal-body" class="card-modal-body"></div>
+    </div>
+  </div>
 
   <div id="toast" class="toast" role="status"></div>
   <div id="lightbox" class="lightbox hidden" role="dialog" aria-modal="true">

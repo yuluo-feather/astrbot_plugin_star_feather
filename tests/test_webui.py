@@ -10,6 +10,7 @@ import types
 
 from data.plugins.astrbot_plugin_star_feather.app.webui import WebUI
 from data.plugins.astrbot_plugin_star_feather.core.settings import STRUCTURE_CHECK_LOOSE
+from data.plugins.astrbot_plugin_star_feather.core.spreads import FORMATIONS
 from data.plugins.astrbot_plugin_star_feather.core.tarot_data import TAROT_CARDS
 from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
 from PIL import Image
@@ -111,6 +112,32 @@ def test_cards_returns_the_whole_deck():
     assert len({card["id"] for card in cards}) == 78
 
 
+def test_card_detail_exposes_both_orientations():
+    _, ui = _make({})
+    detail = ui.card_detail(PICK["card"]["id"])
+    assert detail["cn"] == PICK["card"]["cn"]
+    assert detail["up"]["keywords"] and detail["up"]["what"] and detail["up"]["how"]
+    assert detail["down"]["keywords"] and detail["down"]["turn"]
+
+
+def test_card_detail_rejects_unknown_card():
+    import pytest
+
+    _, ui = _make({})
+    with pytest.raises(FileNotFoundError):
+        ui.card_detail("not-a-card")
+
+
+def test_spreads_reuse_formation_positions():
+    _, ui = _make({})
+    spreads = ui.spreads()
+    assert [spread["name"] for spread in spreads] == list(FORMATIONS)
+    for spread in spreads:
+        assert [position["name"] for position in spread["positions"]] == \
+            FORMATIONS[spread["name"]]
+        assert spread["scenario"]
+
+
 def test_card_image_is_webp_and_reversed_differs():
     _, ui = _make({})
     upright = ui.card_image(PICK["card"]["id"], True, 120)
@@ -147,6 +174,8 @@ def test_register_needs_host_api_and_uses_plugin_prefix():
     host = _Host()
     assert ui.register(host) is True
     routes = [route for route, _methods, _desc in host.routes]
-    assert len(routes) == 5
+    assert len(routes) == 7
     assert all(route.startswith("/astrbot_plugin_star_feather/") for route in routes)
     assert "/astrbot_plugin_star_feather/daily/list" in routes
+    assert "/astrbot_plugin_star_feather/card-detail" in routes
+    assert "/astrbot_plugin_star_feather/spreads" in routes

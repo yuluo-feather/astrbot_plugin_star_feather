@@ -14,6 +14,7 @@ import io
 from PIL import Image
 
 from ..ai.parse import interpretation_from_record
+from ..core.spreads import FORMATIONS
 from ..core.tarot_data import TAROT_CARDS
 from ..render.assets import asset_path_by_id
 
@@ -21,6 +22,40 @@ PLUGIN_NAME = "astrbot_plugin_star_feather"
 _CARDS_BY_ID = {c["id"]: c for c in TAROT_CARDS}
 _MAX_LIST = 200
 _MAX_WIDTH = 640
+
+# 牌阵的适用场景与牌位说明是视图文案：牌位名只从 core/spreads.py 取，
+# 这里只补「这个阵拿来问什么」和每个牌位的一句话含义。
+SPREAD_INFO = {
+    "羽签": {
+        "scenario": "一句话、一件小事、此刻的状态。抽一张，看当下最关键的那点。",
+        "positions": {"你的当下": "此刻最需要被看见的状态"},
+    },
+    "羽时三刻": {
+        "scenario": "想看一件事怎么走到现在、接下来往哪去。三张牌按时间线排开。",
+        "positions": {
+            "过去": "事情的来处",
+            "现在": "此刻的落点",
+            "未来": "照当前趋势的走向",
+        },
+    },
+    "羽镜": {
+        "scenario": "拿不定主意、想看清卡点与下一步。像照镜子一样照出阻力。",
+        "positions": {
+            "现状": "事情现在的样子",
+            "阻碍": "卡住你的那一点",
+            "建议": "可以试着挪动的地方",
+        },
+    },
+    "恋羽十字": {
+        "scenario": "两个人的关系：各自的状态、关系本身，以及照当前趋势的走向。",
+        "positions": {
+            "你": "你在这段关系里的状态",
+            "对方": "对方此刻的状态",
+            "关系现状": "两个人之间的实际温度",
+            "未来走向": "照当前趋势的走向",
+        },
+    },
+}
 
 
 class WebUI:
@@ -43,6 +78,8 @@ class WebUI:
         register(f"{prefix}/daily/list", self.h_daily_list, ["GET"], "Daily fortune list")
         register(f"{prefix}/daily/detail", self.h_daily_detail, ["GET"], "Daily fortune detail")
         register(f"{prefix}/cards", self.h_cards, ["GET"], "Tarot card list")
+        register(f"{prefix}/card-detail", self.h_card_detail, ["GET"], "Tarot card meanings")
+        register(f"{prefix}/spreads", self.h_spreads, ["GET"], "Tarot spread list")
         register(f"{prefix}/card-image", self.h_card_image, ["GET"], "Tarot card thumbnail")
         return True
 
@@ -145,6 +182,35 @@ class WebUI:
             for c in TAROT_CARDS
         ]
 
+    def card_detail(self, card_id: str) -> dict:
+        """单张牌的完整牌义（图鉴详情用）。"""
+        card = _CARDS_BY_ID.get(card_id)
+        if card is None:
+            raise FileNotFoundError(f"没有这张牌: {card_id!r}")
+        return {
+            "id": card["id"],
+            "cn": card["cn"],
+            "en": card.get("en", ""),
+            "suit": card.get("suit", ""),
+            "num": str(card.get("num", "")),
+            "up": card.get("up", {}),
+            "down": card.get("down", {}),
+        }
+
+    def spreads(self) -> list[dict]:
+        """牌阵清单：牌位名只从 FORMATIONS 取，场景说明在这里补。"""
+        result = []
+        for name, positions in FORMATIONS.items():
+            info = SPREAD_INFO.get(name, {})
+            notes = info.get("positions", {})
+            result.append({
+                "name": name,
+                "scenario": info.get("scenario", ""),
+                "positions": [{"name": p, "meaning": notes.get(p, "")}
+                              for p in positions],
+            })
+        return result
+
     def card_image(self, card_id: str, upright: bool = True, width: int = 180) -> dict:
         """牌面缩略图（WebP base64）；同一尺寸只编码一次。"""
         if card_id not in _CARDS_BY_ID:
@@ -193,6 +259,18 @@ class WebUI:
 
     async def h_cards(self):
         return {"items": self.cards()}
+
+    async def h_card_detail(self):
+        from astrbot.api.web import request
+
+        card_id = str(request.query.get("id", "") or "").strip()
+        try:
+            return self.card_detail(card_id)
+        except FileNotFoundError as e:
+            return {"status": "error", "message": str(e)}, 404
+
+    async def h_spreads(self):
+        return {"items": self.spreads()}
 
     async def h_card_image(self):
         from astrbot.api.web import request
