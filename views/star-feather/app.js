@@ -184,8 +184,20 @@ function scheduleMeteor() {
   }, 3600 + Math.random() * 5200);
 }
 
-function initSky() {
-  const box = $("sky-stars");
+// 地平线在视口里的位置：与背景 cover 的缩放/居中保持一致，倒影层据此翻转
+function layoutBackdrop() {
+  const imgW = 5120;
+  const imgH = 2880;
+  const horizon = 2014;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const scale = Math.max(vw / imgW, vh / imgH);
+  const dy = (vh - imgH * scale) / 2;
+  const hy = dy + horizon * scale;
+  document.documentElement.style.setProperty("--horizon-y", `${hy.toFixed(1)}px`);
+}
+
+function initSky() {  const box = $("sky-stars");
   if (!box || box.childElementCount) return;
   const count = 80;
   for (let i = 0; i < count; i += 1) {
@@ -202,6 +214,11 @@ function initSky() {
     star.style.animationDelay = `${Math.random() * 4}s`;
     if (Math.random() < 0.08) star.classList.add("bright");
     box.append(star);
+  }
+  // 倒影层复用同一批星点：位置、亮度和闪烁相位一致，靠水面波纹产生错动
+  const mirror = $("water-stars");
+  if (mirror && !mirror.childElementCount) {
+    for (const star of box.children) mirror.append(star.cloneNode(true));
   }
   if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
     spawnMeteor();
@@ -790,6 +807,8 @@ async function boot() {
   }
   $("version").textContent = "";
   initSky();
+  layoutBackdrop();
+  window.addEventListener("resize", layoutBackdrop);
   for (const button of document.querySelectorAll(".tab")) {
     button.addEventListener("click", () => switchTab(button.dataset.tab));
   }

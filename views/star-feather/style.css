@@ -11,6 +11,7 @@
   --rev: #e08a9c;
   --shadow: 0 16px 44px rgba(0, 0, 0, 0.42);
   --radius: 14px;
+  --horizon-y: 70vh;
 }
 
 * { box-sizing: border-box; }
@@ -33,14 +34,21 @@ body {
   line-height: 1.55;
 }
 
-/* 夜空背景：创意工坊原画整图（已修掉人物倒影与波纹；非商业使用，署名见 README） */
+/* 夜空背景：创意工坊原画（上半部星空 + 水面底色；非商业使用，署名见 README） */
 .sky {
   position: fixed;
   inset: 0;
   z-index: -1;
   overflow: hidden;
   pointer-events: none;
-  background: #04050f url("./assets/bg.webp") 62% center / cover no-repeat;
+  background: #04050f url("./assets/bg_sky.webp") 62% center / cover no-repeat;
+  animation: nebula-cycle 12.5s linear infinite;
+}
+
+/* 星云色相循环：原场景 hue_shift 的 speed=0.08（HSV 色相每秒 +0.08，12.5s 一圈全色谱） */
+@keyframes nebula-cycle {
+  from { filter: hue-rotate(0deg); }
+  to { filter: hue-rotate(360deg); }
 }
 
 /* 压暗层：让前景面板上的文字在亮处也读得清（不是倒影） */
@@ -48,14 +56,65 @@ body {
   content: "";
   position: absolute;
   inset: 0;
+  z-index: 3;
   background: linear-gradient(180deg,
-    rgba(3, 6, 16, 0.38) 0%, rgba(3, 6, 16, 0.16) 45%, rgba(3, 6, 16, 0.58) 100%);
+    rgba(3, 6, 16, 0.38) 0%, rgba(3, 6, 16, 0.16) 45%, rgba(3, 6, 16, 0.46) 100%);
 }
+
+/* 地平线高光：保留原场景那条白色亮带，同时盖住倒影层顶边的接缝 */
+.sky::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(var(--horizon-y) - 8px);
+  height: 18px;
+  z-index: 2;
+  pointer-events: none;
+  background: radial-gradient(70% 100% at 50% 50%,
+    rgba(255, 255, 255, 0.72) 0%, rgba(220, 240, 255, 0.26) 52%, transparent 82%);
+  filter: blur(2px);
+  mix-blend-mode: screen;
+}
+
+/* 水面倒影：同一张星空图以地平线为轴翻转，轻微压缩并错位，再叠 SVG 波纹 */
+.water {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--horizon-y);
+  bottom: 0;
+  z-index: 0;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 55%, rgba(0, 0, 0, 0.42) 100%);
+  mask-image: linear-gradient(180deg, #000 0%, #000 55%, rgba(0, 0, 0, 0.42) 100%);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .water-inner { filter: brightness(0.95) url(#water-ripple); }
+}
+
+.water-inner {
+  position: absolute;
+  left: 0;
+  top: calc(-1 * var(--horizon-y));
+  width: 100%;
+  height: 100vh;
+  background: #04050f url("./assets/bg_sky.webp") 62% center / cover no-repeat;
+  transform: scaleY(-1) skewX(-0.6deg);
+  transform-origin: 50% var(--horizon-y);
+  filter: brightness(0.95);
+}
+
+.water-nebula { opacity: 0.75; }
+
+.svg-defs { position: absolute; width: 0; height: 0; overflow: hidden; }
 
 /* 星云流动层：参考原场景 cloudmotion 的缓慢漂移 + 轻微色相呼吸 */
 .sky-nebula {
   position: absolute;
   inset: -12% -22%;
+  z-index: 1;
   background:
     radial-gradient(38% 30% at 66% 40%, rgba(64, 152, 255, 0.22), transparent 70%),
     radial-gradient(28% 22% at 78% 30%, rgba(120, 200, 255, 0.16), transparent 72%),
@@ -76,7 +135,7 @@ body {
   50% { filter: blur(28px) hue-rotate(10deg); }
 }
 
-.sky-stars { position: absolute; inset: 0; }
+.sky-stars { position: absolute; inset: 0; z-index: 2; }
 
 .star {
   position: absolute;
@@ -125,6 +184,7 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .star, .meteor, .sky-nebula { animation: none; }
+  .sky { animation: none; }
   .meteor { display: none; }
 }
 
