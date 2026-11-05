@@ -137,6 +137,49 @@ function showToast(message) {
   if (message) setTimeout(() => toast.classList.remove("show"), 4200);
 }
 
+function spawnMeteor() {
+  const sky = document.querySelector(".sky");
+  if (!sky) return;
+  const meteor = el("span", "meteor");
+  meteor.style.left = `${24 + Math.random() * 58}%`;
+  meteor.style.top = `${Math.random() * 38}%`;
+  meteor.style.animationDuration = `${0.9 + Math.random() * 0.7}s`;
+  meteor.addEventListener("animationend", () => meteor.remove());
+  sky.append(meteor);
+}
+
+function scheduleMeteor() {
+  setTimeout(() => {
+    spawnMeteor();
+    scheduleMeteor();
+  }, 3600 + Math.random() * 5200);
+}
+
+function initSky() {
+  const box = $("sky-stars");
+  if (!box || box.childElementCount) return;
+  const count = 140;
+  for (let i = 0; i < count; i += 1) {
+    const star = el("span", "star");
+    const size = Math.random() < 0.82 ? 1.5 : 2.5;
+    // 星云在右侧更密：多数星星落在右半，左上留出深空
+    const x = Math.random() < 0.55 ? 42 + Math.random() * 58 : Math.random() * 58;
+    star.style.left = `${x}%`;
+    star.style.top = `${Math.pow(Math.random(), 0.85) * 68}%`;
+    star.style.width = `${size}px`;
+    star.style.height = `${size}px`;
+    star.style.opacity = `${0.2 + Math.random() * 0.6}`;
+    star.style.animationDuration = `${3 + Math.random() * 5}s`;
+    star.style.animationDelay = `${Math.random() * 4}s`;
+    if (Math.random() < 0.08) star.classList.add("bright");
+    box.append(star);
+  }
+  if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    spawnMeteor();
+    scheduleMeteor();
+  }
+}
+
 async function apiGet(endpoint, params = {}) {
   if (DEMO) return demoApi(endpoint, params);
   return bridge.apiGet(endpoint, params);
@@ -520,6 +563,7 @@ async function boot() {
     $("subtitle").classList.add("demo");
   }
   $("version").textContent = "";
+  initSky();
   for (const button of document.querySelectorAll(".tab")) {
     button.addEventListener("click", () => switchTab(button.dataset.tab));
   }
