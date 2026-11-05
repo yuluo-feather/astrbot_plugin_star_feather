@@ -176,6 +176,10 @@ class TestParsedSettings:
         # -0.0 带负号但 `float(raw) < 0` 为假，同样不能当成显式关闭（Codex P2）
         assert parse({"ai": {"ai_fail_cooldown": -0.0}}).ai.fail_cooldown == DEFAULT_AI_COOLDOWN
         assert parse({"tool": {"cmd_rate_limit": -1e-9999}}).tool.cmd_rate_limit == DEFAULT_CMD_RATE_LIMIT
+        # 正的小数同样不能截成 0 变成「显式关闭」；0.0 仍算明确的零
+        assert parse({"ai": {"ai_fail_cooldown": 0.5}}).ai.fail_cooldown == DEFAULT_AI_COOLDOWN
+        assert parse({"tool": {"cmd_rate_limit": 0.9}}).tool.cmd_rate_limit == DEFAULT_CMD_RATE_LIMIT
+        assert parse({"ai": {"ai_fail_cooldown": 0.0}}).ai.fail_cooldown == 0
         assert parse({"tool": {"llm_tool_cooldown": 0}}).tool.llm_cooldown == 0
         assert parse({"tool": {"llm_tool_cooldown": -5}}).tool.llm_cooldown == DEFAULT_TOOL_COOLDOWN
         assert parse({"tool": {"cmd_rate_limit": 0}}).tool.cmd_rate_limit == 0

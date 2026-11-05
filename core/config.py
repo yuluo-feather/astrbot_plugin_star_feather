@@ -73,15 +73,36 @@ def _is_negative_number(raw) -> bool:
     return num < 0 or (num == 0 and math.copysign(1.0, num) < 0)
 
 
-def _cfg_int_non_negative(config: dict[str, Any] | None, group: str, key: str, default: int) -> int:
-    """非负 int 配置：负数回 default，只有显式 0 才表示「关闭」。
+def _is_explicit_zero(raw) -> bool:
+    """原始配置值是不是「明确的 0」：数值 0 / 0.0 / 字符串 "0"。
 
-    -0.5 这类取整后变 0 的负数同样回默认——否则它会被 int() 悄悄当成
-    「显式关闭」，让冷却 / 节流 / 每日次数在配置写错时静默失效。
+    -0.0 与 0.5 都不算：前者带负号（见 _is_negative_number），后者会被
+    int() 截成 0，但配置里写的并不是 0。
+    """
+    if isinstance(raw, bool):
+        return False
+    if isinstance(raw, (int, float)):
+        return raw == 0 and not _is_negative_number(raw)
+    if isinstance(raw, str):
+        text = raw.strip()
+        if text.startswith("-"):
+            return False
+        try:
+            return int(text) == 0
+        except ValueError:
+            return False
+    return False
+
+
+def _cfg_int_non_negative(config: dict[str, Any] | None, group: str, key: str, default: int) -> int:
+    """非负 int 配置：坏值回 default，只有明确的 0 才表示「关闭」。
+
+    负数、-0.0、以及 0.5 这类截成 0 的正小数都回默认——否则它们会被
+    int() 悄悄当成「显式关闭」，让冷却 / 节流 / 每日次数在配置写错时静默失效。
     """
     raw = _cfg_get(config, group, key, default)
     value = _cfg_int(config, group, key, default)
-    if value < 0 or (value == 0 and _is_negative_number(raw)):
+    if value < 0 or (value == 0 and not _is_explicit_zero(raw)):
         return default
     return value
 
