@@ -161,7 +161,7 @@ function initSky() {
   const count = 80;
   for (let i = 0; i < count; i += 1) {
     const star = el("span", "star");
-    const size = Math.random() < 0.82 ? 1.5 : 2.5;
+    const size = 9 + Math.random() * 17;
     // 星云在右侧更密：多数星星落在右半，左上留出深空
     const x = Math.random() < 0.55 ? 42 + Math.random() * 58 : Math.random() * 58;
     star.style.left = `${x}%`;

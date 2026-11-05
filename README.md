@@ -313,4 +313,4 @@
 
 - 觉得好用？来 [GitHub](https://github.com/yuluo-feather/astrbot_plugin_star_feather) 点个 ⭐，是对本羽最大的鼓励
 - 遇到问题、想要新功能？欢迎提交 [Issue](https://github.com/yuluo-feather/astrbot_plugin_star_feather/issues) 或 Pull Request——本羽每一份都会认真看
-- **致谢**：幻星集（卡牌素材）、AstrBot 框架、以及每一位提过 issue、点过 star 的你——牌灵都记得
+- **致谢**：幻星集（卡牌素材）、星空背景原画 Pixiv_ むっくー（成長中）、AstrBot 框架、以及每一位提过 issue、点过 star 的你——牌灵都记得

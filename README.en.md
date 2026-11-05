@@ -327,4 +327,4 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 
 - Like it? A ⭐ on [GitHub](https://github.com/yuluo-feather/astrbot_plugin_star_feather) is all the motivation I need
 - Found a bug or want a feature? [Issues](https://github.com/yuluo-feather/astrbot_plugin_star_feather/issues) and pull requests are always welcome — I read every one of them.
-- **Thanks**: to 幻星集 for the card art, to the AstrBot framework, and to everyone who filed an issue or left a star. The spirit remembers you.
+- **Thanks**: to 幻星集 for the card art, to Pixiv_ むっくー（成長中） for the starry-sky backdrop, to the AstrBot framework, and to everyone who filed an issue or left a star. The spirit remembers you.

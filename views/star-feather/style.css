@@ -33,14 +33,14 @@ body {
   line-height: 1.55;
 }
 
-/* 夜空背景：创意工坊原画（非商业使用）+ 闪烁星点与流星 */
+/* 夜空背景：创意工坊原画的地平线以上部分（非商业使用，署名见 README） */
 .sky {
   position: fixed;
   inset: 0;
   z-index: -1;
   overflow: hidden;
   pointer-events: none;
-  background: #04050f url("./assets/bg.webp") center / cover no-repeat;
+  background: #04050f url("./assets/bg-sky.webp") 65% top / cover no-repeat;
 }
 
 /* 压暗层：让前景面板上的文字在亮处也读得清（不是倒影） */
@@ -52,18 +52,40 @@ body {
     rgba(3, 6, 16, 0.38) 0%, rgba(3, 6, 16, 0.16) 45%, rgba(3, 6, 16, 0.58) 100%);
 }
 
+/* 星云流动层：参考原场景 cloudmotion 的缓慢漂移 + 轻微色相呼吸 */
+.sky-nebula {
+  position: absolute;
+  inset: -12% -22%;
+  background:
+    radial-gradient(38% 30% at 66% 40%, rgba(64, 152, 255, 0.22), transparent 70%),
+    radial-gradient(28% 22% at 78% 30%, rgba(120, 200, 255, 0.16), transparent 72%),
+    radial-gradient(30% 24% at 52% 52%, rgba(112, 80, 200, 0.15), transparent 75%);
+  filter: blur(28px);
+  mix-blend-mode: screen;
+  animation: nebula-drift 38s ease-in-out infinite alternate,
+             nebula-hue 46s ease-in-out infinite;
+}
+
+@keyframes nebula-drift {
+  from { transform: translate3d(-2%, 0, 0) scale(1); }
+  to { transform: translate3d(2%, -1%, 0) scale(1.06); }
+}
+
+@keyframes nebula-hue {
+  0%, 100% { filter: blur(28px) hue-rotate(-8deg); }
+  50% { filter: blur(28px) hue-rotate(10deg); }
+}
+
 .sky-stars { position: absolute; inset: 0; }
 
 .star {
   position: absolute;
-  border-radius: 50%;
-  background: #dfe7ff;
+  background: url("./assets/star.webp") center / contain no-repeat;
   animation: twinkle 4s ease-in-out infinite;
 }
 
 .star.bright {
-  background: #fff3d0;
-  box-shadow: 0 0 6px rgba(255, 243, 208, 0.85);
+  filter: drop-shadow(0 0 5px rgba(255, 240, 200, 0.85));
 }
 
 .meteor {
@@ -82,13 +104,12 @@ body {
 .meteor::after {
   content: "";
   position: absolute;
-  right: -1px;
-  top: -1px;
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: #f4fbff;
-  box-shadow: 0 0 8px 2px rgba(200, 235, 255, 0.9);
+  right: -6px;
+  top: -6px;
+  width: 14px;
+  height: 14px;
+  background: url("./assets/star.webp") center / contain no-repeat;
+  filter: drop-shadow(0 0 5px rgba(210, 235, 255, 0.9));
 }
 
 @keyframes shoot {
@@ -98,20 +119,12 @@ body {
 }
 
 @keyframes twinkle {
-  0%, 100% { opacity: 0.18; }
-  50% { opacity: 0.8; }
-}
-
-.credit {
-  margin: 30px 0 0;
-  color: var(--muted);
-  font-size: 11px;
-  text-align: center;
-  opacity: 0.7;
+  0%, 100% { opacity: 0.12; transform: scale(0.85); }
+  50% { opacity: 0.85; transform: scale(1.08); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .star, .meteor { animation: none; }
+  .star, .meteor, .sky-nebula { animation: none; }
   .meteor { display: none; }
 }
 
