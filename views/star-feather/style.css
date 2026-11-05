@@ -782,3 +782,45 @@ h1 {
   .card-modal-img { width: 100px; }
   .pick-card { grid-template-columns: 76px minmax(0, 1fr); }
 }
+
+/* ---- 交互反馈：按压 / hover / 焦点（PR 1） ---- */
+
+.ghost, .tab, .primary, .user, .card-cell, .seg button, .modal-close {
+  transition: transform 0.12s ease, border-color 0.15s ease, color 0.15s ease,
+              background-color 0.15s ease, filter 0.15s ease;
+}
+
+.tab:hover { color: var(--ink); }
+.seg button:hover { color: var(--ink); }
+.primary:hover:not(:disabled) { filter: brightness(1.06); }
+
+.ghost:active, .tab:active, .primary:active:not(:disabled),
+.seg button:active, .modal-close:active {
+  transform: scale(0.985);
+}
+
+.user:active, .card-cell:active {
+  transform: translateY(0) scale(0.99);
+}
+
+.ghost:focus-visible, .tab:focus-visible, .primary:focus-visible,
+.user:focus-visible, .card-cell:focus-visible, .seg button:focus-visible,
+.modal-close:focus-visible, .field select:focus-visible,
+.field input:focus-visible, .switch input:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.panel { animation: panel-in 180ms ease-out; }
+
+@keyframes panel-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel { animation: none; }
+  .user:hover, .card-cell:hover { transform: none; }
+  .ghost:active, .tab:active, .primary:active, .user:active,
+  .card-cell:active, .seg button:active, .modal-close:active { transform: none; }
+}
