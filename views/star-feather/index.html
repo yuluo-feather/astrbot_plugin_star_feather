@@ -30,6 +30,7 @@
     <button class="tab active" data-tab="daily" type="button">今日牌运</button>
     <button class="tab" data-tab="cards" type="button">牌意图鉴</button>
     <button class="tab" data-tab="spreads" type="button">牌阵介绍</button>
+    <button class="tab" data-tab="preview" type="button">占卜预览</button>
   </nav>
 
   <main>
@@ -56,6 +57,30 @@
 
     <section id="panel-spreads" class="panel hidden">
       <div class="spread-grid" id="spread-grid"></div>
+    </section>
+
+    <section id="panel-preview" class="panel hidden">
+      <div class="preview-form">
+        <div class="preview-row">
+          <label class="field">
+            <span>牌阵</span>
+            <select id="preview-spread"></select>
+          </label>
+          <label class="field field-grow">
+            <span>问题（可留空）</span>
+            <input id="preview-question" type="text" maxlength="200"
+                   placeholder="想看看什么？" />
+          </label>
+          <button id="preview-draw" class="primary" type="button">抽牌</button>
+        </div>
+        <div class="preview-actions">
+          <button id="preview-ai" class="ghost" type="button" disabled>AI 深度解读</button>
+          <span id="preview-note" class="hint">预览不消耗次数、不写入缓存、不会发送到聊天</span>
+        </div>
+      </div>
+      <div id="preview-result" class="preview-result">
+        <p class="empty">选一个牌阵，抽一次牌。</p>
+      </div>
     </section>
   </main>
 

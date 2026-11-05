@@ -10,10 +10,13 @@ from __future__ import annotations
 
 import base64
 import io
+import random
 
 from PIL import Image
 
 from ..ai.parse import interpretation_from_record
+from ..ai.persona import resolve_persona
+from ..core.draw import draw, render_detail
 from ..core.spreads import FORMATIONS
 from ..core.tarot_data import TAROT_CARDS
 from ..render.assets import asset_path_by_id
@@ -80,6 +83,9 @@ class WebUI:
         register(f"{prefix}/cards", self.h_cards, ["GET"], "Tarot card list")
         register(f"{prefix}/card-detail", self.h_card_detail, ["GET"], "Tarot card meanings")
         register(f"{prefix}/spreads", self.h_spreads, ["GET"], "Tarot spread list")
+        register(f"{prefix}/preview/draw", self.h_preview_draw, ["POST"], "Preview draw")
+        register(f"{prefix}/preview/interpret", self.h_preview_interpret, ["POST"],
+                 "Preview AI reading")
         register(f"{prefix}/card-image", self.h_card_image, ["GET"], "Tarot card thumbnail")
         return True
 
@@ -211,6 +217,71 @@ class WebUI:
             })
         return result
 
+    # ---- 占卜预览：独立 RNG，不写缓存、不计次数、不走消息投递 ----
+
+    def draw_preview(self, spread: str, question: str = "") -> dict:
+        if spread not in FORMATIONS:
+            raise ValueError(f"未知牌阵: {spread!r}")
+        positions, picks = draw(spread, random.Random())
+        return {
+            "spread": spread,
+            "question": str(question or "").strip(),
+            "positions": positions,
+            "picks": [self._preview_pick(p) for p in picks],
+        }
+
+    @staticmethod
+    def _preview_pick(pick) -> dict:
+        card = pick["card"]
+        upright = bool(pick["upright"])
+        side = card.get("up" if upright else "down", {})
+        return {
+            "id": card["id"],
+            "cn": card["cn"],
+            "en": card.get("en", ""),
+            "suit": card.get("suit", ""),
+            "num": str(card.get("num", "")),
+            "upright": upright,
+            "keywords": list(side.get("keywords", [])),
+            "what": side.get("what", ""),
+            "advice": side.get("how", "") or side.get("turn", ""),
+            "energy": side.get("energy", ""),
+        }
+
+    @staticmethod
+    def _picks_from_payload(spread: str, raw_picks) -> tuple[list[str], list[dict]]:
+        positions = FORMATIONS[spread]
+        if not isinstance(raw_picks, list) or len(raw_picks) != len(positions):
+            raise ValueError("抽牌结果与牌阵不一致")
+        picks = []
+        for item in raw_picks:
+            card = _CARDS_BY_ID.get(str(item.get("id", ""))) if isinstance(item, dict) else None
+            if card is None:
+                raise ValueError("牌库里没有这张牌")
+            picks.append({"card": card, "upright": bool(item.get("upright", True))})
+        return list(positions), picks
+
+    async def interpret_preview(self, spread: str, question, raw_picks) -> dict | None:
+        """预览解读：只在用户点击后调用；不读写任何缓存、不发送消息。"""
+        if spread not in FORMATIONS:
+            raise ValueError(f"未知牌阵: {spread!r}")
+        if not self.settings.ai.enable_ai or self.daily.interpreter is None:
+            raise RuntimeError("AI 深度解读已关闭，预览可先看本地牌义")
+        positions, picks = self._picks_from_payload(spread, raw_picks)
+        user_input = str(question or "").strip() or "（预览）"
+        interp = await self.daily.interpreter.interpret(
+            None, spread, positions, picks, user_input,
+            render_detail(positions, picks),
+            persona_eff=resolve_persona(self.settings.ai.persona),
+            budget=self.daily.interpreter.new_budget())
+        if interp is None:
+            return None
+        return {
+            "text": interp.text,
+            "sections": list(interp.sections),
+            "summary": interp.summary,
+        }
+
     def card_image(self, card_id: str, upright: bool = True, width: int = 180) -> dict:
         """牌面缩略图（WebP base64）；同一尺寸只编码一次。"""
         if card_id not in _CARDS_BY_ID:
@@ -271,6 +342,34 @@ class WebUI:
 
     async def h_spreads(self):
         return {"items": self.spreads()}
+
+    async def h_preview_draw(self):
+        from astrbot.api.web import request
+
+        payload = await request.json(default={})
+        payload = payload if isinstance(payload, dict) else {}
+        spread = str(payload.get("spread", "") or "")
+        try:
+            return self.draw_preview(spread, payload.get("question", ""))
+        except ValueError as e:
+            return {"status": "error", "message": str(e)}, 400
+
+    async def h_preview_interpret(self):
+        from astrbot.api.web import request
+
+        payload = await request.json(default={})
+        payload = payload if isinstance(payload, dict) else {}
+        spread = str(payload.get("spread", "") or "")
+        try:
+            result = await self.interpret_preview(
+                spread, payload.get("question", ""), payload.get("picks"))
+        except RuntimeError as e:
+            return {"status": "error", "message": str(e)}, 409
+        except ValueError as e:
+            return {"status": "error", "message": str(e)}, 400
+        if result is None:
+            return {"status": "error", "message": "AI 本次没有产出解读，可先看本地牌义"}, 502
+        return result
 
     async def h_card_image(self):
         from astrbot.api.web import request

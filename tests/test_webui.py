@@ -8,7 +8,9 @@ import base64
 import io
 import types
 
+import pytest
 from data.plugins.astrbot_plugin_star_feather.app.webui import WebUI
+from data.plugins.astrbot_plugin_star_feather.core.models import Interpretation
 from data.plugins.astrbot_plugin_star_feather.core.settings import STRUCTURE_CHECK_LOOSE
 from data.plugins.astrbot_plugin_star_feather.core.spreads import FORMATIONS
 from data.plugins.astrbot_plugin_star_feather.core.tarot_data import TAROT_CARDS
@@ -121,8 +123,6 @@ def test_card_detail_exposes_both_orientations():
 
 
 def test_card_detail_rejects_unknown_card():
-    import pytest
-
     _, ui = _make({})
     with pytest.raises(FileNotFoundError):
         ui.card_detail("not-a-card")
@@ -152,8 +152,6 @@ def test_card_image_is_webp_and_reversed_differs():
 
 
 def test_card_image_rejects_unknown_card():
-    import pytest
-
     _, ui = _make({})
     with pytest.raises(FileNotFoundError):
         ui.card_image("not-a-card")
@@ -174,8 +172,82 @@ def test_register_needs_host_api_and_uses_plugin_prefix():
     host = _Host()
     assert ui.register(host) is True
     routes = [route for route, _methods, _desc in host.routes]
-    assert len(routes) == 7
+    assert len(routes) == 9
     assert all(route.startswith("/astrbot_plugin_star_feather/") for route in routes)
     assert "/astrbot_plugin_star_feather/daily/list" in routes
     assert "/astrbot_plugin_star_feather/card-detail" in routes
     assert "/astrbot_plugin_star_feather/spreads" in routes
+    assert "/astrbot_plugin_star_feather/preview/draw" in routes
+    assert "/astrbot_plugin_star_feather/preview/interpret" in routes
+
+
+class _PreviewInterp:
+    def __init__(self):
+        self.calls = 0
+
+    def new_budget(self):
+        return None
+
+    async def interpret(self, *args, **kwargs):
+        self.calls += 1
+        text = "【第1张·你的当下】预览解读。"
+        return Interpretation(text=text, sections=(text,), summary="")
+
+
+def _make_preview(kv, enable_ai=True):
+    interp = _PreviewInterp()
+    daily = DailyFortune(_Ctx(kv), persona="", interpreter=interp)
+    settings = types.SimpleNamespace(
+        ai=types.SimpleNamespace(enable_ai=enable_ai, spirit_line=True,
+                                 structure_check=STRUCTURE_CHECK_LOOSE,
+                                 persona="random"),
+        output=types.SimpleNamespace(send_mode="forward", daily_card=True),
+    )
+    clock = types.SimpleNamespace(today=lambda: DAY)
+    return WebUI(daily, settings, clock, version="0.10.0"), interp
+
+
+def test_preview_draw_uses_the_requested_spread():
+    ui, _ = _make_preview({})
+    data = ui.draw_preview("羽时三刻", "最近怎么样")
+    assert data["positions"] == FORMATIONS["羽时三刻"]
+    assert len(data["picks"]) == 3
+    ids = {card["id"] for card in TAROT_CARDS}
+    for pick in data["picks"]:
+        assert pick["id"] in ids
+        assert pick["keywords"] and pick["what"] and pick["advice"]
+
+
+def test_preview_draw_rejects_unknown_spread():
+    ui, _ = _make_preview({})
+    with pytest.raises(ValueError):
+        ui.draw_preview("不存在的阵")
+
+
+def test_preview_interpret_is_opt_in_and_writes_nothing():
+    kv = {}
+    ui, interp = _make_preview(kv)
+    picks = ui.draw_preview("羽签")["picks"]
+    raw = [{"id": pick["id"], "upright": pick["upright"]} for pick in picks]
+    result = asyncio.run(ui.interpret_preview("羽签", "预览", raw))
+    assert result["text"].startswith("【第1张")
+    assert interp.calls == 1
+    assert kv == {}
+
+
+def test_preview_interpret_honors_ai_switch():
+    ui, interp = _make_preview({}, enable_ai=False)
+    with pytest.raises(RuntimeError):
+        asyncio.run(ui.interpret_preview(
+            "羽签", "", [{"id": "major_00", "upright": True}]))
+    assert interp.calls == 0
+
+
+def test_preview_interpret_rejects_tampered_picks():
+    ui, _ = _make_preview({})
+    with pytest.raises(ValueError):
+        asyncio.run(ui.interpret_preview(
+            "羽签", "", [{"id": "not-a-card", "upright": True}]))
+    with pytest.raises(ValueError):
+        asyncio.run(ui.interpret_preview(
+            "羽时三刻", "", [{"id": "major_00", "upright": True}]))

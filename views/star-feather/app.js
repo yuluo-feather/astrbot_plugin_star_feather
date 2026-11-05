@@ -7,6 +7,7 @@ const $ = (id) => document.getElementById(id);
 const state = {
   items: [], selected: null, cards: [], spreads: [], reversed: false,
   overview: null, cardDetail: null, detailUpright: true,
+  preview: null, aiEnabled: true,
 };
 const thumbCache = new Map();
 
@@ -120,6 +121,32 @@ function demoApi(endpoint, params = {}) {
   if (endpoint === "cards") return { items: DEMO_CARDS };
   if (endpoint === "card-detail") return demoCardDetail(params.id);
   if (endpoint === "spreads") return { items: DEMO_SPREADS };
+  if (endpoint === "preview/draw") {
+    const spread = DEMO_SPREADS.find((item) => item.name === params.spread)
+      || DEMO_SPREADS[1];
+    const picks = spread.positions.map((position, index) => {
+      const card = DEMO_CARDS[(index * 3 + 1) % DEMO_CARDS.length];
+      const upright = index % 2 === 0;
+      const meaning = upright ? DEMO_MEANING.up : DEMO_MEANING.down;
+      return {
+        id: card.id, cn: card.cn, en: "Demo Card", suit: "major", num: "",
+        upright, keywords: meaning.keywords, what: meaning.what,
+        advice: upright ? meaning.how : meaning.turn,
+        energy: upright ? "" : meaning.energy,
+      };
+    });
+    return {
+      spread: spread.name, question: params.question || "",
+      positions: spread.positions.map((position) => position.name), picks,
+    };
+  }
+  if (endpoint === "preview/interpret") {
+    return {
+      text: "【第1张·你的当下】这是预览模式的示例解读。连上 AstrBot 后，"
+        + "点「AI 深度解读」才会真正请求模型；在此之前只显示内置牌义。",
+      sections: [], summary: "",
+    };
+  }
   throw new Error("预览模式没有这个接口");
 }
 
@@ -183,6 +210,11 @@ function initSky() {
 async function apiGet(endpoint, params = {}) {
   if (DEMO) return demoApi(endpoint, params);
   return bridge.apiGet(endpoint, params);
+}
+
+async function apiPost(endpoint, body = {}) {
+  if (DEMO) return demoApi(endpoint, body);
+  return bridge.apiPost(endpoint, body);
 }
 
 // ---- 牌面缩略图（bridge 只回 JSON，图片走 base64） ----
@@ -457,18 +489,155 @@ function closeCardDetail() {
 }
 
 // ---- 牌阵介绍 ----
+async function ensureSpreads() {
+  if (!state.spreads.length) {
+    try {
+      const data = await apiGet("spreads");
+      state.spreads = data.items || [];
+    } catch (error) {
+      showToast(error.message || "牌阵清单加载失败");
+    }
+  }
+  return state.spreads;
+}
+
 async function loadSpreads() {
-  if (state.spreads.length) {
-    renderSpreads();
+  await ensureSpreads();
+  renderSpreads();
+}
+
+// ---- 占卜预览：本地抽牌，AI 解读只在点击后请求 ----
+let previewBusy = false;
+
+async function loadPreviewForm() {
+  const spreads = await ensureSpreads();
+  const select = $("preview-spread");
+  if (select.dataset.ready === "1") return;
+  for (const spread of spreads) {
+    const option = el("option", "", `${spread.name} · ${spread.positions.length} 张`);
+    option.value = spread.name;
+    select.append(option);
+  }
+  select.dataset.ready = "1";
+}
+
+async function drawPreview() {
+  if (previewBusy) return;
+  const spread = $("preview-spread").value;
+  if (!spread) return;
+  previewBusy = true;
+  $("preview-draw").disabled = true;
+  $("preview-ai").disabled = true;
+  try {
+    const question = $("preview-question").value.trim();
+    const data = await apiPost("preview/draw", { spread, question });
+    state.preview = {
+      spread: data.spread,
+      question: data.question || "",
+      positions: data.positions || [],
+      picks: data.picks || [],
+      ai: null,
+      aiError: "",
+    };
+    renderPreview();
+  } catch (error) {
+    showToast(error.message || "抽牌失败");
+  } finally {
+    previewBusy = false;
+    $("preview-draw").disabled = false;
+    updatePreviewAIButton();
+  }
+}
+
+async function requestPreviewAI() {
+  const preview = state.preview;
+  if (!preview || !preview.picks.length) return;
+  const button = $("preview-ai");
+  button.disabled = true;
+  button.textContent = "解读中…";
+  preview.aiError = "";
+  try {
+    const data = await apiPost("preview/interpret", {
+      spread: preview.spread,
+      question: preview.question,
+      picks: preview.picks.map((pick) => ({ id: pick.id, upright: pick.upright })),
+    });
+    preview.ai = data;
+  } catch (error) {
+    preview.aiError = error.message || "AI 解读失败";
+  } finally {
+    button.textContent = "AI 深度解读";
+    renderPreview();
+    updatePreviewAIButton();
+  }
+}
+
+function updatePreviewAIButton() {
+  const button = $("preview-ai");
+  if (!button) return;
+  const ready = Boolean(state.preview && state.preview.picks.length);
+  button.disabled = !ready || !state.aiEnabled;
+  button.title = state.aiEnabled ? "" : "AI 深度解读已在配置中关闭";
+  $("preview-note").textContent = state.aiEnabled
+    ? "预览不消耗次数、不写入缓存、不会发送到聊天"
+    : "AI 已关闭，预览只显示内置牌义；不消耗次数、不写入缓存、不会发送到聊天";
+}
+
+function renderPreview() {
+  const box = $("preview-result");
+  box.replaceChildren();
+  const preview = state.preview;
+  if (!preview || !preview.picks.length) {
+    box.append(el("p", "empty", "选一个牌阵，抽一次牌。"));
     return;
   }
-  try {
-    const data = await apiGet("spreads");
-    state.spreads = data.items || [];
-    renderSpreads();
-  } catch (error) {
-    showToast(error.message || "牌阵清单加载失败");
+
+  const head = el("div", "preview-head");
+  head.append(el("h2", "", preview.spread));
+  head.append(el("span", "tag", `${preview.picks.length} 张`));
+  if (preview.question) head.append(el("span", "preview-question", preview.question));
+  box.append(head);
+
+  const grid = el("div", "preview-cards");
+  preview.picks.forEach((pick, index) => {
+    const card = el("article", "pick-card");
+    const figure = el("div", "pick-figure");
+    figure.append(makeThumb(pick.id, pick.upright, 150, pick.cn));
+    figure.append(el("span", "pick-pos",
+                     `${index + 1} · ${preview.positions[index] || ""}`));
+    card.append(figure);
+
+    const body = el("div", "pick-body");
+    const title = el("div", "pick-title");
+    title.append(el("strong", "", pick.cn));
+    title.append(el("span", "tag " + (pick.upright ? "up" : "rev"),
+                    pick.upright ? "正位" : "逆位"));
+    body.append(title);
+    if (Array.isArray(pick.keywords) && pick.keywords.length) {
+      const row = el("div", "kw-row");
+      for (const word of pick.keywords) row.append(el("span", "kw", String(word)));
+      body.append(row);
+    }
+    if (pick.what) body.append(el("p", "pick-text", pick.what));
+    if (pick.advice) body.append(el("p", "pick-advice", pick.advice));
+    if (pick.energy) body.append(el("p", "pick-energy", pick.energy));
+    card.append(body);
+    grid.append(card);
+  });
+  box.append(grid);
+
+  const ai = el("section", "ai-result");
+  if (preview.ai) {
+    ai.append(el("h3", "", "AI 深度解读"));
+    ai.append(el("p", "ai-text", preview.ai.text || ""));
+  } else if (preview.aiError) {
+    ai.append(el("p", "empty", preview.aiError));
+  } else {
+    ai.append(el("p", "hint", state.aiEnabled
+      ? "点上方「AI 深度解读」获取结构化解读。"
+      : "AI 深度解读已在配置中关闭，以上是内置牌义。"));
   }
+  box.append(ai);
 }
 
 function renderSpreads() {
@@ -522,16 +691,20 @@ function switchTab(tab) {
   $("panel-daily").classList.toggle("hidden", tab !== "daily");
   $("panel-cards").classList.toggle("hidden", tab !== "cards");
   $("panel-spreads").classList.toggle("hidden", tab !== "spreads");
+  $("panel-preview").classList.toggle("hidden", tab !== "preview");
   if (tab === "cards") loadCards();
   if (tab === "spreads") loadSpreads();
+  if (tab === "preview") loadPreviewForm();
 }
 
 async function refresh() {
   try {
     const overview = await apiGet("overview");
     state.overview = overview;
+    state.aiEnabled = Boolean(overview.settings && overview.settings.enable_ai);
     $("version").textContent = overview.version ? `v${overview.version}` : "";
     renderStats(overview);
+    updatePreviewAIButton();
   } catch (error) {
     showToast(error.message || "概览加载失败");
   }
@@ -573,6 +746,14 @@ async function boot() {
     renderCards();
   });
   $("lightbox").addEventListener("click", closeLightbox);
+  $("preview-draw").addEventListener("click", drawPreview);
+  $("preview-ai").addEventListener("click", requestPreviewAI);
+  $("preview-question").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      drawPreview();
+    }
+  });
   $("card-modal-close").addEventListener("click", closeCardDetail);
   $("card-modal").addEventListener("click", (event) => {
     if (event.target === $("card-modal")) closeCardDetail();
