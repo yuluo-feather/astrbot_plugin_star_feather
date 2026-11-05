@@ -1606,3 +1606,65 @@ class TestDailyUserIndex:
         kv = {"sf_daily_index": {"date": "20260827", "uids": ["u1"]}}
         df = self._df(kv)
         assert asyncio.run(df.users_for("20260828")) == []
+
+    def test_index_is_keyed_by_date(self):
+        """跨天重新登记：同一实例跨天继续用，不能在旧日期上停写。"""
+        kv = {}
+        df = self._df(kv)
+        asyncio.run(df.pick_cached("u1", "20260827"))
+        asyncio.run(df.pick_cached("u1", "20260828"))
+        assert kv["sf_daily_index"]["date"] == "20260828"
+        assert asyncio.run(df.users_for("20260828")) == ["u1"]
+
+    def test_index_read_failure_does_not_overwrite(self):
+        """索引读故障时不知道旧名单，写回会把当天名单缩成一个人。"""
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
+
+        class _Flaky:
+            def __init__(self):
+                self.store = {"sf_daily_index": {"date": "20260828", "uids": ["u0"]}}
+                self.puts = []
+
+            async def get_kv_data(self, key, default=None):
+                if key == "sf_daily_index":
+                    raise RuntimeError("boom")
+                return self.store.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                self.puts.append(key)
+                self.store[key] = value
+
+        ctx = _Flaky()
+        df = DailyFortune(ctx, persona="")
+        asyncio.run(df.pick_cached("u1", "20260828"))
+        assert ctx.store["sf_daily_index"]["uids"] == ["u0"]
+        assert "sf_daily_index" not in ctx.puts
+
+    def test_index_write_failure_is_retried(self):
+        """索引写失败不能记账：下一次命中路径还要再试。"""
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
+
+        class _Flaky:
+            def __init__(self):
+                self.store = {}
+                self.index_puts = 0
+                self.fail = True
+
+            async def get_kv_data(self, key, default=None):
+                return self.store.get(key, default)
+
+            async def put_kv_data(self, key, value):
+                if key == "sf_daily_index":
+                    self.index_puts += 1
+                    if self.fail:
+                        raise RuntimeError("boom")
+                self.store[key] = value
+
+        ctx = _Flaky()
+        df = DailyFortune(ctx, persona="")
+        asyncio.run(df.pick_cached("u1", "20260828"))
+        assert asyncio.run(df.users_for("20260828")) == []
+        ctx.fail = False
+        asyncio.run(df.pick_cached("u1", "20260828"))
+        assert asyncio.run(df.users_for("20260828")) == ["u1"]
+        assert ctx.index_puts == 2

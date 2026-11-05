@@ -215,7 +215,7 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 
 ## 📦 Installation
 
-> ⚠️ **Runtime requirement**: this plugin requires **Python 3.12+** (matching AstrBot's own minimum) and **AstrBot 4.16+ (<5)**. Environments below these versions cannot load it.
+> ⚠️ **Runtime requirement**: this plugin requires **Python 3.12+** (matching AstrBot's own minimum) and **AstrBot 4.16+ (<5)**. Environments below these versions cannot load it. The "Star Feather · Observer" view in the WebUI requires **AstrBot 4.24.2+**; on older versions only the chat commands are available and the view is not listed in the panel.
 
 ### 🌷 Option 1: From AstrBot Plugin Market (Recommended)
 
