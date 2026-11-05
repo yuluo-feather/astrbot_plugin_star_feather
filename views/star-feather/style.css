@@ -821,6 +821,6 @@ h1 {
 @media (prefers-reduced-motion: reduce) {
   .panel { animation: none; }
   .user:hover, .card-cell:hover { transform: none; }
-  .ghost:active, .tab:active, .primary:active, .user:active,
+  .ghost:active, .tab:active, .primary:active:not(:disabled), .user:active,
   .card-cell:active, .seg button:active, .modal-close:active { transform: none; }
 }
