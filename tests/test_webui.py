@@ -89,20 +89,38 @@ def test_daily_list_reports_indexed_total_and_no_truncation():
     assert data["truncated"] is False
 
 
-def test_daily_list_prefers_the_most_recent_users_past_the_cap():
-    """超出列表上限时展示最近登记的用户，并说清索引覆盖了多少。（SF-WEB-02）"""
-    from data.plugins.astrbot_plugin_star_feather.app.webui import _MAX_LIST
+def test_daily_list_skips_invalid_records_until_the_cap_is_filled(monkeypatch):
+    """最近的条目没有有效记录时继续往前找，不能让无效条目占掉名额。（#119）"""
+    from data.plugins.astrbot_plugin_star_feather.app import webui as webui_module
 
-    uids = [f"u{i:03d}" for i in range(_MAX_LIST + 50)]
+    monkeypatch.setattr(webui_module, "_MAX_LIST", 2)
+    uids = ["u0", "u1", "u2", "u3"]
     kv = {"sf_daily_index": {"date": DAY, "uids": uids}}
     daily, ui = _make(kv)
-    _seed(daily, uids[0])    # 最早登记：落在展示窗口外
-    _seed(daily, uids[-1])   # 最近登记：必须被展示
+    _seed(daily, "u0")   # 较早，但有当天记录
+    _seed(daily, "u1")   # 较早，但有当天记录
     data = asyncio.run(ui.daily_list())
-    assert data["indexed_total"] == _MAX_LIST + 50
-    assert data["shown"] == _MAX_LIST
+    assert data["indexed_total"] == 4
+    assert data["shown"] == 2
+    assert data["truncated"] is False
+    assert [item["uid"] for item in data["items"]] == ["u0", "u1"]
+
+
+def test_daily_list_prefers_the_most_recent_valid_users_past_the_cap(monkeypatch):
+    """凑满上限后没扫到的旧用户才算截断，且展示的是最近那批。（SF-WEB-02）"""
+    from data.plugins.astrbot_plugin_star_feather.app import webui as webui_module
+
+    monkeypatch.setattr(webui_module, "_MAX_LIST", 2)
+    uids = ["u0", "u1", "u2", "u3"]
+    kv = {"sf_daily_index": {"date": DAY, "uids": uids}}
+    daily, ui = _make(kv)
+    for uid in uids:
+        _seed(daily, uid)
+    data = asyncio.run(ui.daily_list())
+    assert data["indexed_total"] == 4
+    assert data["shown"] == 2
     assert data["truncated"] is True
-    assert [item["uid"] for item in data["items"]] == [uids[-1]]
+    assert [item["uid"] for item in data["items"]] == ["u2", "u3"]
 
 
 def test_detail_serializes_topics_and_stale_flag():
