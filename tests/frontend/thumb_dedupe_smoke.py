@@ -119,6 +119,7 @@ def main():
     except ImportError:
         print("SKIP: playwright not installed")
         return 2
+    from _browser import launch
     if not view_dir.is_dir():
         print(f"SKIP: view dir not found: {view_dir}")
         return 2
@@ -130,7 +131,7 @@ def main():
     results = []
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(channel="msedge", headless=True)
+            browser = launch(p)
             for mode in ("dedupe", "retry"):
                 results.append(run_scenario(browser, base_url, mode))
             browser.close()

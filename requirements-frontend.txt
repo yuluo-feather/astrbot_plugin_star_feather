@@ -1,0 +1,10 @@
+# 星羽塔罗 Star Feather — 前端 smoke 的浏览器依赖（CI 用，运行时不需要）
+#
+# 为什么单开一份、不放进 requirements-dev.txt：
+#   - 只有「前端 smoke」那一格要用它，放进通用工具链会让每个 pytest 矩阵格
+#     多装一份 ~40 MB 的 Playwright，纯属拖时间；
+#   - 版本同样只在这里钉一处：本机与 CI 装同一份，浏览器行为不因版本漂移。
+#
+# 钉的依据：本机跑通三条 smoke（Edge 口径）用的就是这一版；CI 里装 Playwright
+# 自带的 chromium，脚本会自动在 Edge 缺失时退回去。
+playwright==1.60.0

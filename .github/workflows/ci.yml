@@ -196,6 +196,43 @@ jobs:
       - name: mypy
         run: python -m mypy
 
+  frontend:
+    # 前端 smoke：详情竞态、预览抽牌/AI 旧响应、缩略图请求去重、减少动态效果。
+    # 这几条测的是浏览器里的异步状态，Python 那几格测不到；脚本只依赖 views/ 静态页，
+    # 不导入插件模块，也不需要 astrbot。
+    #
+    # 浏览器：本机脚本优先用 Edge；CI 没装 Edge，脚本会自动退回 Playwright 自带的
+    # chromium，版本钉在 requirements-frontend.txt（与本地同一份）。
+    # 视觉参数（颜色、星芒、尾迹）仍走人工验收，不在这格做逐帧断言。
+    name: 前端 smoke (Playwright · chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-frontend.txt
+      - name: 装依赖
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-frontend.txt
+      - name: 缓存浏览器
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('requirements-frontend.txt') }}
+      - name: 装 chromium
+        run: python -m playwright install --with-deps chromium
+      - name: 前端 smoke
+        run: |
+          python tests/frontend/detail_race_smoke.py
+          python tests/frontend/preview_async_smoke.py
+          python tests/frontend/thumb_dedupe_smoke.py
+
   smoke:
     name: 真框架启动冒烟（手动）
     # 这一格买的是单测桩买不到的东西：metadata 解析、目录扫描、真实 import、
