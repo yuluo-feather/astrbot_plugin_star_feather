@@ -11,6 +11,7 @@ const state = {
   listIndexedTotal: 0, listShown: 0, listTruncated: false,
 };
 const thumbCache = new Map();
+let detailSeq = 0;
 const CARD_BACK_ID = "__back__";
 let cardBackURL = "";
 
@@ -1269,16 +1270,17 @@ function renderDailyList() {
 
 async function openDaily(uid) {
   state.selected = uid;
+  const seq = ++detailSeq;
   renderDailyList();
   const box = $("daily-detail");
   box.replaceChildren(el("p", "empty", "读取中…"));
   try {
     const data = await apiGet("daily/detail", { uid });
-    if (state.selected !== uid) return;  // 已被新的选择取代，别把旧响应画到新选中项下
+    if (seq !== detailSeq || state.selected !== uid) return;
     if (!data) throw new Error("没有这条记录");
     renderDetail(data);
   } catch (error) {
-    if (state.selected !== uid) return;
+    if (seq !== detailSeq || state.selected !== uid) return;
     box.replaceChildren(el("p", "empty", error.message || "读取失败"));
   }
 }
