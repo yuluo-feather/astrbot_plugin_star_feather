@@ -413,7 +413,7 @@ def test_overview_bounds_concurrent_record_reads(monkeypatch):
             date=DAY if number % 3 else "20260828",
             spirit_line="牌灵" if number % 2 else "",
             interps={"事业": "x", "感情": "y"} if number % 5 == 0 else {},
-            prompt_v=daily.prompt_version,
+            prompt_v="old" if number % 7 == 0 else daily.prompt_version,
             persona=daily.persona,
         )
 
@@ -421,7 +421,7 @@ def test_overview_bounds_concurrent_record_reads(monkeypatch):
     monkeypatch.setattr(daily, "read_record", read_record)
     data = asyncio.run(ui.overview())
 
-    expected_active = expected_spirit = expected_topics = 0
+    expected_active = expected_spirit = expected_topics = expected_stale = 0
     for number in range(len(uids)):
         if number % 4 == 0 or number % 3 == 0:
             continue
@@ -430,12 +430,30 @@ def test_overview_bounds_concurrent_record_reads(monkeypatch):
             expected_spirit += 1
         if number % 5 == 0:
             expected_topics += 2
+        if number % 7 == 0:
+            expected_stale += 1
 
     assert 1 < peak <= 8
     assert data["users"] == expected_active
     assert data["with_spirit"] == expected_spirit
     assert data["topics"] == expected_topics
-    assert data["stale"] == 0
+    assert data["stale"] == expected_stale
+
+
+def test_bounded_reads_keep_index_order(monkeypatch):
+    """并发读取按 uids 下标回填，返回顺序不受完成先后影响。"""
+    daily, ui = _make({})
+    uids = [f"u{index}" for index in range(20)]
+
+    async def read_record(uid):
+        index = int(uid[1:])
+        # 越靠前的用户越慢，完成顺序与索引顺序相反
+        await asyncio.sleep(0.002 * (len(uids) - index) / 10)
+        return types.SimpleNamespace(uid=uid)
+
+    monkeypatch.setattr(daily, "read_record", read_record)
+    records = asyncio.run(ui._read_records_bounded(uids))
+    assert [record.uid for record in records] == uids
 
 
 def test_card_image_cache_stays_bounded():
