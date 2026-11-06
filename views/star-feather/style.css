@@ -41,6 +41,14 @@ body {
   z-index: -1;
   overflow: hidden;
   pointer-events: none;
+  background: #04050f;
+}
+
+/* 色相容器：只包环境层；流星留在容器外，青碧色不随背景漂移 */
+.sky-hue {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
   background: #04050f url("./assets/bg_sky.webp") 62% center / cover no-repeat;
   animation: nebula-cycle 12.5s linear infinite;
 }
@@ -88,6 +96,12 @@ body {
   overflow: hidden;
   -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 55%, rgba(0, 0, 0, 0.42) 100%);
   mask-image: linear-gradient(180deg, #000 0%, #000 55%, rgba(0, 0, 0, 0.42) 100%);
+}
+
+.water-hue {
+  position: absolute;
+  inset: 0;
+  animation: nebula-cycle 12.5s linear infinite;
 }
 
 .water-inner {
@@ -318,7 +332,7 @@ body {
 .meteor-canvas {
   position: absolute;
   inset: 0;
-  z-index: 2;
+  z-index: 5;
   width: 100%;
   height: 100%;
   pointer-events: none;
@@ -353,7 +367,7 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .star, .meteor, .sky-nebula, .snowflake, .gust, .dust-mote, .ember { animation: none; }
-  .sky { animation: none; }
+  .sky-hue, .water-hue { animation: none; }
   .meteor, .snow, .wind, .dust, .meteor-canvas, .ember { display: none; }
 }
 

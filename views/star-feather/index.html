@@ -8,16 +8,20 @@
 </head>
 <body>
   <div class="sky" aria-hidden="true">
-    <div class="sky-nebula"></div>
-    <div id="wind" class="wind"></div>
-    <div id="sky-stars" class="sky-stars"></div>
+    <div class="sky-hue">
+      <div class="sky-nebula"></div>
+      <div id="wind" class="wind"></div>
+      <div id="sky-stars" class="sky-stars"></div>
+      <div id="dust" class="dust"></div>
+      <div id="snow" class="snow"></div>
+    </div>
     <canvas id="meteor-canvas" class="meteor-canvas"></canvas>
-    <div id="dust" class="dust"></div>
-    <div id="snow" class="snow"></div>
     <div class="water">
-      <div class="water-inner">
-        <div class="sky-nebula water-nebula"></div>
-        <div id="water-stars" class="sky-stars"></div>
+      <div class="water-hue">
+        <div class="water-inner">
+          <div class="sky-nebula water-nebula"></div>
+          <div id="water-stars" class="sky-stars"></div>
+        </div>
       </div>
       <div id="water-meteors" class="water-meteors"></div>
       <canvas id="meteor-water" class="meteor-canvas meteor-water"></canvas>
