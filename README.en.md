@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/yuluo-feather/astrbot_plugin_star_feather/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-ffb3d9" alt="License: AGPL v3"/></a>
   <a href="https://astrbot.app"><img src="https://img.shields.io/badge/AstrBot-Plugin-ff9ecb" alt="AstrBot Plugin"/></a>
-<img src="https://img.shields.io/badge/version-v0.10.0-f8a5c2" alt="v0.10.0"/>
+<img src="https://img.shields.io/badge/version-v0.10.1-f8a5c2" alt="v0.10.1"/>
 </p>
 
 <p align="center">🪶 ✨ 🌸 💫 🃏</p>
@@ -282,6 +282,18 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 
 ## 📜 Changelog
 
+#### v0.10.1
+
+- Added: the observer view (WebUI) — today's readings, topic interpretations, all 78 cards with their meanings, the four spreads, and a preview workbench (draw locally, request the AI reading only on click; no quota, no cache writes, no messages)
+- Added: an observer backdrop with a mirrored live water surface, layered distant meteors, a drifting nebula, snow, stardust and golden embers
+- Added: near meteors with a breathing flare, an independent group layer, and a local hue field that returns to cyan-teal once they leave it
+- Changed: near meteors now fade point by point as they approach the horizon, so the trail still in the sky keeps its brightness
+- Changed: the observer list follows registration order, and preview cards flip in 3D one after another; a new draw or a refresh invalidates responses still in flight
+- Fixed: observer details match the daily boundary, rapid user switches no longer show stale detail, and the preview rejects duplicate cards and non-boolean upright flags
+- Fixed: the daily index rotates correctly when full, and the list surfaces the most recently active users
+- Fixed: readings generated before a prompt update, or with AI turned off, are no longer served; strict structure checking now covers cached readings
+- Fixed: negative config values no longer silently disable protections; the overview reads with bounded concurrency and duplicate thumbnail requests for the same card are merged
+
 #### v0.10.0
 
 - Added: `ai.spirit_line` — turn it off to skip the spirit's opening line entirely (the `/今日牌运` poster drops its quote and sign-off too) without touching the deep reading
@@ -305,12 +317,6 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 #### v0.9.2
 
 - Fixed: a corrupt daily-reading cache bucket is no longer treated as a hit — empty or structurally invalid content is regenerated and overwritten instead of silently delivering nothing
-
-#### v0.9.1
-
-- Fixed: rebuilding the daily record after a persona change no longer drops the card fields or the spirit cache; a changed prompt version also invalidates the old spirit line (a v0.9.0 regression)
-- Fixed: an AI queue timeout on the local concurrency gate is no longer recorded as a provider failure — the log names the local cause instead
-- Changed: design rationale now lives in `docs/design-notes/` (one file per topic); code comments keep only the rules and a pointer
 
 > Full per-version details for v0.9.0 and earlier live in [CHANGELOG.md](CHANGELOG.md) and the `changelogs/` directory — this page keeps only the six most recent releases.
 

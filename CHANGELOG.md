@@ -2,6 +2,7 @@
 
 > 每个版本一个文件，见 [`changelogs/`](changelogs/)。
 
+- [v0.10.1](changelogs/v0.10.1.md)
 - [v0.10.0](changelogs/v0.10.0.md)
 - [v0.9.5](changelogs/v0.9.5.md)
 - [v0.9.4](changelogs/v0.9.4.md)
