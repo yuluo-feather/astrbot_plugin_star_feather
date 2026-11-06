@@ -186,6 +186,7 @@ const HALO_RADIUS_MAX = 13;
 
 // 预渲染的柔光贴图，按颜色缓存
 const glowCache = new Map();
+const GLOW_CACHE_LIMIT = 96;
 
 function glowSprite(rgb) {
   const key = rgb.join(",");
@@ -201,8 +202,168 @@ function glowSprite(rgb) {
   grad.addColorStop(1, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0)`);
   g.fillStyle = grad;
   g.fillRect(0, 0, 64, 64);
+  if (glowCache.size >= GLOW_CACHE_LIMIT) {
+    const oldest = glowCache.keys().next().value;
+    glowCache.delete(oldest);
+  }
   glowCache.set(key, canvas);
   return canvas;
+}
+
+// ---- 近景局部色相区域（Local Hue Field） ----
+// 固定背景坐标系中的一片色相区域；只作用于近景 Canvas，不改背景滤镜。
+const HUE_BASE_HSL = { h: 176, s: 88, l: 67 };
+const HUE_PERIOD_MS = 12500;
+const HUE_CORE_RATIO = 0.62;
+const HUE_BUCKET_DEG = 3;
+const HUE_RGB_LIMIT = 8;
+const HUE_GLOW_STEP_DEG = 5;
+const HUE_FIELD_POINTS = [
+  { u: 0.06, v: 0.74, w: 0.20 },
+  { u: 0.24, v: 0.67, w: 0.25 },
+  { u: 0.42, v: 0.55, w: 0.30 },
+  { u: 0.60, v: 0.42, w: 0.34 },
+  { u: 0.78, v: 0.26, w: 0.38 },
+  { u: 0.96, v: 0.12, w: 0.40 },
+];
+
+const hueReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+let hueAnim = null;
+
+function getHueAnim() {
+  if (hueAnim) return hueAnim;
+  const skyHue = document.querySelector(".sky-hue");
+  const anims = skyHue?.getAnimations?.() || [];
+  hueAnim = anims.find((a) => a.animationName === "nebula-cycle") || null;
+  return hueAnim;
+}
+
+hueReducedMotion.addEventListener("change", () => { hueAnim = null; });
+
+function huePhase() {
+  if (hueReducedMotion.matches) return 0;
+  let raw = getHueAnim()?.currentTime;
+  if (raw == null) {
+    hueAnim = null;
+    raw = getHueAnim()?.currentTime;
+  }
+  if (raw == null) return 0;
+  return (((raw % HUE_PERIOD_MS) + HUE_PERIOD_MS) % HUE_PERIOD_MS) / HUE_PERIOD_MS;
+}
+
+function backdropMetrics(vw, vh) {
+  const scale = Math.max(vw / 5120, vh / 2880);
+  const dispW = 5120 * scale;
+  const dispH = 2880 * scale;
+  return {
+    scale,
+    dispW,
+    dispH,
+    offsetX: (vw - dispW) * 0.62,
+    offsetY: (vh - dispH) / 2,
+  };
+}
+
+function buildHueField(vw, vh) {
+  const m = backdropMetrics(vw, vh);
+  return HUE_FIELD_POINTS.map((p) => ({
+    x: m.offsetX + p.u * m.dispW,
+    y: m.offsetY + p.v * m.dispH,
+    half: (p.w * m.dispH) / 2,
+  }));
+}
+
+function hueWeightAt(x, y, field) {
+  if (!field || field.length < 2) return 0;
+  let tMin = Infinity;
+  for (let i = 0; i < field.length - 1; i += 1) {
+    const a = field[i];
+    const b = field[i + 1];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len2 = dx * dx + dy * dy;
+    let s = len2 ? ((x - a.x) * dx + (y - a.y) * dy) / len2 : 0;
+    s = Math.max(0, Math.min(1, s));
+    const qx = a.x + s * dx;
+    const qy = a.y + s * dy;
+    const half = a.half + (b.half - a.half) * s;
+    const t = Math.hypot(x - qx, y - qy) / Math.max(half, 1);
+    if (t < tMin) tMin = t;
+  }
+  if (!Number.isFinite(tMin) || tMin >= 1) return 0;
+  if (tMin <= HUE_CORE_RATIO) return 1;
+  const u = (tMin - HUE_CORE_RATIO) / (1 - HUE_CORE_RATIO);
+  return 1 - u * u * (3 - 2 * u);
+}
+
+function hslToRgb(h, s, l) {
+  const hh = (((h % 360) + 360) % 360) / 360;
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  const channel = (t) => {
+    let v = t;
+    if (v < 0) v += 1;
+    if (v > 1) v -= 1;
+    if (v < 1 / 6) return p + (q - p) * 6 * v;
+    if (v < 1 / 2) return q;
+    if (v < 2 / 3) return p + (q - p) * (2 / 3 - v) * 6;
+    return p;
+  };
+  return [
+    Math.round(channel(hh + 1 / 3) * 255),
+    Math.round(channel(hh) * 255),
+    Math.round(channel(hh - 1 / 3) * 255),
+  ];
+}
+
+function mixRgb(a, b, t) {
+  return [
+    Math.round(a[0] + (b[0] - a[0]) * t),
+    Math.round(a[1] + (b[1] - a[1]) * t),
+    Math.round(a[2] + (b[2] - a[2]) * t),
+  ];
+}
+
+function rgbToHue(rgb) {
+  const r = rgb[0] / 255;
+  const g = rgb[1] / 255;
+  const b = rgb[2] / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  if (!d) return 0;
+  let h;
+  if (max === r) h = ((g - b) / d) % 6;
+  else if (max === g) h = (b - r) / d + 2;
+  else h = (r - g) / d + 4;
+  h *= 60;
+  return (h + 360) % 360;
+}
+
+function maxChannelDiff(a, b) {
+  return Math.max(
+    Math.abs(a[0] - b[0]),
+    Math.abs(a[1] - b[1]),
+    Math.abs(a[2] - b[2]),
+  );
+}
+
+function bodyAlpha(p) {
+  if (p <= 0.55) return 0.40 * (p / 0.55);
+  return 0.40 + 0.45 * ((p - 0.55) / 0.45);
+}
+
+function glowTint(weight, phase) {
+  if (weight <= 0) return METEOR_TINT;
+  const offset = Math.round((phase * 360) / HUE_GLOW_STEP_DEG) * HUE_GLOW_STEP_DEG;
+  const w = Math.round(weight * 4) / 4;
+  if (offset % 360 === 0 && w >= 1) return METEOR_TINT;
+  const target = hslToRgb(
+    HUE_BASE_HSL.h + offset,
+    HUE_BASE_HSL.s / 100,
+    HUE_BASE_HSL.l / 100,
+  );
+  return mixRgb(METEOR_TINT, target, w);
 }
 
 function spawnMeteor() {
@@ -310,6 +471,7 @@ class NearMeteors {
     this.vh = 0;
     this.horizon = 0;
     this.waterH = 0;
+    this.hueField = null;
     this.running = false;
     this.enabled = true;
     this.raf = 0;
@@ -326,6 +488,7 @@ class NearMeteors {
     );
     this.horizon = Number.isFinite(hz) ? hz : this.vh * 0.7;
     this.waterH = Math.max(0, this.vh - this.horizon);
+    this.hueField = buildHueField(this.vw, this.vh);
     this.fit(this.sky, this.vw, this.vh);
     if (this.water) this.fit(this.water, this.vw, this.waterH);
     this.paint();
@@ -335,6 +498,11 @@ class NearMeteors {
     canvas.width = Math.round(w * this.dpr);
     canvas.height = Math.round(h * this.dpr);
     canvas.getContext("2d").setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+  }
+
+  weightAt(x, y) {
+    if (y >= this.horizon) return 0;
+    return hueWeightAt(x, y, this.hueField);
   }
 
   spawn(opts = {}) {
@@ -386,7 +554,6 @@ class NearMeteors {
       g: 4 + Math.random() * 5,
       drag: 0.02 + Math.random() * 0.02,
       trailLen,
-      tint: METEOR_TINT,
       trail: [],
       spin: Math.random() * Math.PI * 2,
       spinSpeed: 0.05 + Math.random() * 0.07,
@@ -471,11 +638,14 @@ class NearMeteors {
 
   paint() {
     const ctx = this.ctx;
+    const phase = huePhase();
+    const solo = this.prepareMeteors(this.list, phase);
+    const group = this.prepareMeteors(this.groupList, phase);
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, this.vw, this.vh);
     ctx.globalCompositeOperation = "lighter";
-    this.paintMeteors(ctx, 1, this.list);
-    this.paintMeteors(ctx, 1, this.groupList);
+    this.paintPrepared(ctx, 1, solo, phase);
+    this.paintPrepared(ctx, 1, group, phase);
 
     if (this.wctx && this.waterH > 0) {
       const w = this.wctx;
@@ -484,8 +654,8 @@ class NearMeteors {
       w.clearRect(0, 0, this.vw, this.waterH);
       w.setTransform(this.dpr, 0, 0, -this.dpr * ratio, 0, this.dpr * this.waterH);
       w.globalCompositeOperation = "lighter";
-      this.paintMeteors(w, 0.4, this.list);
-      this.paintMeteors(w, 0.4, this.groupList);
+      this.paintPrepared(w, 0.4, solo, phase);
+      this.paintPrepared(w, 0.4, group, phase);
     }
 
     ctx.globalAlpha = 1;
@@ -496,96 +666,182 @@ class NearMeteors {
     }
   }
 
-  paintMeteors(ctx, alphaScale, list) {
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    for (const m of list) {
-      const n = m.trail.length;
-      const fade = Math.min(1, m.age / 0.08)
-        * Math.min(1, Math.max(0, (m.life - m.age) / 0.3));
-      const head = n ? m.trail[n - 1] : { x: m.x, y: m.y };
+  prepareMeteors(list, phase) {
+    const target = hslToRgb(
+      HUE_BASE_HSL.h + phase * 360,
+      HUE_BASE_HSL.s / 100,
+      HUE_BASE_HSL.l / 100,
+    );
+    return list.map((m) => this.prepareMeteor(m, target));
+  }
 
-      if (n > 1) {
-        const tail = m.trail[0];
-        const halo = ctx.createLinearGradient(tail.x, tail.y, head.x, head.y);
-        halo.addColorStop(0, "rgba(96,245,235,0)");
-        halo.addColorStop(1, "rgba(96,245,235,0.16)");
-        const body = ctx.createLinearGradient(tail.x, tail.y, head.x, head.y);
-        body.addColorStop(0, "rgba(96,245,235,0)");
-        body.addColorStop(0.55, "rgba(96,245,235,0.40)");
-        body.addColorStop(1, "rgba(96,245,235,0.85)");
+  prepareMeteor(m, target) {
+    const fade = Math.min(1, m.age / 0.08)
+      * Math.min(1, Math.max(0, (m.life - m.age) / 0.3));
+    const breath = 0.5 + 0.5 * Math.sin(
+      (2 * Math.PI * m.age) / m.breathPeriod + m.breathPhase,
+    );
+    const sizeBreath = 0.5 + 0.5 * Math.sin(
+      (2 * Math.PI * m.age) / m.breathPeriod + m.breathPhase + BREATH_SIZE_LAG,
+    );
 
-        // 外层柔光
-        ctx.globalAlpha = fade * alphaScale;
-        ctx.strokeStyle = halo;
-        ctx.lineWidth = 4.5;
-        this.strokeTrail(ctx, m.trail, 0, n - 1);
-
-        // 青碧主体
-        ctx.strokeStyle = body;
-        ctx.lineWidth = 1.8;
-        this.strokeTrail(ctx, m.trail, 0, n - 1);
-
-        // 白青亮芯：靠近头部的 40%
-        let coreStart = n - 1;
-        let dist = 0;
-        for (let i = n - 1; i > 0; i -= 1) {
-          dist += Math.hypot(
-            m.trail[i].x - m.trail[i - 1].x,
-            m.trail[i].y - m.trail[i - 1].y,
-          );
-          coreStart = i - 1;
-          if (dist >= m.trailLen * 0.40) break;
-        }
-        if (coreStart < n - 1) {
-          const core = ctx.createLinearGradient(
-            m.trail[coreStart].x,
-            m.trail[coreStart].y,
-            head.x,
-            head.y,
-          );
-          core.addColorStop(0, "rgba(255,255,255,0)");
-          core.addColorStop(1, "rgba(255,255,255,0.85)");
-          ctx.strokeStyle = core;
-          ctx.lineWidth = 0.9;
-          this.strokeTrail(ctx, m.trail, coreStart, n - 1);
+    // 按 6px 目标间距重采样轨迹，保留真实路径
+    const src = m.trail;
+    const points = [];
+    for (let i = 0; i < src.length; i += 1) {
+      if (i > 0) {
+        const a = src[i - 1];
+        const b = src[i];
+        const d = Math.hypot(b.x - a.x, b.y - a.y);
+        const steps = Math.max(1, Math.ceil(d / 6));
+        for (let k = 1; k < steps; k += 1) {
+          const t = k / steps;
+          points.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
         }
       }
+      points.push({ x: src[i].x, y: src[i].y });
+    }
 
-      // 星芒呼吸：透明度与尺寸同周期，尺寸略滞后
-      const breath = 0.5 + 0.5 * Math.sin(
-        (2 * Math.PI * m.age) / m.breathPeriod + m.breathPhase,
+    const dist = [0];
+    for (let i = 1; i < points.length; i += 1) {
+      dist.push(dist[i - 1] + Math.hypot(
+        points[i].x - points[i - 1].x,
+        points[i].y - points[i - 1].y,
+      ));
+    }
+    const total = dist[dist.length - 1] || 0;
+    const head = points.length ? points[points.length - 1] : { x: m.x, y: m.y };
+    const headWeight = this.weightAt(head.x, head.y);
+
+    for (let i = 0; i < points.length; i += 1) {
+      const p = total ? dist[i] / total : 0;
+      const w = this.weightAt(points[i].x, points[i].y);
+      const color = w > 0 ? mixRgb(METEOR_TINT, target, w) : METEOR_TINT;
+      const hue = rgbToHue(color);
+      points[i].p = p;
+      points[i].color = color;
+      points[i].bucket = Math.round(hue / HUE_BUCKET_DEG);
+    }
+
+    let coreStart = points.length - 1;
+    let fromHead = 0;
+    for (let i = points.length - 1; i > 0; i -= 1) {
+      fromHead += Math.hypot(
+        points[i].x - points[i - 1].x,
+        points[i].y - points[i - 1].y,
       );
-      const sizeBreath = 0.5 + 0.5 * Math.sin(
-        (2 * Math.PI * m.age) / m.breathPeriod + m.breathPhase + BREATH_SIZE_LAG,
+      coreStart = i - 1;
+      if (fromHead >= m.trailLen * 0.40) break;
+    }
+
+    const runs = [];
+    if (points.length > 1) {
+      let start = 0;
+      let runColor = points[0].color;
+      for (let i = 1; i < points.length; i += 1) {
+        const prev = points[i - 1];
+        const cur = points[i];
+        const split = cur.bucket !== prev.bucket
+          || maxChannelDiff(cur.color, prev.color) > HUE_RGB_LIMIT
+          || maxChannelDiff(cur.color, runColor) > HUE_RGB_LIMIT
+          || (prev.p < 0.55 && cur.p >= 0.55);
+        if (split) {
+          runs.push({ start, end: i - 1, color: runColor });
+          start = i - 1;
+          runColor = cur.color;
+        }
+      }
+      if (start < points.length - 1) {
+        runs.push({ start, end: points.length - 1, color: runColor });
+      }
+    }
+
+    return {
+      points,
+      runs,
+      coreStart,
+      head,
+      headWeight,
+      fade,
+      haloRadius: HALO_RADIUS_MIN + (HALO_RADIUS_MAX - HALO_RADIUS_MIN) * sizeBreath,
+      haloAlpha: HALO_ALPHA_MIN + (HALO_ALPHA_MAX - HALO_ALPHA_MIN) * breath,
+      starSize: STAR_SIZE_MIN + (STAR_SIZE_MAX - STAR_SIZE_MIN) * sizeBreath,
+      starAlpha: STAR_ALPHA_MIN + (STAR_ALPHA_MAX - STAR_ALPHA_MIN) * breath,
+      spin: m.spin + m.age * m.spinSpeed,
+    };
+  }
+
+  paintPrepared(ctx, alphaScale, prepared, phase) {
+    ctx.lineCap = "butt";
+    ctx.lineJoin = "round";
+    for (const p of prepared) {
+      ctx.globalAlpha = 1;
+
+      // 外层柔光
+      for (const run of p.runs) {
+        this.strokeRun(
+          ctx, p.points, run, run.color,
+          p.fade * alphaScale * 0.16 * p.points[run.start].p,
+          p.fade * alphaScale * 0.16 * p.points[run.end].p,
+          4.5,
+        );
+      }
+
+      // 青碧主体
+      for (const run of p.runs) {
+        this.strokeRun(
+          ctx, p.points, run, run.color,
+          p.fade * alphaScale * bodyAlpha(p.points[run.start].p),
+          p.fade * alphaScale * bodyAlpha(p.points[run.end].p),
+          1.8,
+        );
+      }
+
+      // 白青亮芯：只覆盖头部约 40%，保持白色
+      const last = p.points.length - 1;
+      if (p.coreStart < last) {
+        this.strokeRun(
+          ctx, p.points, { start: p.coreStart, end: last }, [255, 255, 255],
+          0, p.fade * alphaScale * 0.85, 0.9,
+        );
+      }
+
+      // 头部柔光：按头部位置取色，量化后走贴图缓存
+      ctx.globalAlpha = p.fade * p.haloAlpha * alphaScale;
+      const radius = p.haloRadius;
+      ctx.drawImage(
+        glowSprite(glowTint(p.headWeight, phase)),
+        p.head.x - radius, p.head.y - radius, radius * 2, radius * 2,
       );
 
-      // 头部柔光
-      const radius = HALO_RADIUS_MIN + (HALO_RADIUS_MAX - HALO_RADIUS_MIN) * sizeBreath;
-      const haloAlpha = HALO_ALPHA_MIN + (HALO_ALPHA_MAX - HALO_ALPHA_MIN) * breath;
-      ctx.globalAlpha = fade * haloAlpha * alphaScale;
-      ctx.drawImage(glowSprite(m.tint), head.x - radius, head.y - radius, radius * 2, radius * 2);
-
-      // 星芒
+      // 十字星芒保持原样
       if (starReady) {
-        const size = STAR_SIZE_MIN + (STAR_SIZE_MAX - STAR_SIZE_MIN) * sizeBreath;
-        const starAlpha = STAR_ALPHA_MIN + (STAR_ALPHA_MAX - STAR_ALPHA_MIN) * breath;
-        ctx.globalAlpha = fade * starAlpha * alphaScale;
+        ctx.globalAlpha = p.fade * p.starAlpha * alphaScale;
         ctx.save();
-        ctx.translate(head.x, head.y);
-        ctx.rotate(m.spin + m.age * m.spinSpeed);
-        ctx.drawImage(starTinted, -size / 2, -size / 2, size, size);
+        ctx.translate(p.head.x, p.head.y);
+        ctx.rotate(p.spin);
+        ctx.drawImage(starTinted, -p.starSize / 2, -p.starSize / 2, p.starSize, p.starSize);
         ctx.restore();
       }
     }
     ctx.globalAlpha = 1;
   }
 
-  strokeTrail(ctx, trail, from, to) {
+  strokeRun(ctx, points, run, rgb, alphaStart, alphaEnd, width) {
+    if (run.end <= run.start) return;
+    const start = points[run.start];
+    const end = points[run.end];
+    const grad = ctx.createLinearGradient(start.x, start.y, end.x, end.y);
+    const a0 = Math.max(0, Math.min(1, alphaStart));
+    const a1 = Math.max(0, Math.min(1, alphaEnd));
+    grad.addColorStop(0, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${a0})`);
+    grad.addColorStop(1, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${a1})`);
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = width;
     ctx.beginPath();
-    ctx.moveTo(trail[from].x, trail[from].y);
-    for (let i = from + 1; i <= to; i += 1) {
-      ctx.lineTo(trail[i].x, trail[i].y);
+    ctx.moveTo(start.x, start.y);
+    for (let i = run.start + 1; i <= run.end; i += 1) {
+      ctx.lineTo(points[i].x, points[i].y);
     }
     ctx.stroke();
   }
@@ -689,14 +945,11 @@ function scheduleGroupMeteor() {
 
 // 地平线在视口里的位置：与背景 cover 的缩放/居中保持一致，倒影层据此翻转
 function layoutBackdrop() {
-  const imgW = 5120;
-  const imgH = 2880;
   const horizon = 2014;
   const vw = window.innerWidth;
   const vh = window.innerHeight;
-  const scale = Math.max(vw / imgW, vh / imgH);
-  const dy = (vh - imgH * scale) / 2;
-  const hy = dy + horizon * scale;
+  const { scale, offsetY } = backdropMetrics(vw, vh);
+  const hy = offsetY + horizon * scale;
   document.documentElement.style.setProperty("--horizon-y", `${hy.toFixed(1)}px`);
 }
 
