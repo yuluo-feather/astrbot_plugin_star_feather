@@ -171,6 +171,14 @@ def test_detail_route_returns_404_for_non_today_record(monkeypatch):
     assert data["status"] == "error"
 
 
+def test_preview_picks_reject_duplicate_cards():
+    spread = "羽时三刻"
+    card_id = TAROT_CARDS[0]["id"]
+    raw = [{"id": card_id, "upright": True} for _ in FORMATIONS[spread]]
+    with pytest.raises(ValueError, match="不能重复"):
+        WebUI._picks_from_payload(spread, raw)
+
+
 def test_overview_counts_today_records():
     kv = {}
     daily, ui = _make(kv)

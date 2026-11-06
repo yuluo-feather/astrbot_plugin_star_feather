@@ -291,10 +291,14 @@ class WebUI:
         if not isinstance(raw_picks, list) or len(raw_picks) != len(positions):
             raise ValueError("抽牌结果与牌阵不一致")
         picks = []
+        seen: set[str] = set()
         for item in raw_picks:
             card = _CARDS_BY_ID.get(str(item.get("id", ""))) if isinstance(item, dict) else None
             if card is None:
                 raise ValueError("牌库里没有这张牌")
+            if card["id"] in seen:
+                raise ValueError("同一张牌不能重复出现")
+            seen.add(card["id"])
             upright = item.get("upright", True)
             if not isinstance(upright, bool):
                 raise ValueError("正逆位必须是布尔值")
