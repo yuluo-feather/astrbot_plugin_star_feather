@@ -157,7 +157,8 @@ def test_detail_hides_non_today_record():
     assert asyncio.run(stale.daily_detail("u1")) is None
 
 
-def test_detail_route_returns_404_for_non_today_record(monkeypatch):
+def test_detail_handler_returns_404_for_non_today_record(monkeypatch):
+    """Handler-level 404 mapping; full HTTP dispatch belongs to AstrBot's web layer."""
     kv = {}
     daily, ui = _make(kv)
     _seed(daily, "u1")

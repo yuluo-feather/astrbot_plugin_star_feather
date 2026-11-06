@@ -3,9 +3,9 @@
 运行：
     python tests/frontend/detail_race_smoke.py
 
-不依赖 AstrBot：在页面加载前注入假的 AstrBotPluginView，用可控延迟返回
-两次 daily/detail，验证旧请求（成功或失败）晚返回时不会覆盖新详情。
-需要本机安装 Playwright 与 Edge；未安装时脚本会明确跳过。
+不依赖 AstrBot：在页面加载前注入假的 AstrBotPluginView，用显式 gate
+控制旧响应何时返回，验证旧请求（成功或失败）都不能覆盖新结果。
+需要本机安装 Playwright 与 Edge；缺少依赖时返回非零，不静默通过。
 """
 import functools
 import http.server
@@ -18,23 +18,25 @@ VIEW_DIR = Path(__file__).resolve().parents[2] / "views" / "star-feather"
 BRIDGE = r"""
 (() => {
   const px = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
-  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   const scenario = new URLSearchParams(location.search).get("race") || "success";
   let detailCalls = 0;
+  let releaseOld = null;
+  const oldGate = new Promise((resolve) => { releaseOld = resolve; });
+  window.__releaseOld = () => { if (releaseOld) releaseOld(); };
   const card = (id, cn, num) => ({ id, cn, suit: "major", num });
-  const detail = (which, delay, fail) => ({
+  const detail = (which, fail = false) => ({
     uid: "u1", date: "20261107", today: "20261107",
     card: which === "old" ? card("major_00", "愚者", "0")
       : which === "new" ? card("major_01", "魔术师", "1")
       : card("major_02", "女祭司", "2"),
     upright: true, spirit: "", sign: "", persona: "", stale: false,
     topics: [{ topic: "测试", text: "测试解读", sections: [], summary: "" }],
-    _delay: delay, _fail: fail,
+    _fail: fail,
+    _message: which === "new" ? "新请求失败" : "旧请求失败",
   });
   const send = async (payload) => {
-    await wait(payload._delay || 0);
-    if (payload._fail) throw new Error("旧请求失败");
-    const { _delay, _fail, ...data } = payload;
+    if (payload._fail) throw new Error(payload._message);
+    const { _fail, _message, ...data } = payload;
     return data;
   };
   window.AstrBotPluginView = {
@@ -59,11 +61,11 @@ BRIDGE = r"""
       if (endpoint === "card-image") return { mime: "image/png", base64: px };
       if (endpoint === "daily/detail") {
         detailCalls += 1;
-        if (detailCalls === 1) return send(detail("base", 0, false));
+        if (detailCalls === 1) return send(detail("base"));
         if (detailCalls === 2) {
-          return send(detail("old", 600, scenario === "failure"));
+          return oldGate.then(() => send(detail("old", scenario === "failure")));
         }
-        return send(detail("new", 0, false));
+        return send(detail("new", scenario === "newFailure"));
       }
       throw new Error("unexpected endpoint: " + endpoint);
     },
@@ -75,17 +77,35 @@ BRIDGE = r"""
 
 def run_scenario(browser, base_url, scenario):
     page = browser.new_page(viewport={"width": 1280, "height": 800})
-    page.add_init_script(BRIDGE)
-    page.goto(f"{base_url}/index.html?race={scenario}", wait_until="networkidle")
-    page.wait_for_selector(".detail-title h2", timeout=5000)
-    # 第一次详情来自 boot；随后同一用户连点两次，制造同 UID 双请求。
-    page.locator(".user").first.click()
-    page.locator(".user").first.click()
-    page.wait_for_timeout(900)
-    title = page.locator(".detail-title h2").inner_text()
-    error = page.locator("#daily-detail .empty").count()
-    page.close()
-    return {"scenario": scenario, "title": title, "errorBox": bool(error)}
+    try:
+        page.add_init_script(BRIDGE)
+        page.goto(f"{base_url}/index.html?race={scenario}", wait_until="networkidle")
+        page.wait_for_selector(".detail-title h2", timeout=5000)
+        # 第一次详情来自 boot；随后同一用户连点两次：旧请求停在 gate 上，
+        # 新请求先渲染，再显式放行旧请求。
+        page.locator(".user").first.click()
+        page.locator(".user").first.click()
+        if scenario == "newFailure":
+            page.wait_for_function(
+                "document.querySelector('#daily-detail .empty')?.textContent === '新请求失败'",
+                timeout=5000,
+            )
+        else:
+            page.wait_for_function(
+                "document.querySelector('.detail-title h2')?.textContent === '魔术师'",
+                timeout=5000,
+            )
+        page.evaluate("window.__releaseOld()")
+        page.wait_for_timeout(250)
+        return {
+            "scenario": scenario,
+            "title": page.locator(".detail-title h2").inner_text()
+            if page.locator(".detail-title h2").count() else "",
+            "errorText": page.locator("#daily-detail .empty").inner_text()
+            if page.locator("#daily-detail .empty").count() else "",
+        }
+    finally:
+        page.close()
 
 
 def main():
@@ -93,10 +113,10 @@ def main():
         from playwright.sync_api import sync_playwright
     except ImportError:
         print("SKIP: playwright not installed")
-        return 0
+        return 2
     if not VIEW_DIR.is_dir():
         print(f"SKIP: view dir not found: {VIEW_DIR}")
-        return 0
+        return 2
     handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(VIEW_DIR))
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     port = server.server_address[1]
@@ -106,13 +126,18 @@ def main():
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(channel="msedge", headless=True)
-            results.append(run_scenario(browser, base_url, "success"))
-            results.append(run_scenario(browser, base_url, "failure"))
+            for scenario in ("success", "failure", "newFailure"):
+                results.append(run_scenario(browser, base_url, scenario))
             browser.close()
     finally:
         server.shutdown()
     print(results)
-    ok = all(item["title"] == "魔术师" and not item["errorBox"] for item in results)
+    ok = True
+    for item in results:
+        if item["scenario"] == "newFailure":
+            ok = ok and item["errorText"] == "新请求失败" and item["title"] != "愚者"
+        else:
+            ok = ok and item["title"] == "魔术师" and item["errorText"] == ""
     print("PASS" if ok else "FAIL")
     return 0 if ok else 1
 
