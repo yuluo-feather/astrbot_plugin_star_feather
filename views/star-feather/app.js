@@ -218,6 +218,7 @@ const HUE_CORE_RATIO = 0.62;
 const HUE_BUCKET_DEG = 3;
 const HUE_RGB_LIMIT = 8;
 const HUE_GLOW_STEP_DEG = 5;
+const HORIZON_FADE_PX = 48;
 const HUE_FIELD_POINTS = [
   { u: 0.06, v: 0.74, w: 0.20 },
   { u: 0.24, v: 0.67, w: 0.25 },
@@ -603,10 +604,10 @@ class NearMeteors {
     this.stepList(this.list, dt);
     this.stepList(this.groupList, dt);
     this.list = this.list.filter(
-      (m) => m.age < m.life && m.x < this.vw + 300 && m.y < this.horizon - 4,
+      (m) => m.age < m.life && m.x < this.vw + 300 && m.y < this.horizon,
     );
     this.groupList = this.groupList.filter(
-      (m) => m.age < m.life && m.x < this.vw + 300 && m.y < this.horizon - 4,
+      (m) => m.age < m.life && m.x < this.vw + 300 && m.y < this.horizon,
     );
   }
 
@@ -676,7 +677,7 @@ class NearMeteors {
   }
 
   prepareMeteor(m, target) {
-    const fade = Math.min(1, m.age / 0.08)
+    let fade = Math.min(1, m.age / 0.08)
       * Math.min(1, Math.max(0, (m.life - m.age) / 0.3));
     const breath = 0.5 + 0.5 * Math.sin(
       (2 * Math.PI * m.age) / m.breathPeriod + m.breathPhase,
@@ -712,6 +713,11 @@ class NearMeteors {
     const total = dist[dist.length - 1] || 0;
     const head = points.length ? points[points.length - 1] : { x: m.x, y: m.y };
     const headWeight = this.weightAt(head.x, head.y);
+    const horizonFade = Math.max(
+      0,
+      Math.min(1, (this.horizon - head.y) / HORIZON_FADE_PX),
+    );
+    fade *= horizonFade;
 
     for (let i = 0; i < points.length; i += 1) {
       const p = total ? dist[i] / total : 0;
@@ -1437,6 +1443,7 @@ async function loadSpreads() {
 // ---- 占卜预览：本地抽牌，AI 解读只在点击后请求 ----
 let previewBusy = false;
 let previewAiSeq = 0;
+let previewSeq = 0;
 
 async function loadPreviewForm() {
   const spreads = await ensureSpreads();
@@ -1460,6 +1467,7 @@ async function drawPreview() {
   if (previewBusy) return;
   const spread = $("preview-spread").value;
   if (!spread) return;
+  const seq = ++previewSeq;
   previewBusy = true;
   previewAiSeq += 1;  // 抽牌一开始就作废上一轮 AI，不必等抽牌结果返回
   $("preview-draw").disabled = true;
@@ -1467,6 +1475,7 @@ async function drawPreview() {
   try {
     const question = $("preview-question").value.trim();
     const data = await apiPost("preview/draw", { spread, question });
+    if (seq !== previewSeq) return;
     state.preview = {
       spread: data.spread,
       question: data.question || "",
@@ -1477,12 +1486,30 @@ async function drawPreview() {
     };
     renderPreview({ animate: true });
   } catch (error) {
-    showToast(error.message || "抽牌失败");
+    if (seq === previewSeq) showToast(error.message || "抽牌失败");
   } finally {
-    previewBusy = false;
-    $("preview-draw").disabled = false;
-    updatePreviewAIButton();
+    if (seq === previewSeq) {
+      previewBusy = false;
+      $("preview-draw").disabled = false;
+      updatePreviewAIButton();
+    }
   }
+}
+
+function resetPreview() {
+  previewSeq += 1;
+  previewAiSeq += 1;
+  previewBusy = false;
+  state.preview = null;
+  const draw = $("preview-draw");
+  const ai = $("preview-ai");
+  if (draw) draw.disabled = false;
+  if (ai) {
+    ai.disabled = true;
+    ai.textContent = "AI 深度解读";
+  }
+  renderPreview();
+  updatePreviewAIButton();
 }
 
 async function requestPreviewAI() {
@@ -1692,6 +1719,7 @@ function switchTab(tab) {
 }
 
 async function refresh() {
+  if (!$("panel-preview").classList.contains("hidden")) resetPreview();
   try {
     const overview = await apiGet("overview");
     state.overview = overview;
