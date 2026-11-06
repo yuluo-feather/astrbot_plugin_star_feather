@@ -197,6 +197,7 @@ function glowSprite(rgb) {
 }
 
 function spawnMeteor() {
+  if (!farEnabled) return;
   const sky = document.querySelector(".sky");
   if (!sky) return;
   const xPct = 24 + Math.random() * 58;
@@ -501,6 +502,8 @@ class NearMeteors {
 
 let nearField = null;
 let nearTimer = 0;
+let farEnabled = false;
+let farTimer = 0;
 
 function initNearMeteors() {
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
@@ -520,8 +523,21 @@ function stopNearMeteors() {
   if (nearField) nearField.stop();
 }
 
+function startFarMeteors() {
+  if (farEnabled) return;
+  farEnabled = true;
+  scheduleMeteor(false);
+}
+
+function stopFarMeteors() {
+  farEnabled = false;
+  clearTimeout(farTimer);
+  farTimer = 0;
+}
+
 function scheduleMeteor(near) {
   if (near && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  if (!near && !farEnabled) return;
   // 远景保持 0.8–1.9 秒的频率（30% 连发）；近景 6–12 秒一颗，最多 2 颗。
   const delay = near
     ? 6000 + Math.random() * 6000
@@ -535,6 +551,7 @@ function scheduleMeteor(near) {
         }
       }
     } else {
+      if (!farEnabled) return;
       const bursts = Math.random() < 0.3 ? 2 : 1;
       for (let i = 0; i < bursts; i += 1) {
         setTimeout(() => spawnMeteor(), i * (140 + Math.random() * 220));
@@ -543,6 +560,7 @@ function scheduleMeteor(near) {
     scheduleMeteor(near);
   }, delay);
   if (near) nearTimer = timer;
+  else farTimer = timer;
 }
 
 // 地平线在视口里的位置：与背景 cover 的缩放/居中保持一致，倒影层据此翻转
@@ -649,15 +667,18 @@ function initSky() {  const box = $("sky-stars");
   }
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
   if (!reduced.matches) {
+    startFarMeteors();
     spawnMeteor();
-    scheduleMeteor(false);
     initNearMeteors();
     scheduleMeteor(true);
   }
   reduced.addEventListener("change", (event) => {
     if (event.matches) {
       stopNearMeteors();
+      stopFarMeteors();
     } else {
+      startFarMeteors();
+      spawnMeteor();
       initNearMeteors();
       scheduleMeteor(true);
     }
