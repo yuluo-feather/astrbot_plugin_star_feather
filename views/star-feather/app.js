@@ -171,10 +171,18 @@ function showToast(message) {
 // 近流星固定青碧色；远景 CSS 流星另有固定淡青蓝，两套都不再随机取色
 const METEOR_TINT = [96, 245, 235];
 
-// 头部两层：透明度直接就是绘制 alpha（亮度 1 = 贴图原样）
-const GLOW_ALPHA = 0.26; // 头部柔光
-const CROSS_ALPHA = 0.12; // 十字
-const CROSS_SIZE = 16;
+// 星芒呼吸：透明度与尺寸共用同一周期，尺寸略滞后；每颗流星独立相位
+const BREATH_PERIOD_MIN = 1.4;
+const BREATH_PERIOD_MAX = 1.7;
+const BREATH_SIZE_LAG = -0.35; // 尺寸落后透明度约 0.35 rad
+const STAR_ALPHA_MIN = 0.14;
+const STAR_ALPHA_MAX = 0.34;
+const STAR_SIZE_MIN = 14;
+const STAR_SIZE_MAX = 18;
+const HALO_ALPHA_MIN = 0.18;
+const HALO_ALPHA_MAX = 0.32;
+const HALO_RADIUS_MIN = 10;
+const HALO_RADIUS_MAX = 13;
 
 // 预渲染的柔光贴图，按颜色缓存
 const glowCache = new Map();
@@ -188,7 +196,8 @@ function glowSprite(rgb) {
   const g = canvas.getContext("2d");
   const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
   grad.addColorStop(0, "rgba(255,255,255,1)");
-  grad.addColorStop(0.3, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.6)`);
+  // 白色只留最中心的一小圈，对应 2–3px 的中心亮核；外围回到青碧色
+  grad.addColorStop(0.1, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.6)`);
   grad.addColorStop(1, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0)`);
   g.fillStyle = grad;
   g.fillRect(0, 0, 64, 64);
@@ -269,8 +278,21 @@ function spawnMeteor() {
   pool.append(echo);
 }
 
-// 近流星的星芒贴图（对应原场景 star_shine 子粒子）
+// 近流星的星芒贴图（对应原场景 star_shine 子粒子）。原图是白色，画到 canvas 前
+// 先染成固定青碧色，白色只留给中心亮核和尾迹亮芯。
 const starSprite = new Image();
+const starTinted = document.createElement("canvas");
+let starReady = false;
+starSprite.onload = () => {
+  starTinted.width = starSprite.naturalWidth;
+  starTinted.height = starSprite.naturalHeight;
+  const g = starTinted.getContext("2d");
+  g.drawImage(starSprite, 0, 0);
+  g.globalCompositeOperation = "source-in";
+  g.fillStyle = `rgb(${METEOR_TINT.join(",")})`;
+  g.fillRect(0, 0, starTinted.width, starTinted.height);
+  starReady = true;
+};
 starSprite.src = "./assets/star.webp";
 
 // 近流星：canvas 渲染。按「重力 + 阻力」逐帧积分，尾迹沿真实路径撒柔光精灵
@@ -282,6 +304,7 @@ class NearMeteors {
     this.ctx = skyCanvas.getContext("2d");
     this.wctx = waterCanvas ? waterCanvas.getContext("2d") : null;
     this.list = [];
+    this.groupList = [];
     this.dpr = 1;
     this.vw = 0;
     this.vh = 0;
@@ -314,27 +337,61 @@ class NearMeteors {
     canvas.getContext("2d").setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
   }
 
-  spawn() {
+  spawn(opts = {}) {
+    const isGroup = opts.group === true;
+    const target = isGroup ? this.groupList : this.list;
+    // 单颗与流星群各自独立计时、各自独立上限
+    const limit = isGroup ? 3 : 2;
     if (!this.enabled) return;
     if (!this.vw || !this.vh) this.resize();
     if (!this.vw || !this.vh) return;
-    // 硬上限：达到 2 颗就拒绝；不能写成 > 2，否则列表会到 3 颗
-    if (this.list.length >= 2) return;
+    if (target.length >= limit) return;
     // Canvas 水平向右为 0°，Y 轴向下，正角度即右下方向
-    const angle = ((28 + Math.random() * 4) * Math.PI) / 180;
-    const speed = 280 + Math.random() * 80;
-    this.list.push({
-      x: this.vw * (0.16 + Math.random() * 0.56),
-      y: this.vh * (0.02 + Math.random() * 0.12),
+    let angleDeg;
+    let x;
+    let y;
+    if (isGroup) {
+      // 同组共用基础角度，每颗再各自浮动 ±2°，看起来同向但不机械平行
+      const jittered = (opts.baseAngle ?? 33) + (Math.random() * 4 - 2);
+      angleDeg = Math.min(36, Math.max(29, jittered));
+      // 顶部进入 65%，左侧进入 35%
+      const fromTop = Math.random() < 0.65;
+      x = fromTop
+        ? this.vw * (0.08 + Math.random() * 0.72)
+        : this.vw * Math.random() * 0.12;
+      y = fromTop
+        ? this.vh * Math.random() * 0.10
+        : this.vh * (0.15 + Math.random() * 0.40);
+    } else {
+      angleDeg = 29 + Math.random() * 7;
+      x = this.vw * (0.16 + Math.random() * 0.56);
+      y = this.vh * (0.02 + Math.random() * 0.12);
+    }
+    const angle = (angleDeg * Math.PI) / 180;
+    const speed = 300 + Math.random() * 80;
+    // 尾迹长度按 20% 短 / 60% 中 / 20% 长分布，避免每颗都一样
+    const trailRoll = Math.random();
+    const trailLen = trailRoll < 0.2
+      ? 140 + Math.random() * 40
+      : trailRoll < 0.8
+        ? 190 + Math.random() * 50
+        : 250 + Math.random() * 30;
+    target.push({
+      x,
+      y,
       vx: Math.cos(angle) * speed,
       vy: Math.sin(angle) * speed,
       age: 0,
-      life: 1.6 + Math.random() * 0.6,
-      g: 5 + Math.random() * 7,
-      trailLen: 220 + Math.random() * 60,
+      life: 1.7 + Math.random() * 0.5,
+      g: 4 + Math.random() * 5,
+      drag: 0.02 + Math.random() * 0.02,
+      trailLen,
       tint: METEOR_TINT,
       trail: [],
       spin: Math.random() * Math.PI * 2,
+      spinSpeed: 0.05 + Math.random() * 0.07,
+      breathPeriod: BREATH_PERIOD_MIN + Math.random() * (BREATH_PERIOD_MAX - BREATH_PERIOD_MIN),
+      breathPhase: Math.random() * Math.PI * 2,
     });
     this.start();
   }
@@ -350,6 +407,7 @@ class NearMeteors {
   stop() {
     this.enabled = false;
     this.list = [];
+    this.groupList = [];
     this.running = false;
     if (this.raf) cancelAnimationFrame(this.raf);
     this.raf = 0;
@@ -366,7 +424,7 @@ class NearMeteors {
     this.last = now;
     this.step(dt);
     this.paint();
-    if (this.list.length) {
+    if (this.list.length || this.groupList.length) {
       this.raf = requestAnimationFrame((t) => this.frame(t));
     } else {
       this.running = false;
@@ -375,10 +433,20 @@ class NearMeteors {
   }
 
   step(dt) {
-    const k = 0.05;
-    for (const m of this.list) {
+    this.stepList(this.list, dt);
+    this.stepList(this.groupList, dt);
+    this.list = this.list.filter(
+      (m) => m.age < m.life && m.x < this.vw + 300 && m.y < this.horizon - 4,
+    );
+    this.groupList = this.groupList.filter(
+      (m) => m.age < m.life && m.x < this.vw + 300 && m.y < this.horizon - 4,
+    );
+  }
+
+  stepList(list, dt) {
+    for (const m of list) {
       m.age += dt;
-      const damp = 1 - k * dt;
+      const damp = 1 - m.drag * dt;
       m.vx *= damp;
       m.vy = m.vy * damp + m.g * dt;
       m.x += m.vx * dt;
@@ -399,9 +467,6 @@ class NearMeteors {
       }
       if (cut > 0) m.trail.splice(0, cut);
     }
-    this.list = this.list.filter(
-      (m) => m.age < m.life && m.x < this.vw + 300 && m.y < this.horizon - 4,
-    );
   }
 
   paint() {
@@ -409,7 +474,8 @@ class NearMeteors {
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, this.vw, this.vh);
     ctx.globalCompositeOperation = "lighter";
-    this.paintMeteors(ctx, 1);
+    this.paintMeteors(ctx, 1, this.list);
+    this.paintMeteors(ctx, 1, this.groupList);
 
     if (this.wctx && this.waterH > 0) {
       const w = this.wctx;
@@ -418,7 +484,8 @@ class NearMeteors {
       w.clearRect(0, 0, this.vw, this.waterH);
       w.setTransform(this.dpr, 0, 0, -this.dpr * ratio, 0, this.dpr * this.waterH);
       w.globalCompositeOperation = "lighter";
-      this.paintMeteors(w, 0.4);
+      this.paintMeteors(w, 0.4, this.list);
+      this.paintMeteors(w, 0.4, this.groupList);
     }
 
     ctx.globalAlpha = 1;
@@ -429,10 +496,10 @@ class NearMeteors {
     }
   }
 
-  paintMeteors(ctx, alphaScale) {
+  paintMeteors(ctx, alphaScale, list) {
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    for (const m of this.list) {
+    for (const m of list) {
       const n = m.trail.length;
       const fade = Math.min(1, m.age / 0.08)
         * Math.min(1, Math.max(0, (m.life - m.age) / 0.3));
@@ -442,10 +509,10 @@ class NearMeteors {
         const tail = m.trail[0];
         const halo = ctx.createLinearGradient(tail.x, tail.y, head.x, head.y);
         halo.addColorStop(0, "rgba(96,245,235,0)");
-        halo.addColorStop(1, "rgba(96,245,235,0.22)");
+        halo.addColorStop(1, "rgba(96,245,235,0.16)");
         const body = ctx.createLinearGradient(tail.x, tail.y, head.x, head.y);
         body.addColorStop(0, "rgba(96,245,235,0)");
-        body.addColorStop(0.55, "rgba(96,245,235,0.22)");
+        body.addColorStop(0.55, "rgba(96,245,235,0.40)");
         body.addColorStop(1, "rgba(96,245,235,0.85)");
 
         // 外层柔光
@@ -456,10 +523,10 @@ class NearMeteors {
 
         // 青碧主体
         ctx.strokeStyle = body;
-        ctx.lineWidth = 2.0;
+        ctx.lineWidth = 1.8;
         this.strokeTrail(ctx, m.trail, 0, n - 1);
 
-        // 白青亮芯：靠近头部的 45%
+        // 白青亮芯：靠近头部的 40%
         let coreStart = n - 1;
         let dist = 0;
         for (let i = n - 1; i > 0; i -= 1) {
@@ -468,7 +535,7 @@ class NearMeteors {
             m.trail[i].y - m.trail[i - 1].y,
           );
           coreStart = i - 1;
-          if (dist >= m.trailLen * 0.45) break;
+          if (dist >= m.trailLen * 0.40) break;
         }
         if (coreStart < n - 1) {
           const core = ctx.createLinearGradient(
@@ -478,28 +545,36 @@ class NearMeteors {
             head.y,
           );
           core.addColorStop(0, "rgba(255,255,255,0)");
-          core.addColorStop(1, "rgba(255,255,255,0.9)");
+          core.addColorStop(1, "rgba(255,255,255,0.85)");
           ctx.strokeStyle = core;
-          ctx.lineWidth = 1.0;
+          ctx.lineWidth = 0.9;
           this.strokeTrail(ctx, m.trail, coreStart, n - 1);
         }
       }
 
+      // 星芒呼吸：透明度与尺寸同周期，尺寸略滞后
+      const breath = 0.5 + 0.5 * Math.sin(
+        (2 * Math.PI * m.age) / m.breathPeriod + m.breathPhase,
+      );
+      const sizeBreath = 0.5 + 0.5 * Math.sin(
+        (2 * Math.PI * m.age) / m.breathPeriod + m.breathPhase + BREATH_SIZE_LAG,
+      );
+
       // 头部柔光
-      if (GLOW_ALPHA > 0) {
-        const radius = 12;
-        ctx.globalAlpha = fade * GLOW_ALPHA * alphaScale;
-        ctx.drawImage(glowSprite(m.tint), head.x - radius, head.y - radius, radius * 2, radius * 2);
-      }
+      const radius = HALO_RADIUS_MIN + (HALO_RADIUS_MAX - HALO_RADIUS_MIN) * sizeBreath;
+      const haloAlpha = HALO_ALPHA_MIN + (HALO_ALPHA_MAX - HALO_ALPHA_MIN) * breath;
+      ctx.globalAlpha = fade * haloAlpha * alphaScale;
+      ctx.drawImage(glowSprite(m.tint), head.x - radius, head.y - radius, radius * 2, radius * 2);
 
       // 星芒
-      if (CROSS_ALPHA > 0 && starSprite.complete && starSprite.naturalWidth) {
-        const size = CROSS_SIZE;
-        ctx.globalAlpha = fade * CROSS_ALPHA * alphaScale;
+      if (starReady) {
+        const size = STAR_SIZE_MIN + (STAR_SIZE_MAX - STAR_SIZE_MIN) * sizeBreath;
+        const starAlpha = STAR_ALPHA_MIN + (STAR_ALPHA_MAX - STAR_ALPHA_MIN) * breath;
+        ctx.globalAlpha = fade * starAlpha * alphaScale;
         ctx.save();
         ctx.translate(head.x, head.y);
-        ctx.rotate(m.spin + m.age * 0.8);
-        ctx.drawImage(starSprite, -size / 2, -size / 2, size, size);
+        ctx.rotate(m.spin + m.age * m.spinSpeed);
+        ctx.drawImage(starTinted, -size / 2, -size / 2, size, size);
         ctx.restore();
       }
     }
@@ -518,6 +593,8 @@ class NearMeteors {
 
 let nearField = null;
 let nearTimer = 0;
+let nearGroupTimer = 0;
+let nearGroupTimers = [];
 let farEnabled = false;
 let farTimer = 0;
 
@@ -536,6 +613,10 @@ function initNearMeteors() {
 function stopNearMeteors() {
   clearTimeout(nearTimer);
   nearTimer = 0;
+  clearTimeout(nearGroupTimer);
+  nearGroupTimer = 0;
+  for (const timer of nearGroupTimers) clearTimeout(timer);
+  nearGroupTimers = [];
   if (nearField) nearField.stop();
 }
 
@@ -554,7 +635,7 @@ function stopFarMeteors() {
 function scheduleMeteor(near) {
   if (near && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   if (!near && !farEnabled) return;
-  // 远景保持 0.8–1.9 秒的频率（30% 连发）；近景 6–12 秒一颗，最多 2 颗。
+  // 远景保持 0.8–1.9 秒的频率（30% 连发）；近景单颗 6–12 秒一颗，最多 2 颗。
   const delay = near
     ? 6000 + Math.random() * 6000
     : 800 + Math.random() * 1100;
@@ -577,6 +658,33 @@ function scheduleMeteor(near) {
   }, delay);
   if (near) nearTimer = timer;
   else farTimer = timer;
+}
+
+// 流星群：与单颗近景流星互不影响，独立计时、独立上限 3 颗
+function scheduleGroupMeteor() {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const delay = 7000 + Math.random() * 3000;
+  const timer = setTimeout(() => {
+    if (nearField) {
+      // 65% 两颗、35% 三颗；组内间隔 180–320ms，同组共用一个基础角度
+      const count = Math.random() < 0.35 ? 3 : 2;
+      const baseAngle = 33 + (Math.random() * 3 - 1.5);
+      nearGroupTimers = [];
+      let at = 0;
+      for (let i = 0; i < count; i += 1) {
+        if (i === 0) {
+          nearField.spawn({ group: true, baseAngle });
+        } else {
+          at += 180 + Math.random() * 140;
+          nearGroupTimers.push(setTimeout(() => {
+            if (nearField) nearField.spawn({ group: true, baseAngle });
+          }, at));
+        }
+      }
+    }
+    scheduleGroupMeteor();
+  }, delay);
+  nearGroupTimer = timer;
 }
 
 // 地平线在视口里的位置：与背景 cover 的缩放/居中保持一致，倒影层据此翻转
@@ -687,6 +795,7 @@ function initSky() {  const box = $("sky-stars");
     spawnMeteor();
     initNearMeteors();
     scheduleMeteor(true);
+    scheduleGroupMeteor();
   }
   reduced.addEventListener("change", (event) => {
     if (event.matches) {
@@ -697,6 +806,7 @@ function initSky() {  const box = $("sky-stars");
       spawnMeteor();
       initNearMeteors();
       scheduleMeteor(true);
+      scheduleGroupMeteor();
     }
   });
 }
