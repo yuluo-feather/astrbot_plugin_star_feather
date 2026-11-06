@@ -5,7 +5,7 @@
 
 三个场景（假 bridge 注入，不依赖 AstrBot）：
 - drawStale：旧抽牌响应晚归，不能覆盖刷新后重新抽出的结果。
-- aiStale：旧 AI 解读晚归，不能写进已清空的预览。
+- aiStale：AI 解读在途时刷新并重新抽牌，旧解读不能落到新结果的界面上。
 - reduced：prefers-reduced-motion 下翻牌立即可见，不等 animationend。
 需要本机安装 Playwright 与 Edge；缺少依赖时返回非零，不静默通过。
 """
@@ -137,10 +137,14 @@ def run_scenario(browser, base_url, scenario):
             page.click("#preview-ai")
             page.wait_for_function("window.__aiCalls === 1", timeout=5000)
             page.click("#refresh")
+            page.wait_for_function("!document.querySelector('#preview-draw').disabled", timeout=5000)
+            # 刷新后重新抽牌，让旧 AI 落在一个已经换了内容的结果上
+            draw_once(page)
             page.evaluate("window.__releaseAi()")
             page.wait_for_timeout(300)
             return {"scenario": scenario,
-                    "text": page.inner_text("#preview-result")}
+                    "text": page.inner_text("#preview-result"),
+                    "titles": page.evaluate(CARD_TITLES)}
         draw_once(page)
         page.wait_for_function(FLIPPED_ALL, timeout=300)
         return {"scenario": scenario, "flipped": True}
@@ -156,8 +160,10 @@ def check(result):
     if result["scenario"] == "drawStale":
         return set(result["titles"]) == {"魔术师"}
     if result["scenario"] == "aiStale":
+        # 旧 AI 不能改写新结果的 UI；新结果仍是刚抽出的那张牌
         text = result["text"]
-        return "选一个牌阵" in text and "旧解读" not in text
+        return (set(result["titles"]) == {"魔术师"}
+                and "旧解读" not in text and "点上方" in text)
     return result.get("flipped") is True
 
 
