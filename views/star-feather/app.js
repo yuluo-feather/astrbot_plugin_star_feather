@@ -413,78 +413,89 @@ class NearMeteors {
   }
 
   paintMeteors(ctx, alphaScale) {
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
     for (const m of this.list) {
       const n = m.trail.length;
-      const fade = Math.min(1, m.age / 0.1)
-        * Math.min(1, Math.max(0, (m.life - m.age) / 0.5));
+      const fade = Math.min(1, m.age / 0.08)
+        * Math.min(1, Math.max(0, (m.life - m.age) / 0.3));
+      const head = n ? m.trail[n - 1] : { x: m.x, y: m.y };
 
-      // 截掉光晕半径（10px）内的点
-      let end = n - 1;
-      while (end > 0) {
-        const dx = m.trail[end].x - m.x;
-        const dy = m.trail[end].y - m.y;
-        if (dx * dx + dy * dy >= 100) break;
-        end -= 1;
-      }
-      if (end > 1) {
-        // 沿路径每 3px 撒一颗柔光精灵，加法混合累积出亮芯
-        const spacing = 3;
-        const dots = [];
-        let carry = 0;
-        for (let i = 1; i <= end; i += 1) {
-          const p0 = m.trail[i - 1];
-          const p1 = m.trail[i];
-          const seg = Math.hypot(p1.x - p0.x, p1.y - p0.y);
-          if (seg <= 0) continue;
-          let at = carry;
-          while (at < seg) {
-            const k = at / seg;
-            dots.push({
-              x: p0.x + (p1.x - p0.x) * k,
-              y: p0.y + (p1.y - p0.y) * k,
-            });
-            at += spacing;
-          }
-          carry = at - seg;
+      if (n > 1) {
+        const tail = m.trail[0];
+        const halo = ctx.createLinearGradient(tail.x, tail.y, head.x, head.y);
+        halo.addColorStop(0, "rgba(96,245,235,0)");
+        halo.addColorStop(1, "rgba(96,245,235,0.22)");
+        const body = ctx.createLinearGradient(tail.x, tail.y, head.x, head.y);
+        body.addColorStop(0, "rgba(96,245,235,0)");
+        body.addColorStop(0.55, "rgba(96,245,235,0.22)");
+        body.addColorStop(1, "rgba(96,245,235,0.85)");
+
+        // 外层柔光
+        ctx.globalAlpha = fade * alphaScale;
+        ctx.strokeStyle = halo;
+        ctx.lineWidth = 4.5;
+        this.strokeTrail(ctx, m.trail, 0, n - 1);
+
+        // 青碧主体
+        ctx.strokeStyle = body;
+        ctx.lineWidth = 2.0;
+        this.strokeTrail(ctx, m.trail, 0, n - 1);
+
+        // 白青亮芯：靠近头部的 45%
+        let coreStart = n - 1;
+        let dist = 0;
+        for (let i = n - 1; i > 0; i -= 1) {
+          dist += Math.hypot(
+            m.trail[i].x - m.trail[i - 1].x,
+            m.trail[i].y - m.trail[i - 1].y,
+          );
+          coreStart = i - 1;
+          if (dist >= m.trailLen * 0.45) break;
         }
-        const total = dots.length;
-        if (total > 0) {
-          const sprite = glowSprite(m.tint);
-          for (let i = 0; i < total; i += 1) {
-            const f = total > 1 ? i / (total - 1) : 1;
-            const size = 2.2 + 2.6 * f;
-            const ends = Math.min(1, f / 0.08);
-            ctx.globalAlpha = fade * ends * (0.14 + 0.3 * f) * alphaScale;
-            ctx.drawImage(
-              sprite,
-              dots[i].x - size / 2,
-              dots[i].y - size / 2,
-              size,
-              size,
-            );
-          }
+        if (coreStart < n - 1) {
+          const core = ctx.createLinearGradient(
+            m.trail[coreStart].x,
+            m.trail[coreStart].y,
+            head.x,
+            head.y,
+          );
+          core.addColorStop(0, "rgba(255,255,255,0)");
+          core.addColorStop(1, "rgba(255,255,255,0.9)");
+          ctx.strokeStyle = core;
+          ctx.lineWidth = 1.0;
+          this.strokeTrail(ctx, m.trail, coreStart, n - 1);
         }
       }
 
-      // 头部柔光（GLOW_ALPHA = 0 时跳过）
+      // 头部柔光
       if (GLOW_ALPHA > 0) {
-        const radius = 18;
+        const radius = 12;
         ctx.globalAlpha = fade * GLOW_ALPHA * alphaScale;
-        ctx.drawImage(glowSprite(m.tint), m.x - radius, m.y - radius, radius * 2, radius * 2);
+        ctx.drawImage(glowSprite(m.tint), head.x - radius, head.y - radius, radius * 2, radius * 2);
       }
 
       // 星芒
       if (CROSS_ALPHA > 0 && starSprite.complete && starSprite.naturalWidth) {
-        const size = 32;
+        const size = CROSS_SIZE;
         ctx.globalAlpha = fade * CROSS_ALPHA * alphaScale;
         ctx.save();
-        ctx.translate(m.x, m.y);
+        ctx.translate(head.x, head.y);
         ctx.rotate(m.spin + m.age * 0.8);
         ctx.drawImage(starSprite, -size / 2, -size / 2, size, size);
         ctx.restore();
       }
     }
     ctx.globalAlpha = 1;
+  }
+
+  strokeTrail(ctx, trail, from, to) {
+    ctx.beginPath();
+    ctx.moveTo(trail[from].x, trail[from].y);
+    for (let i = from + 1; i <= to; i += 1) {
+      ctx.lineTo(trail[i].x, trail[i].y);
+    }
+    ctx.stroke();
   }
 }
 
