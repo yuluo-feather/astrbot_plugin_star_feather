@@ -173,8 +173,9 @@ class WebUI:
         }
 
     async def daily_detail(self, uid: str) -> dict | None:
+        today = self.clock.today()
         record = await self.daily.read_record(uid)
-        if record is None:
+        if record is None or record.date != today:
             return None
         card = _CARDS_BY_ID.get(record.card_id, {})
         topics = []
@@ -189,7 +190,7 @@ class WebUI:
         return {
             "uid": uid,
             "date": record.date,
-            "today": self.clock.today(),
+            "today": today,
             "card": {
                 "id": record.card_id,
                 "cn": card.get("cn", record.card_id),

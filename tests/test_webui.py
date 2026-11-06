@@ -6,6 +6,7 @@
 import asyncio
 import base64
 import io
+import sys
 import types
 
 import pytest
@@ -55,6 +56,11 @@ def _make(kv, structure_check=STRUCTURE_CHECK_LOOSE):
     )
     clock = types.SimpleNamespace(today=lambda: DAY)
     return daily, WebUI(daily, settings, clock, version="0.10.0")
+
+
+def _ui_with_today(ui, today):
+    return WebUI(ui.daily, ui.settings,
+                 types.SimpleNamespace(today=lambda: today), version=ui.version)
 
 
 def _seed(daily, uid):
@@ -141,6 +147,28 @@ def test_detail_serializes_topics_and_stale_flag():
 def test_detail_missing_user_is_none():
     _, ui = _make({})
     assert asyncio.run(ui.daily_detail("nobody")) is None
+
+
+def test_detail_hides_non_today_record():
+    kv = {}
+    daily, ui = _make(kv)
+    _seed(daily, "u1")
+    stale = _ui_with_today(ui, "20260828")
+    assert asyncio.run(stale.daily_detail("u1")) is None
+
+
+def test_detail_route_returns_404_for_non_today_record(monkeypatch):
+    kv = {}
+    daily, ui = _make(kv)
+    _seed(daily, "u1")
+    stale = _ui_with_today(ui, "20260828")
+    web = types.ModuleType("astrbot.api.web")
+    web.request = types.SimpleNamespace(query={"uid": "u1"})
+    monkeypatch.setitem(sys.modules, "astrbot.api.web", web)
+    monkeypatch.setattr(sys.modules["astrbot.api"], "web", web, raising=False)
+    data, status = asyncio.run(stale.h_daily_detail())
+    assert status == 404
+    assert data["status"] == "error"
 
 
 def test_overview_counts_today_records():
