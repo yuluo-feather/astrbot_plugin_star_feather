@@ -390,6 +390,54 @@ def test_overview_counts_beyond_the_list_cap():
     assert data["users"] == 201
 
 
+def test_overview_bounds_concurrent_record_reads(monkeypatch):
+    """索引再大也只维持固定并发；统计口径与串行版本逐项一致。"""
+    daily, ui = _make({})
+    uids = [f"u{index}" for index in range(64)]
+    inflight = 0
+    peak = 0
+
+    async def users_for(today):
+        return uids
+
+    async def read_record(uid):
+        nonlocal inflight, peak
+        inflight += 1
+        peak = max(peak, inflight)
+        await asyncio.sleep(0)
+        inflight -= 1
+        number = int(uid[1:])
+        if number % 4 == 0:
+            return None
+        return types.SimpleNamespace(
+            date=DAY if number % 3 else "20260828",
+            spirit_line="牌灵" if number % 2 else "",
+            interps={"事业": "x", "感情": "y"} if number % 5 == 0 else {},
+            prompt_v=daily.prompt_version,
+            persona=daily.persona,
+        )
+
+    monkeypatch.setattr(daily, "users_for", users_for)
+    monkeypatch.setattr(daily, "read_record", read_record)
+    data = asyncio.run(ui.overview())
+
+    expected_active = expected_spirit = expected_topics = 0
+    for number in range(len(uids)):
+        if number % 4 == 0 or number % 3 == 0:
+            continue
+        expected_active += 1
+        if number % 2:
+            expected_spirit += 1
+        if number % 5 == 0:
+            expected_topics += 2
+
+    assert 1 < peak <= 8
+    assert data["users"] == expected_active
+    assert data["with_spirit"] == expected_spirit
+    assert data["topics"] == expected_topics
+    assert data["stale"] == 0
+
+
 def test_card_image_cache_stays_bounded():
     _, ui = _make({})
     for width in range(60, 160):

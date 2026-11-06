@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 import random
@@ -30,6 +31,9 @@ _CARD_BACK_ID = "__back__"
 _MAX_LIST = 200
 _MAX_WIDTH = 640
 _THUMB_CACHE_MAX = 96
+# 概览要覆盖整个索引（最多 500），串行读会让一次刷新叠满读延迟；
+# 固定并发而非无上限 gather，避免把宿主 KV 打个措手不及。
+_OVERVIEW_READ_CONCURRENCY = 8
 
 # 牌阵的适用场景与牌位说明是视图文案：牌位名只从 core/spreads.py 取，
 # 这里只补「这个阵拿来问什么」和每个牌位的一句话含义。
@@ -116,12 +120,12 @@ class WebUI:
         today = self.clock.today()
         # 统计覆盖整个索引（最多 500），列表才截到 _MAX_LIST
         users = await self.daily.users_for(today)
+        records = await self._read_records_bounded(users)
         active = 0
         with_spirit = 0
         stale = 0
         topics = 0
-        for uid in users:
-            record = await self.daily.read_record(uid)
+        for record in records:
             if record is None or record.date != today:
                 continue
             active += 1
@@ -139,6 +143,24 @@ class WebUI:
             "topics": topics,
             "settings": self._settings_summary(),
         }
+
+    async def _read_records_bounded(self, uids: list[str]) -> list:
+        """按固定并发上限读记录；返回顺序与 uids 一致。
+
+        只服务概览这类「全量统计」：没有提前停止，统计口径与串行版本一致。
+        列表仍走串行，因为它有「凑满 _MAX_LIST 即停」的语义。
+        """
+        results: list = [None] * len(uids)
+        workers = min(_OVERVIEW_READ_CONCURRENCY, len(uids))
+        if not workers:
+            return results
+
+        async def worker(start: int) -> None:
+            for index in range(start, len(uids), workers):
+                results[index] = await self.daily.read_record(uids[index])
+
+        await asyncio.gather(*(worker(start) for start in range(workers)))
+        return results
 
     async def daily_list(self) -> dict:
         today = self.clock.today()
