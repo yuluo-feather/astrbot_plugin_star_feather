@@ -203,16 +203,27 @@ function spawnMeteor() {
   const xPct = 24 + Math.random() * 58;
   const yPct = Math.random() * 38;
   const duration = 0.9 + Math.random() * 0.7;
+  const angle = 28 + Math.random() * 8;
+  // A 背景流星：短、细、偏暗；B 纵深流星：更长、更亮、长度差异大
+  const kind = Math.random() < 2 / 3 ? "a" : "b";
+  const len = kind === "a" ? 90 + Math.random() * 50 : 140 + Math.random() * 80;
+  const travel = kind === "a" ? 260 + Math.random() * 60 : 300 + Math.random() * 80;
+  const peak = kind === "a" ? 0.45 + Math.random() * 0.2 : 0.6 + Math.random() * 0.25;
 
   const meteor = el("span", "meteor");
   meteor.style.left = `${xPct}%`;
   meteor.style.top = `${yPct}%`;
   meteor.style.animationDuration = `${duration}s`;
+  meteor.style.setProperty("--angle", `${angle.toFixed(1)}deg`);
+  meteor.style.setProperty("--len", `${len.toFixed(0)}px`);
+  meteor.style.setProperty("--travel", `${travel.toFixed(0)}px`);
+  meteor.style.setProperty("--peak", peak.toFixed(2));
+  meteor.dataset.kind = kind;
   meteor.addEventListener("animationend", () => meteor.remove());
   sky.append(meteor);
 
   // 金色余晖：沿轨迹撒几颗火星，各自飘散淡出
-  const rad = (32 * Math.PI) / 180;
+  const rad = (angle * Math.PI) / 180;
   const dirX = Math.cos(rad);
   const dirY = Math.sin(rad);
   const startX = (xPct / 100) * window.innerWidth;
@@ -220,7 +231,7 @@ function spawnMeteor() {
   for (let i = 0; i < 5; i += 1) {
     const at = 0.12 + i * 0.14;
     setTimeout(() => {
-      const along = 140 + 320 * at;
+      const along = 140 + travel * at;
       const ember = el("span", "ember");
       const size = 2 + Math.random() * 2.5;
       ember.style.width = `${size}px`;
@@ -249,6 +260,11 @@ function spawnMeteor() {
   echo.style.left = `${xPct}%`;
   echo.style.top = `${(waterH * (1 - yPct / 68)).toFixed(1)}px`;
   echo.style.animationDuration = `${duration}s`;
+  echo.style.setProperty("--angle", `${angle.toFixed(1)}deg`);
+  echo.style.setProperty("--len", `${len.toFixed(0)}px`);
+  echo.style.setProperty("--travel", `${travel.toFixed(0)}px`);
+  echo.style.setProperty("--peak", peak.toFixed(2));
+  echo.dataset.kind = kind;
   echo.addEventListener("animationend", () => echo.remove());
   pool.append(echo);
 }

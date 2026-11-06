@@ -281,11 +281,11 @@ body {
 
 .meteor {
   position: absolute;
-  width: 140px;
+  width: var(--len, 140px);
   height: 1px;
   border-radius: 999px;
   background: linear-gradient(90deg, rgba(210, 235, 255, 0), rgba(210, 235, 255, 0.9));
-  transform: rotate(32deg);
+  transform: rotate(var(--angle, 32deg));
   transform-origin: left center;
   opacity: 0;
   filter: drop-shadow(0 0 4px rgba(180, 220, 255, 0.8));
@@ -304,15 +304,15 @@ body {
 }
 
 @keyframes shoot {
-  0% { opacity: 0; transform: rotate(32deg) translate3d(0, 0, 0); }
-  12% { opacity: 1; }
-  100% { opacity: 0; transform: rotate(32deg) translate3d(320px, 0, 0); }
+  0% { opacity: 0; transform: rotate(var(--angle, 32deg)) translate3d(0, 0, 0); }
+  12% { opacity: var(--peak, 1); }
+  100% { opacity: 0; transform: rotate(var(--angle, 32deg)) translate3d(var(--travel, 320px), 0, 0); }
 }
 
 /* 倒影流星：沿水线做垂直镜像，方向与运动都反过来，整体压暗做虚 */
 .meteor.reflect {
-  width: 120px;
-  transform: rotate(-32deg);
+  width: calc(var(--len, 140px) * 0.86);
+  transform: rotate(calc(-1 * var(--angle, 32deg)));
   filter: blur(0.4px) drop-shadow(0 0 3px rgba(180, 220, 255, 0.45));
   animation-name: shoot-reflect;
 }
@@ -322,9 +322,9 @@ body {
 }
 
 @keyframes shoot-reflect {
-  0% { opacity: 0; transform: rotate(-32deg) translate3d(0, 0, 0); }
-  14% { opacity: 0.55; }
-  100% { opacity: 0; transform: rotate(-32deg) translate3d(240px, 0, 0); }
+  0% { opacity: 0; transform: rotate(calc(-1 * var(--angle, 32deg))) translate3d(0, 0, 0); }
+  14% { opacity: calc(var(--peak, 1) * 0.55); }
+  100% { opacity: 0; transform: rotate(calc(-1 * var(--angle, 32deg))) translate3d(calc(var(--travel, 320px) * 0.75), 0, 0); }
 }
 
 /* 近流星：更长更粗、头部带辉光，沿弧线匀速飞（不做减速模拟） */
