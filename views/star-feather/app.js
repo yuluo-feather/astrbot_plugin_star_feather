@@ -11,6 +11,7 @@ const state = {
   listIndexedTotal: 0, listShown: 0, listTruncated: false,
 };
 const thumbCache = new Map();
+const thumbInflight = new Map();
 let detailSeq = 0;
 const CARD_BACK_ID = "__back__";
 let cardBackURL = "";
@@ -1149,10 +1150,23 @@ async function thumbURL(cardId, upright, width) {
     thumbCache.set(key, url);
     return url;
   }
-  const res = await apiGet("card-image", { id: cardId, upright: upright ? 1 : 0, w: width });
-  const url = `data:${res.mime};base64,${res.base64}`;
-  thumbCache.set(key, url);
-  return url;
+  // 同一张牌、同一尺寸会被多个 <img> 同时要（列表里同牌用户、图鉴与详情）；
+  // 复用进行中的请求，别让 base64 传两遍。
+  const pending = thumbInflight.get(key);
+  if (pending) return pending;
+  const request = (async () => {
+    const res = await apiGet("card-image", { id: cardId, upright: upright ? 1 : 0, w: width });
+    const url = `data:${res.mime};base64,${res.base64}`;
+    thumbCache.set(key, url);
+    return url;
+  })();
+  thumbInflight.set(key, request);
+  try {
+    return await request;
+  } finally {
+    // 失败也要清理，否则这张牌会一直拿到同一个 rejected Promise
+    thumbInflight.delete(key);
+  }
 }
 
 async function ensureCardBack(width = 150) {
