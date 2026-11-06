@@ -221,6 +221,13 @@ const HUE_BUCKET_DEG = 3;
 const HUE_RGB_LIMIT = 8;
 const HUE_GLOW_STEP_DEG = 5;
 const HORIZON_FADE_PX = 48;
+// 一段 run 内的地平线透明度跨度超过这个值就断开：线性渐变只在两个端点之间插值，
+// 跨过整条淡出带的 run 会被抹平，断开后每段都能贴合实际值
+const HORIZON_RUN_STEP = 0.2;
+
+function horizonFadeAt(horizon, y) {
+  return Math.max(0, Math.min(1, (horizon - y) / HORIZON_FADE_PX));
+}
 const HUE_FIELD_POINTS = [
   { u: 0.06, v: 0.74, w: 0.20 },
   { u: 0.24, v: 0.67, w: 0.25 },
@@ -679,7 +686,7 @@ class NearMeteors {
   }
 
   prepareMeteor(m, target) {
-    let fade = Math.min(1, m.age / 0.08)
+    const fade = Math.min(1, m.age / 0.08)
       * Math.min(1, Math.max(0, (m.life - m.age) / 0.3));
     const breath = 0.5 + 0.5 * Math.sin(
       (2 * Math.PI * m.age) / m.breathPeriod + m.breathPhase,
@@ -715,11 +722,6 @@ class NearMeteors {
     const total = dist[dist.length - 1] || 0;
     const head = points.length ? points[points.length - 1] : { x: m.x, y: m.y };
     const headWeight = this.weightAt(head.x, head.y);
-    const horizonFade = Math.max(
-      0,
-      Math.min(1, (this.horizon - head.y) / HORIZON_FADE_PX),
-    );
-    fade *= horizonFade;
 
     for (let i = 0; i < points.length; i += 1) {
       const p = total ? dist[i] / total : 0;
@@ -729,7 +731,12 @@ class NearMeteors {
       points[i].p = p;
       points[i].color = color;
       points[i].bucket = Math.round(hue / HUE_BUCKET_DEG);
+      // 地平线淡出按采样点各自算：头部沉下去时，仍在天上的尾迹不跟着一起淡
+      points[i].horizon = horizonFadeAt(this.horizon, points[i].y);
     }
+    const headHorizon = points.length
+      ? points[points.length - 1].horizon
+      : horizonFadeAt(this.horizon, head.y);
 
     let coreStart = points.length - 1;
     let fromHead = 0;
@@ -752,6 +759,7 @@ class NearMeteors {
         const split = cur.bucket !== prev.bucket
           || maxChannelDiff(cur.color, prev.color) > HUE_RGB_LIMIT
           || maxChannelDiff(cur.color, runColor) > HUE_RGB_LIMIT
+          || Math.abs(cur.horizon - points[start].horizon) > HORIZON_RUN_STEP
           || (prev.p < 0.55 && cur.p >= 0.55);
         if (split) {
           runs.push({ start, end: i - 1, color: runColor });
@@ -771,6 +779,7 @@ class NearMeteors {
       head,
       headWeight,
       fade,
+      headFade: fade * headHorizon,
       haloRadius: HALO_RADIUS_MIN + (HALO_RADIUS_MAX - HALO_RADIUS_MIN) * sizeBreath,
       haloAlpha: HALO_ALPHA_MIN + (HALO_ALPHA_MAX - HALO_ALPHA_MIN) * breath,
       starSize: STAR_SIZE_MIN + (STAR_SIZE_MAX - STAR_SIZE_MIN) * sizeBreath,
@@ -789,8 +798,8 @@ class NearMeteors {
       for (const run of p.runs) {
         this.strokeRun(
           ctx, p.points, run, run.color,
-          p.fade * alphaScale * 0.16 * p.points[run.start].p,
-          p.fade * alphaScale * 0.16 * p.points[run.end].p,
+          p.fade * alphaScale * 0.16 * p.points[run.start].p * p.points[run.start].horizon,
+          p.fade * alphaScale * 0.16 * p.points[run.end].p * p.points[run.end].horizon,
           4.5,
         );
       }
@@ -799,8 +808,8 @@ class NearMeteors {
       for (const run of p.runs) {
         this.strokeRun(
           ctx, p.points, run, run.color,
-          p.fade * alphaScale * bodyAlpha(p.points[run.start].p),
-          p.fade * alphaScale * bodyAlpha(p.points[run.end].p),
+          p.fade * alphaScale * bodyAlpha(p.points[run.start].p) * p.points[run.start].horizon,
+          p.fade * alphaScale * bodyAlpha(p.points[run.end].p) * p.points[run.end].horizon,
           1.8,
         );
       }
@@ -810,12 +819,12 @@ class NearMeteors {
       if (p.coreStart < last) {
         this.strokeRun(
           ctx, p.points, { start: p.coreStart, end: last }, [255, 255, 255],
-          0, p.fade * alphaScale * 0.85, 0.9,
+          0, p.fade * alphaScale * 0.85 * p.points[last].horizon, 0.9,
         );
       }
 
       // 头部柔光：按头部位置取色，量化后走贴图缓存
-      ctx.globalAlpha = p.fade * p.haloAlpha * alphaScale;
+      ctx.globalAlpha = p.headFade * p.haloAlpha * alphaScale;
       const radius = p.haloRadius;
       ctx.drawImage(
         glowSprite(glowTint(p.headWeight, phase)),
@@ -824,7 +833,7 @@ class NearMeteors {
 
       // 十字星芒保持原样
       if (starReady) {
-        ctx.globalAlpha = p.fade * p.starAlpha * alphaScale;
+        ctx.globalAlpha = p.headFade * p.starAlpha * alphaScale;
         ctx.save();
         ctx.translate(p.head.x, p.head.y);
         ctx.rotate(p.spin);
