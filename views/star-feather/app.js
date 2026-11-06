@@ -168,26 +168,13 @@ function showToast(message) {
   if (message) setTimeout(() => toast.classList.remove("show"), 4200);
 }
 
-// 粒子本色是白的；近流星再乘上场景层的 colorn（层 131 青、层 13872 红，其余层没有就是白）
-const METEOR_TINTS = [
-  { rgb: [255, 255, 255], weight: 5 },
-  { rgb: [0, 255, 255], weight: 3 },
-  { rgb: [255, 0, 0], weight: 2 },
-];
-
-function pickMeteorTint() {
-  const total = METEOR_TINTS.reduce((sum, t) => sum + t.weight, 0);
-  let roll = Math.random() * total;
-  for (const t of METEOR_TINTS) {
-    roll -= t.weight;
-    if (roll <= 0) return t.rgb;
-  }
-  return METEOR_TINTS[0].rgb;
-}
+// 近流星固定青碧色；远景 CSS 流星另有固定淡青蓝，两套都不再随机取色
+const METEOR_TINT = [96, 245, 235];
 
 // 头部两层：透明度直接就是绘制 alpha（亮度 1 = 贴图原样）
-const GLOW_ALPHA = 0;    // 头部柔光（0 = 关闭）
-const CROSS_ALPHA = 0.3; // 十字
+const GLOW_ALPHA = 0.26; // 头部柔光
+const CROSS_ALPHA = 0.12; // 十字
+const CROSS_SIZE = 16;
 
 // 预渲染的柔光贴图，按颜色缓存
 const glowCache = new Map();
@@ -284,6 +271,8 @@ class NearMeteors {
     this.horizon = 0;
     this.waterH = 0;
     this.running = false;
+    this.enabled = true;
+    this.raf = 0;
     this.last = 0;
     this.resize();
   }
@@ -309,19 +298,24 @@ class NearMeteors {
   }
 
   spawn() {
+    if (!this.enabled) return;
     if (!this.vw || !this.vh) this.resize();
     if (!this.vw || !this.vh) return;
-    if (this.list.length > 5) return;
-    const angle = ((8 + Math.random() * 6) * Math.PI) / 180;
-    const speed = 220 + Math.random() * 30;
+    // 硬上限：达到 2 颗就拒绝；不能写成 > 2，否则列表会到 3 颗
+    if (this.list.length >= 2) return;
+    // Canvas 水平向右为 0°，Y 轴向下，正角度即右下方向
+    const angle = ((28 + Math.random() * 4) * Math.PI) / 180;
+    const speed = 280 + Math.random() * 80;
     this.list.push({
       x: this.vw * (0.16 + Math.random() * 0.56),
       y: this.vh * (0.02 + Math.random() * 0.12),
       vx: Math.cos(angle) * speed,
       vy: Math.sin(angle) * speed,
       age: 0,
-      life: 2.3 + Math.random() * 0.3,
-      tint: pickMeteorTint(),
+      life: 1.6 + Math.random() * 0.6,
+      g: 5 + Math.random() * 7,
+      trailLen: 220 + Math.random() * 60,
+      tint: METEOR_TINT,
       trail: [],
       spin: Math.random() * Math.PI * 2,
     });
@@ -329,10 +323,25 @@ class NearMeteors {
   }
 
   start() {
+    this.enabled = true;
     if (this.running) return;
     this.running = true;
     this.last = performance.now();
-    requestAnimationFrame((t) => this.frame(t));
+    this.raf = requestAnimationFrame((t) => this.frame(t));
+  }
+
+  stop() {
+    this.enabled = false;
+    this.list = [];
+    this.running = false;
+    if (this.raf) cancelAnimationFrame(this.raf);
+    this.raf = 0;
+    this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    this.ctx.clearRect(0, 0, this.vw, this.vh);
+    if (this.wctx) {
+      this.wctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      this.wctx.clearRect(0, 0, this.vw, this.waterH);
+    }
   }
 
   frame(now) {
@@ -341,24 +350,24 @@ class NearMeteors {
     this.step(dt);
     this.paint();
     if (this.list.length) {
-      requestAnimationFrame((t) => this.frame(t));
+      this.raf = requestAnimationFrame((t) => this.frame(t));
     } else {
       this.running = false;
+      this.raf = 0;
     }
   }
 
   step(dt) {
-    const k = 0.1;
-    const g = 70;
+    const k = 0.05;
     for (const m of this.list) {
       m.age += dt;
       const damp = 1 - k * dt;
       m.vx *= damp;
-      m.vy = m.vy * damp + g * dt;
+      m.vy = m.vy * damp + m.g * dt;
       m.x += m.vx * dt;
       m.y += m.vy * dt;
       m.trail.push({ x: m.x, y: m.y });
-      // 尾迹只保留最近 255px
+      // 尾迹只保留最近 trailLen 像素
       let acc = 0;
       let cut = 0;
       for (let i = m.trail.length - 1; i > 0; i -= 1) {
@@ -366,7 +375,7 @@ class NearMeteors {
           m.trail[i].x - m.trail[i - 1].x,
           m.trail[i].y - m.trail[i - 1].y,
         );
-        if (acc > 255) {
+        if (acc > m.trailLen) {
           cut = i;
           break;
         }
@@ -480,25 +489,40 @@ class NearMeteors {
 }
 
 let nearField = null;
+let nearTimer = 0;
 
 function initNearMeteors() {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   const sky = $("meteor-canvas");
   const water = $("meteor-water");
   if (!sky || !water) return;
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-  nearField = new NearMeteors(sky, water);
+  if (!nearField) {
+    nearField = new NearMeteors(sky, water);
+  } else {
+    nearField.enabled = true;
+  }
+}
+
+function stopNearMeteors() {
+  clearTimeout(nearTimer);
+  nearTimer = 0;
+  if (nearField) nearField.stop();
 }
 
 function scheduleMeteor(near) {
-  // 初版是 3.6–8.8 秒一颗。这里两处都是有意加密：先按「提高流星密度」调到
-  // 1.6–3.8，近流星停用后再减半到 0.8–1.9 补数量。叠加 30% 连发后，
-  // 净频率约为初版的 6 倍——不是单纯的对半补偿。
+  if (near && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  // 远景保持 0.8–1.9 秒的频率（30% 连发）；近景 6–12 秒一颗，最多 2 颗。
   const delay = near
-    ? 900 + Math.random() * 1100
+    ? 6000 + Math.random() * 6000
     : 800 + Math.random() * 1100;
-  setTimeout(() => {
+  const timer = setTimeout(() => {
     if (near) {
-      if (nearField) nearField.spawn();
+      if (nearField) {
+        nearField.spawn();
+        if (Math.random() < 0.15) {
+          setTimeout(() => { if (nearField) nearField.spawn(); }, 400 + Math.random() * 400);
+        }
+      }
     } else {
       const bursts = Math.random() < 0.3 ? 2 : 1;
       for (let i = 0; i < bursts; i += 1) {
@@ -507,6 +531,7 @@ function scheduleMeteor(near) {
     }
     scheduleMeteor(near);
   }, delay);
+  if (near) nearTimer = timer;
 }
 
 // 地平线在视口里的位置：与背景 cover 的缩放/居中保持一致，倒影层据此翻转
@@ -611,11 +636,21 @@ function initSky() {  const box = $("sky-stars");
   if (mirror && !mirror.childElementCount) {
     for (const star of box.children) mirror.append(star.cloneNode(true));
   }
-  if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    // 近流星不做（NearMeteors 类保留但不再启动）
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
+  if (!reduced.matches) {
     spawnMeteor();
     scheduleMeteor(false);
+    initNearMeteors();
+    scheduleMeteor(true);
   }
+  reduced.addEventListener("change", (event) => {
+    if (event.matches) {
+      stopNearMeteors();
+    } else {
+      initNearMeteors();
+      scheduleMeteor(true);
+    }
+  });
 }
 
 async function apiGet(endpoint, params = {}) {
