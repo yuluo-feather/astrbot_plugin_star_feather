@@ -280,12 +280,6 @@ body {
   50% { opacity: 0.85; transform: scale(1.08); }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .star, .meteor, .sky-nebula, .ember { animation: none; }
-  .sky-hue, .water-hue { animation: none; }
-  .meteor, .meteor-canvas, .ember, .environment-canvas { display: none; }
-}
-
 .hidden { display: none !important; }
 
 .ghost, .pill, .tabs, .tab.active, .user, .detail, .card-cell, .modal-panel,
@@ -386,6 +380,9 @@ h1 {
 
 .tab {
   position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 8px 16px;
   border: 0;
   border-radius: 999px;
@@ -396,6 +393,8 @@ h1 {
   transition: color var(--motion-fast) var(--ease-out),
               background var(--motion-fast) var(--ease-out);
 }
+
+.tab-icon { width: 14px; height: 14px; flex: none; }
 
 .tab::after {
   content: "";
@@ -1151,6 +1150,7 @@ h1 {
   h1 { font-size: 16px; letter-spacing: 0.02em; }
   .tabs { max-width: 100%; overflow-x: auto; }
   .tab { padding: 8px 12px; }
+  .tab-icon { display: none; }
   .tab::after { left: 12px; right: 12px; }
   .stat-value { font-size: 20px; }
   .spread-grid { flex-direction: column; justify-content: flex-start; }
@@ -1218,15 +1218,6 @@ h1 {
 @keyframes panel-in {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: none; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .panel { animation: none; }
-  .modal, .modal-panel { animation: none; }
-  .ghost.is-loading .icon { animation: none; }
-  .user:hover, .card-cell:hover { transform: none; }
-  .ghost:active, .tab:active, .primary:active:not(:disabled), .user:active,
-  .card-cell:active, .seg button:active, .modal-close:active { transform: none; }
 }
 
 /* ---- 预览揭示：3D 翻牌 + 缩略图占位（PR 3） ---- */
@@ -1361,7 +1352,19 @@ h1 {
   to { opacity: 1; transform: none; }
 }
 
+/* 减动效：统一在这里关闭所有动画与位移 */
 @media (prefers-reduced-motion: reduce) {
+  .star, .meteor, .sky-nebula, .ember { animation: none; }
+  .sky-hue, .water-hue { animation: none; }
+  .meteor, .meteor-canvas, .ember, .environment-canvas { display: none; }
+
+  .panel { animation: none; }
+  .modal, .modal-panel { animation: none; }
+  .ghost.is-loading .icon { animation: none; }
+  .user:hover, .card-cell:hover { transform: none; }
+  .ghost:active, .tab:active, .primary:active:not(:disabled), .user:active,
+  .card-cell:active, .seg button:active, .modal-close:active { transform: none; }
+
   .pick-card.flip-animate .pick-back,
   .preview-cards.flips-ready .pick-card.flip-animate .pick-back {
     transform: rotateY(-90deg);
