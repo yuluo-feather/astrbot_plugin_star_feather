@@ -508,14 +508,18 @@ function updateAiBlock({ animate = false } = {}) {
 function renderSpreads() {
   const box = $("spread-grid");
   box.replaceChildren();
+  let expanded = null;
   for (const spread of state.spreads) {
     const card = el("article", "spread-card");
-    const head = el("div", "spread-head");
-    head.append(el("h3", "", spread.name));
-    head.append(el("span", "tag", `${spread.positions.length} 张`));
-    card.append(head);
-    if (spread.scenario) card.append(el("p", "spread-scenario", spread.scenario));
+    const toggle = el("button", "spread-toggle");
+    toggle.type = "button";
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.append(el("span", "spread-name", spread.name));
+    toggle.append(el("span", "spread-count", `${spread.positions.length}张`));
 
+    const body = el("div", "spread-body");
+    body.append(el("h3", "spread-body-title", spread.name));
+    if (spread.scenario) body.append(el("p", "spread-scenario", spread.scenario));
     const layout = el("div", "spread-layout");
     spread.positions.forEach((position, index) => {
       const slot = el("div", "spread-slot");
@@ -524,7 +528,20 @@ function renderSpreads() {
       if (position.meaning) slot.append(el("span", "spread-mean", position.meaning));
       layout.append(slot);
     });
-    card.append(layout);
+    body.append(layout);
+
+    toggle.addEventListener("click", () => {
+      const open = !card.classList.contains("expanded");
+      if (expanded && expanded !== card) {
+        expanded.classList.remove("expanded");
+        expanded.querySelector(".spread-toggle").setAttribute("aria-expanded", "false");
+      }
+      card.classList.toggle("expanded", open);
+      toggle.setAttribute("aria-expanded", String(open));
+      expanded = open ? card : null;
+    });
+
+    card.append(toggle, body);
     box.append(card);
   }
 }

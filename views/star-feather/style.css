@@ -843,29 +843,66 @@ h1 {
 .meaning-label { margin: 0 0 2px; color: var(--gold); font-size: 12px; }
 .meaning-text { margin: 0; white-space: pre-wrap; }
 
-/* 牌阵 */
+/* 牌阵：桌面横向展开，窄屏纵向手风琴 */
 .spread-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  display: flex;
   gap: 16px;
+  align-items: stretch;
+  justify-content: center;
 }
 
 .spread-card {
-  padding: 20px;
+  position: relative;
+  flex: 0 0 96px;
+  height: 460px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel);
+  overflow: hidden;
+  transition: flex-basis var(--motion-slow) var(--ease-out);
 }
 
-.spread-head {
+.spread-card.expanded { flex-basis: 520px; }
+
+.spread-toggle {
+  position: absolute;
+  inset: 0;
   display: flex;
+  flex-direction: row;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  justify-content: center;
+  gap: 14px;
+  padding: 16px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+  letter-spacing: 0.22em;
+  transition: opacity var(--motion-base) var(--ease-out);
 }
 
-.spread-head h3 { margin: 0; font-size: 17px; font-weight: 600; }
-.spread-scenario { margin: 8px 0 16px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.spread-card.expanded .spread-toggle { opacity: 0; pointer-events: none; }
+
+.spread-name { font-size: 15px; font-weight: 600; }
+.spread-count { color: var(--muted); font-size: 11px; }
+
+.spread-body {
+  position: absolute;
+  inset: 0;
+  padding: 20px;
+  overflow-y: auto;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--motion-base) var(--ease-out);
+}
+
+.spread-card.expanded .spread-body { opacity: 1; pointer-events: auto; }
+
+.spread-body-title { margin: 0 0 10px; font-size: 17px; font-weight: 600; }
+.spread-scenario { margin: 0 0 16px; color: var(--muted); font-size: 13px; line-height: 1.6; }
 .spread-layout { display: flex; flex-direction: column; gap: 8px; }
 
 .spread-slot {
@@ -1025,6 +1062,27 @@ h1 {
   .tab { padding: 8px 12px; }
   .tab::after { left: 12px; right: 12px; }
   .stat-value { font-size: 20px; }
+  .spread-grid { flex-direction: column; justify-content: flex-start; }
+  .spread-card { flex: none; width: 100%; height: auto; }
+  .spread-toggle {
+    position: static;
+    flex-direction: row;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 16px;
+    writing-mode: horizontal-tb;
+    letter-spacing: 0;
+  }
+  .spread-card.expanded .spread-toggle { opacity: 1; pointer-events: auto; }
+  .spread-body-title { display: none; }
+  .spread-body {
+    position: static;
+    display: none;
+    padding: 0 16px 16px;
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .spread-card.expanded .spread-body { display: block; }
 }
 
 /* ---- 交互反馈：按压 / hover / 焦点（PR 1） ---- */
