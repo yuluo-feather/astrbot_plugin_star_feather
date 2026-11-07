@@ -601,6 +601,22 @@ class TestCommandEntry:
         self._run(p, ev)
         assert ev.sent[-1].chain[0].text == "BLOCK"
 
+    def test_gate_block_send_failure_is_logged(self, monkeypatch):
+        async def block(event, for_command):
+            return "BLOCK"
+        p = _plugin(gate=types.SimpleNamespace(check=block, session_throttle=None))
+        ev = _event()
+
+        async def broken_send(chain):
+            raise RuntimeError("send down")
+        ev.send = broken_send
+        warnings = []
+        monkeypatch.setattr(
+            handlers, "log",
+            types.SimpleNamespace(warning=lambda msg: warnings.append(msg)))
+        self._run(p, ev)
+        assert warnings and "限流拦截文案发送失败" in warnings[0]
+
     def test_error_sends_friendly_text(self):
         async def boom(request, uid):
             raise RuntimeError("internal path /secret")

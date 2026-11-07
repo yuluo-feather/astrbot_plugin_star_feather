@@ -48,7 +48,9 @@ async def command_entry(container, incoming: IncomingEvent,
             return
         block = await container.gate.check(incoming, for_command=True)
         if block:
-            await messenger.send_text(block)
+            # 拦截文案发不出去不阻塞返回，但至少留一条线索；tool_entry 那边会返回失败标记
+            if not await messenger.send_text(block):
+                log.warning(f"限流拦截文案发送失败: {block}")
             return
         uid = incoming.user_id
         prepared = await container.reading.prepare(request, uid)
