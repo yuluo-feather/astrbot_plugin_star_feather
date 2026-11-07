@@ -531,13 +531,26 @@ h1 {
   color: var(--muted);
 }
 
-.tag.up { color: var(--gold); }
-.tag.rev { color: var(--rev); }
+.tag.up {
+  color: var(--gold);
+  background: rgba(230, 196, 122, 0.12);
+  border: 1px solid rgba(230, 196, 122, 0.30);
+}
+
+.tag.rev {
+  color: var(--rev);
+  background: rgba(224, 138, 156, 0.12);
+  border: 1px solid rgba(224, 138, 156, 0.30);
+}
+
 .tag.stale { color: var(--rev); background: transparent; border: 1px solid var(--rev); }
 
 .user-uid {
   color: var(--muted);
-  font-size: 11px;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  opacity: 0.85;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -551,7 +564,8 @@ h1 {
   white-space: nowrap;
 }
 
-.user-meta { color: var(--muted); font-size: 11px; }
+.user-meta { color: var(--muted); font-size: 10.5px; }
+.user-meta::before { content: "·"; margin-right: 4px; opacity: 0.6; }
 
 .detail {
   padding: 22px;
@@ -578,7 +592,10 @@ h1 {
 .detail-uid {
   margin: 6px 0 0;
   color: var(--muted);
-  font-size: 12px;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  opacity: 0.85;
   word-break: break-all;
 }
 
@@ -833,15 +850,22 @@ h1 {
 
 .kw {
   padding: 2px 10px;
+  border: 1px solid rgba(230, 196, 122, 0.35);
   border-radius: 999px;
-  background: var(--accent-soft);
+  background: transparent;
   color: var(--gold);
   font-size: 12px;
 }
 
-.meaning { margin: 12px 0 0; }
-.meaning-label { margin: 0 0 2px; color: var(--gold); font-size: 12px; }
-.meaning-text { margin: 0; white-space: pre-wrap; }
+.meaning {
+  margin: 0;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.meaning:first-of-type { border-top: 0; padding-top: 0; }
+.meaning-label { margin: 0 0 4px; color: var(--gold); font-size: 11px; letter-spacing: 0.06em; }
+.meaning-text { margin: 0; font-size: 13.5px; line-height: 1.75; white-space: pre-wrap; }
 
 /* 牌阵：桌面横向展开，窄屏纵向手风琴 */
 .spread-grid {
