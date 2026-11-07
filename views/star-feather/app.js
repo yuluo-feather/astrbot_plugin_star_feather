@@ -33,7 +33,7 @@ function renderStats(data) {
   const cards = [
     ["今日用户", data.users],
     ["主题解读", data.topics],
-    ["有牌灵话", data.with_spirit],
+    ["牌灵低语", data.with_spirit],
   ];
   const strip = [
     ["缓存过期", data.stale, data.stale > 0 ? "warn" : ""],
