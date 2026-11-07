@@ -47,7 +47,7 @@ export class FarMeteors {
     const xPct = 24 + Math.random() * 58;
     const yPct = Math.random() * 38;
     const duration = 0.9 + Math.random() * 0.7;
-    const angle = 28 + Math.random() * 8;
+    const angle = 24 + Math.random() * 16;
     // A 背景流星：短、细、偏暗；B 纵深流星：更长、更亮、长度差异大
     const kind = Math.random() < 2 / 3 ? "a" : "b";
     const len = kind === "a" ? 90 + Math.random() * 50 : 140 + Math.random() * 80;

@@ -334,13 +334,11 @@ export class NearMeteors {
     if (!this.vw || !this.vh) return;
     if (target.length >= limit) return;
     // Canvas 水平向右为 0°，Y 轴向下，正角度即右下方向
-    let angleDeg;
+    // 每颗独立取角度；群组只共享出现时机与入口分布，不共享方向
+    const angleDeg = 24 + Math.random() * 16;
     let x;
     let y;
     if (isGroup) {
-      // 同组共用基础角度，每颗再各自浮动 ±2°，看起来同向但不机械平行
-      const jittered = (opts.baseAngle ?? 33) + (Math.random() * 4 - 2);
-      angleDeg = Math.min(36, Math.max(29, jittered));
       // 顶部进入 65%，左侧进入 35%
       const fromTop = Math.random() < 0.65;
       x = fromTop
@@ -350,7 +348,6 @@ export class NearMeteors {
         ? this.vh * Math.random() * 0.10
         : this.vh * (0.15 + Math.random() * 0.40);
     } else {
-      angleDeg = 29 + Math.random() * 7;
       x = this.vw * (0.16 + Math.random() * 0.56);
       y = this.vh * (0.02 + Math.random() * 0.12);
     }
@@ -370,7 +367,7 @@ export class NearMeteors {
       vy: Math.sin(angle) * speed,
       age: 0,
       life: 1.7 + Math.random() * 0.5,
-      g: 4 + Math.random() * 5,
+      g: 6 + Math.random() * 6,
       drag: 0.02 + Math.random() * 0.02,
       trailLen,
       trail: [],
@@ -678,18 +675,17 @@ export class NearMeteors {
     const delay = 7000 + Math.random() * 3000;
     this.groupTimer = setTimeout(() => {
       if (!this.enabled) return;
-      // 65% 两颗、35% 三颗；组内间隔 180–320ms，同组共用一个基础角度
+      // 65% 两颗、35% 三颗；组内间隔 180–320ms，每颗方向独立
       const count = Math.random() < 0.35 ? 3 : 2;
-      const baseAngle = 33 + (Math.random() * 3 - 1.5);
       this.groupTimers = [];
       let at = 0;
       for (let i = 0; i < count; i += 1) {
         if (i === 0) {
-          this.spawn({ group: true, baseAngle });
+          this.spawn({ group: true });
         } else {
           at += 180 + Math.random() * 140;
           this.groupTimers.push(setTimeout(() => {
-            if (this.enabled) this.spawn({ group: true, baseAngle });
+            if (this.enabled) this.spawn({ group: true });
           }, at));
         }
       }
