@@ -518,7 +518,6 @@ function renderSpreads() {
     toggle.append(el("span", "spread-count", `${spread.positions.length}张`));
 
     const body = el("div", "spread-body");
-    body.append(el("h3", "spread-body-title", spread.name));
     if (spread.scenario) body.append(el("p", "spread-scenario", spread.scenario));
     const layout = el("div", "spread-layout");
     spread.positions.forEach((position, index) => {
@@ -622,6 +621,7 @@ async function refresh() {
     } catch (error) {
       showToast(error.message || "牌运列表加载失败");
     }
+    if (state.spreads.length) renderSpreads();
   } finally {
     button.classList.remove("is-loading");
     button.disabled = false;
