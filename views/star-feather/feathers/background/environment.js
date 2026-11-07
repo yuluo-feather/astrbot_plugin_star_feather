@@ -86,7 +86,7 @@ export class Environment {
   constructor(canvas, options = {}) {
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d");
-    this.options = { wind: true, gust: true, seed: 0x5f3759df, ...options };
+    this.seed = options.seed ?? 0x5f3759df;
     this.particles = [];
     this.gusts = [];
     this.wind = { x: 1, y: 0, strength: 0, gust: 0 };
@@ -102,13 +102,8 @@ export class Environment {
     this.lastTime = 0;
     this.acc = 0;
     this.simTime = 0;
-    this.gustState = createGustState(this.options.seed, GUST_PEAK);
+    this.gustState = createGustState(this.seed, GUST_PEAK);
     this.resize();
-    // PR1 验收用的只读调试入口；PR4 删除
-    const params = new URLSearchParams(window.location.search);
-    if (params.has("debug") || params.get("bg") === "debug") {
-      window.__env = this;
-    }
   }
 
   start() {
@@ -308,8 +303,7 @@ export class Environment {
   }
 
   currentWind() {
-    if (!this.options.wind) return { x: 1, y: 0, strength: 0, gust: 0 };
-    return sampleWind(this.simTime, this.gustState, this.options.gust);
+    return sampleWind(this.simTime, this.gustState);
   }
 
   step(dt) {
