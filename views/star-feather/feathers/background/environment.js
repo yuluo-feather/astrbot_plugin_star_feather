@@ -1,7 +1,7 @@
 // 环境粒子系统（PR1：只实现雪）。
 // 风场状态、模拟时间与粒子都在这里；全局监听由 background/index.js 转交。
 import { advanceGustState, createGustState, sampleWind } from "./wind-field.js";
-import { drawSnowSprite, ensureSnowSprites } from "./environment-sprites.js";
+import { drawDustSprite, drawSnowSprite, ensureDustSprites, ensureSnowSprites } from "./environment-sprites.js";
 
 const STEP = 1 / 60;
 const MAX_DELTA = 0.05;
@@ -21,6 +21,29 @@ const SNOW = {
   fadeInRatio: 0.08,
   fadeOutRatio: 0.10,
 };
+
+const DUST = {
+  count: 56,
+  sizeFar: 1.6, sizeMid: 2.8, sizeNear: 4.2,
+  driftVw: 0.04, // 旧版 --dx ±4vw
+  driftVh: 0.03, // 旧版 --dy ±3vh
+  periodMin: 32, // alternate 一来一回
+  periodMax: 80,
+  responseMin: 0.25, responseMax: 0.55,
+  inertia: 1.2,
+  sinkMax: 0.5,
+  twinkleMin: 2.6, twinkleMax: 6,
+  alphaMin: 0.12, alphaMax: 0.9,
+  scaleMin: 0.72, scaleMax: 1.12,
+};
+
+// 旧版 dust.js：金 12%、青 12%、其余白
+function dustColorIndex() {
+  const roll = Math.random();
+  if (roll < 0.12) return 1;
+  if (roll < 0.24) return 2;
+  return 0;
+}
 
 function lerp(a, b, t) {
   return a + (b - a) * t;
@@ -54,6 +77,7 @@ export class Environment {
     this.options = { wind: true, gust: true, seed: 0x5f3759df, ...options };
     this.particles = [];
     this.sprites = ensureSnowSprites();
+    this.dustSprites = ensureDustSprites();
     this.dpr = 1;
     this.vw = 0;
     this.vh = 0;
@@ -121,6 +145,11 @@ export class Environment {
       for (const p of this.particles) {
         p.x *= sx;
         p.y *= sy;
+        if (p.type === "dust") {
+          p.driftAmpX = DUST.driftVw * this.vw;
+          p.driftAmpY = DUST.driftVh * this.vh;
+          continue;
+        }
         // life（即旧版动画时长）不随视口变化；速度随 110vh 重算
         p.travel = TRAVEL_RATIO * this.vh;
         p.fallSpeed = p.travel / p.life;
@@ -135,6 +164,7 @@ export class Environment {
   spawnAll() {
     this.particles = [];
     for (let i = 0; i < SNOW.count; i += 1) this.particles.push(this.makeParticle());
+    for (let i = 0; i < DUST.count; i += 1) this.particles.push(this.makeDust());
     // 远处的先画，近处的后画
     this.particles.sort((a, b) => a.z - b.z);
   }
@@ -168,6 +198,29 @@ export class Environment {
     return p;
   }
 
+  makeDust() {
+    const z = Math.random();
+    const period = DUST.periodMin + Math.random() * (DUST.periodMax - DUST.periodMin);
+    return {
+      type: "dust",
+      z,
+      x: Math.random() * this.vw,
+      y: Math.random() * Math.max(1, this.horizon),
+      vx: 0,
+      vy: 0,
+      size: segment(z, DUST.sizeFar, DUST.sizeMid, DUST.sizeNear),
+      response: DUST.responseMin + Math.random() * (DUST.responseMax - DUST.responseMin),
+      sinkSpeed: Math.random() * DUST.sinkMax,
+      driftAmpX: DUST.driftVw * this.vw,
+      driftAmpY: DUST.driftVh * this.vh,
+      driftFullPeriod: period,
+      driftPhase: Math.random() * Math.PI * 2,
+      twinklePeriod: DUST.twinkleMin + Math.random() * (DUST.twinkleMax - DUST.twinkleMin),
+      twinklePhase: Math.random() * Math.PI * 2,
+      colorIndex: dustColorIndex(),
+    };
+  }
+
   recycle(p, wind) {
     const travel = TRAVEL_RATIO * this.vh;
     p.life = snowDuration(p.z);
@@ -191,26 +244,59 @@ export class Environment {
     this.simTime += dt;
     advanceGustState(this.gustState, this.simTime);
     const wind = this.currentWind();
-    const a = 1 - Math.exp(-dt / SNOW.inertia);
+    const snowA = 1 - Math.exp(-dt / SNOW.inertia);
+    const dustA = 1 - Math.exp(-dt / DUST.inertia);
 
     for (const p of this.particles) {
-      p.age += dt;
-      if (p.age >= p.life) {
-        this.recycle(p, wind);
-        continue;
-      }
+      if (p.type === "dust") this.stepDust(p, dt, wind, dustA);
+      else this.stepSnow(p, dt, wind, snowA);
+    }
+  }
 
-      const targetVx = baseDriftFor(p.z) + wind.strength * wind.x * p.response;
-      const targetVy = p.fallSpeed + wind.y * wind.strength * p.response * 0.5;
-      p.vx += (targetVx - p.vx) * a;
-      p.vy += (targetVy - p.vy) * a;
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
-      p.swayPhase += (2 * Math.PI / p.swayPeriod) * dt;
+  stepSnow(p, dt, wind, a) {
+    p.age += dt;
+    if (p.age >= p.life) {
+      this.recycle(p, wind);
+      return;
+    }
 
-      // 横向越界换边
-      if (p.x < -60) p.x += this.vw + 120;
-      else if (p.x > this.vw + 60) p.x -= this.vw + 120;
+    const targetVx = baseDriftFor(p.z) + wind.strength * wind.x * p.response;
+    const targetVy = p.fallSpeed + wind.y * wind.strength * p.response * 0.5;
+    p.vx += (targetVx - p.vx) * a;
+    p.vy += (targetVy - p.vy) * a;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.swayPhase += (2 * Math.PI / p.swayPeriod) * dt;
+
+    if (p.x < -60) p.x += this.vw + 120;
+    else if (p.x > this.vw + 60) p.x -= this.vw + 120;
+  }
+
+  stepDust(p, dt, wind, a) {
+    // 旧版 dust-drift：X/Y 同相位，沿一条斜线往返
+    const rate = (2 * Math.PI) / p.driftFullPeriod;
+    const c = Math.cos(p.driftPhase);
+    const driftVx = p.driftAmpX * rate * c;
+    const driftVy = p.driftAmpY * rate * c;
+    p.driftPhase += rate * dt;
+
+    const targetVx = driftVx + wind.x * wind.strength * p.response;
+    const targetVy = driftVy + p.sinkSpeed + wind.y * wind.strength * p.response * 0.35;
+    p.vx += (targetVx - p.vx) * a;
+    p.vy += (targetVy - p.vy) * a;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.twinklePhase += (2 * Math.PI / p.twinklePeriod) * dt;
+
+    // 横向换边；纵向越过天空上下界时重投
+    if (p.x < -80) p.x += this.vw + 160;
+    else if (p.x > this.vw + 80) p.x -= this.vw + 160;
+    if (p.y >= this.horizon) {
+      p.y = 0;
+      p.x = Math.random() * this.vw;
+    } else if (p.y < -20) {
+      p.y = this.horizon - 10;
+      p.x = Math.random() * this.vw;
     }
   }
 
@@ -221,23 +307,37 @@ export class Environment {
     ctx.globalCompositeOperation = "source-over";
 
     for (const p of this.particles) {
-      const fadeIn = SNOW.fadeInRatio * p.life;
-      const fadeOut = SNOW.fadeOutRatio * p.life;
-      let fade = Math.min(1, p.age / fadeIn, (p.life - p.age) / fadeOut);
-      fade = Math.max(0, Math.min(1, fade));
-      if (fade <= 0) continue;
-
-      let horizonFade = 1;
-      if (p.y > this.horizon) {
-        horizonFade = Math.max(0, 1 - (p.y - this.horizon) / HORIZON_FADE_PX);
-      }
-      const alpha = p.alpha * fade * horizonFade;
-      if (alpha <= 0.002) continue;
-
-      const drawX = p.x + p.swayAmp * Math.sin(p.swayPhase);
-      drawSnowSprite(ctx, this.sprites, p.z, drawX, p.y, p.size, alpha);
+      if (p.type === "dust") this.renderDust(ctx, p);
+      else this.renderSnow(ctx, p);
     }
     ctx.globalAlpha = 1;
+  }
+
+  renderSnow(ctx, p) {
+    const fadeIn = SNOW.fadeInRatio * p.life;
+    const fadeOut = SNOW.fadeOutRatio * p.life;
+    let fade = Math.min(1, p.age / fadeIn, (p.life - p.age) / fadeOut);
+    fade = Math.max(0, Math.min(1, fade));
+    if (fade <= 0) return;
+
+    let horizonFade = 1;
+    if (p.y > this.horizon) {
+      horizonFade = Math.max(0, 1 - (p.y - this.horizon) / HORIZON_FADE_PX);
+    }
+    const alpha = p.alpha * fade * horizonFade;
+    if (alpha <= 0.002) return;
+
+    const drawX = p.x + p.swayAmp * Math.sin(p.swayPhase);
+    drawSnowSprite(ctx, this.sprites, p.z, drawX, p.y, p.size, alpha);
+  }
+
+  renderDust(ctx, p) {
+    // 只画天空区域；亮度和尺寸一起呼吸，对应旧版 dust-twinkle 的 opacity + scale
+    if (p.y < 0 || p.y >= this.horizon) return;
+    const t = 0.5 + 0.5 * Math.sin(p.twinklePhase);
+    const alpha = DUST.alphaMin + (DUST.alphaMax - DUST.alphaMin) * t;
+    const scale = DUST.scaleMin + (DUST.scaleMax - DUST.scaleMin) * t;
+    drawDustSprite(ctx, this.dustSprites, p.z, p.colorIndex, p.x, p.y, p.size * scale, alpha);
   }
 
   frame(now) {
