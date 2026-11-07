@@ -1,10 +1,11 @@
 // 星羽塔罗 · 观测台：Dashboard iframe 里的只读视图。
 // 数据访问在 feathers/api.js，DOM 工具在 feathers/dom.js；这里只放页面功能与装配。
 import { $, el, showToast } from "./feathers/dom.js";
-import {
-  isDemo, apiGet, apiPost, connect, demoThumbURL, demoBackURL, CARD_BACK_ID,
-} from "./feathers/api.js";
+import { isDemo, apiGet, apiPost, connect } from "./feathers/api.js";
 import { init as initBackground, start as startBackground } from "./feathers/background/index.js";
+import {
+  thumbURL, ensureCardBack, getCardBackURL, loadThumb, makeThumb,
+} from "./feathers/card-images.js";
 
 const state = {
   items: [], selected: null, cards: [], spreads: [], reversed: false,
@@ -12,112 +13,11 @@ const state = {
   preview: null, aiEnabled: true,
   listIndexedTotal: 0, listShown: 0, listTruncated: false,
 };
-const thumbCache = new Map();
-const thumbInflight = new Map();
 let detailSeq = 0;
-let cardBackURL = "";
-let cardBackPromise = null;
 
 const SUIT_NAMES = {
   major: "大阿卡纳", wands: "权杖", cups: "圣杯", swords: "宝剑", pentacles: "星币",
 };
-
-
-// ---- 牌面缩略图（bridge 只回 JSON，图片走 base64） ----
-const observer = new IntersectionObserver((entries) => {
-  for (const entry of entries) {
-    if (!entry.isIntersecting) continue;
-    observer.unobserve(entry.target);
-    loadThumb(entry.target);
-  }
-}, { rootMargin: "160px" });
-
-async function thumbURL(cardId, upright, width) {
-  const key = `${cardId}|${upright ? 1 : 0}|${width}`;
-  if (thumbCache.has(key)) return thumbCache.get(key);
-  if (isDemo) {
-    const url = demoThumbURL(cardId, upright, width);
-    thumbCache.set(key, url);
-    return url;
-  }
-  // 同一张牌、同一尺寸会被多个 <img> 同时要（列表里同牌用户、图鉴与详情）；
-  // 复用进行中的请求，别让 base64 传两遍。
-  const pending = thumbInflight.get(key);
-  if (pending) return pending;
-  const request = (async () => {
-    const res = await apiGet("card-image", { id: cardId, upright: upright ? 1 : 0, w: width });
-    const url = `data:${res.mime};base64,${res.base64}`;
-    thumbCache.set(key, url);
-    return url;
-  })();
-  thumbInflight.set(key, request);
-  try {
-    return await request;
-  } finally {
-    // 失败也要清理，否则这张牌会一直拿到同一个 rejected Promise
-    thumbInflight.delete(key);
-  }
-}
-
-async function ensureCardBack(width = 150) {
-  if (cardBackURL) return cardBackURL;
-  // 并发调用共享同一次解码：预览表单与抽牌渲染会同时要牌背
-  if (!cardBackPromise) {
-    cardBackPromise = (async () => {
-      const url = await thumbURL(CARD_BACK_ID, true, width);
-      if (!url) return "";
-      await new Promise((resolve, reject) => {
-        const img = new Image();
-        img.onload = resolve;
-        img.onerror = reject;
-        img.src = url;
-      });
-      cardBackURL = url;
-      return url;
-    })().finally(() => {
-      // 失败也要清掉，下次调用能重新解码
-      cardBackPromise = null;
-    });
-  }
-  return cardBackPromise;
-}
-function loadThumb(img) {
-  if (img._thumbPromise) return img._thumbPromise;
-  img._thumbPromise = (async () => {
-    if (img.dataset.loaded) return;
-    img.dataset.loaded = "1";
-    const holder = img.closest(".pick-thumb");
-    const card = img.closest(".pick-card");
-    try {
-      const url = await thumbURL(img.dataset.cardId, img.dataset.upright === "1",
-                                Number(img.dataset.width));
-      if (!url) throw new Error("empty thumbnail");
-      img.src = url;
-      // 解码完成后再揭开：预览卡的占位层只在真正能画出图时退场
-      await img.decode();
-      holder?.classList.add("thumb-ready");
-      card?.classList.add("card-ready");
-    } catch (error) {
-      console.warn("card-image failed", img.dataset.cardId, error);
-      img.classList.add("thumb-error");
-      img.alt = "图片加载失败";
-      holder?.classList.add("thumb-ready");
-      card?.classList.add("card-ready");
-    }
-  })();
-  return img._thumbPromise;
-}
-
-function makeThumb(cardId, upright, width, alt) {
-  const img = el("img", "thumb");
-  img.alt = alt || "";
-  img.loading = "lazy";
-  img.dataset.cardId = cardId;
-  img.dataset.upright = upright ? "1" : "0";
-  img.dataset.width = String(width);
-  observer.observe(img);
-  return img;
-}
 
 // ---- 概览 ----
 const SEND_MODES = { forward: "合并转发", plain: "图文", text_only: "纯文字" };
@@ -496,7 +396,8 @@ function renderPreview({ animate = false } = {}) {
     const thumb = el("div", "pick-thumb");
     const flip = el("div", "pick-flip");
     const back = el("div", "pick-face pick-back");
-    if (cardBackURL) back.style.backgroundImage = `url("${cardBackURL}")`;
+    const backURL = getCardBackURL();
+    if (backURL) back.style.backgroundImage = `url("${backURL}")`;
     const front = el("div", "pick-face pick-front");
     front.append(makeThumb(pick.id, pick.upright, 150, pick.cn));
     flip.append(back, front);
