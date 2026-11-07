@@ -4,6 +4,7 @@ import { $, el, showToast } from "./feathers/dom.js";
 import {
   isDemo, apiGet, apiPost, connect, demoThumbURL, demoBackURL, CARD_BACK_ID,
 } from "./feathers/api.js";
+import { init as initBackground, start as startBackground } from "./feathers/background/index.js";
 
 const state = {
   items: [], selected: null, cards: [], spreads: [], reversed: false,
@@ -21,99 +22,6 @@ const SUIT_NAMES = {
   major: "大阿卡纳", wands: "权杖", cups: "圣杯", swords: "宝剑", pentacles: "星币",
 };
 
-import { init as initBackground, start as startBackground } from "./feathers/background/index.js";
-
-// 星尘：不落，只在原地附近缓慢漂荡，明暗各自呼吸
-function initDust() {
-  const box = $("dust");
-  if (!box || box.childElementCount) return;
-  const count = 56;
-  for (let i = 0; i < count; i += 1) {
-    const mote = el("span", "dust-mote");
-    const size = 1.6 + Math.random() * 2.6;
-    const roll = Math.random();
-    if (roll < 0.12) mote.classList.add("gold");
-    else if (roll < 0.24) mote.classList.add("cyan");
-    mote.style.left = `${Math.random() * 100}%`;
-    mote.style.top = `${Math.random() * 96}%`;
-    mote.style.width = `${size}px`;
-    mote.style.height = `${size}px`;
-    mote.style.setProperty("--dx", `${(Math.random() * 2 - 1) * 4}vw`);
-    mote.style.setProperty("--dy", `${(Math.random() * 2 - 1) * 3}vh`);
-    mote.style.animationDuration = `${16 + Math.random() * 24}s`;
-    mote.style.animationDelay = `${-Math.random() * 30}s`;
-    mote.style.setProperty("--twinkle-duration", `${2.6 + Math.random() * 3.4}s`);
-    mote.style.setProperty("--twinkle-delay", `${-Math.random() * 6}s`);
-    box.append(mote);
-  }
-}
-
-// 风：几道横风带从左侧扫过，配合被吹斜的雪
-function initWind() {
-  const box = $("wind");
-  if (!box || box.childElementCount) return;
-  const count = 10;
-  for (let i = 0; i < count; i += 1) {
-    const gust = el("span", "gust");
-    const duration = 6 + Math.random() * 6;
-    gust.style.top = `${4 + Math.random() * 62}%`;
-    gust.style.width = `${24 + Math.random() * 34}vw`;
-    gust.style.setProperty("--gust-opacity", (0.08 + Math.random() * 0.14).toFixed(2));
-    gust.style.animationDuration = `${duration}s`;
-    gust.style.animationDelay = `${-Math.random() * duration}s`;
-    box.append(gust);
-  }
-}
-
-// 风雪：雪片整体被风往右下吹，途中沿风向摆动
-function initSnow() {
-  const box = $("snow");
-  if (!box || box.childElementCount) return;
-  const count = 72;
-  for (let i = 0; i < count; i += 1) {
-    const flake = el("span", "snowflake");
-    // 近处的雪片更大更亮、落得更快，远处更小更淡，拉开纵深
-    const depth = Math.random();
-    const size = 1.4 + depth * depth * 4.4;
-    flake.style.left = `${Math.random() * 100}%`;
-    flake.style.width = `${size}px`;
-    flake.style.height = `${size}px`;
-    flake.style.setProperty("--drift", `${14 + Math.random() * 26 + depth * 12}vw`);
-    flake.style.setProperty("--sway", `${1 + Math.random() * 3}vw`);
-    flake.style.setProperty(
-      "--flake-opacity", (0.2 + depth * 0.65).toFixed(2),
-    );
-    flake.style.animationDuration = `${16.5 - depth * 8 + Math.random() * 2}s`;
-    flake.style.animationDelay = `${-Math.random() * 18}s`;
-    box.append(flake);
-  }
-}
-
-function initStars() {
-  const box = $("sky-stars");
-  if (!box || box.childElementCount) return;
-  const count = 80;
-  for (let i = 0; i < count; i += 1) {
-    const star = el("span", "star");
-    const size = 9 + Math.random() * 17;
-    // 星云在右侧更密：多数星星落在右半，左上留出深空
-    const x = Math.random() < 0.55 ? 42 + Math.random() * 58 : Math.random() * 58;
-    star.style.left = `${x}%`;
-    star.style.top = `${Math.pow(Math.random(), 0.85) * 68}%`;
-    star.style.width = `${size}px`;
-    star.style.height = `${size}px`;
-    star.style.opacity = `${0.2 + Math.random() * 0.6}`;
-    star.style.animationDuration = `${3 + Math.random() * 5}s`;
-    star.style.animationDelay = `${Math.random() * 4}s`;
-    if (Math.random() < 0.08) star.classList.add("bright");
-    box.append(star);
-  }
-  // 倒影层复用同一批星点：位置、亮度和闪烁相位一致，靠水面波纹产生错动
-  const mirror = $("water-stars");
-  if (mirror && !mirror.childElementCount) {
-    for (const star of box.children) mirror.append(star.cloneNode(true));
-  }
-}
 
 // ---- 牌面缩略图（bridge 只回 JSON，图片走 base64） ----
 const observer = new IntersectionObserver((entries) => {
@@ -779,10 +687,6 @@ async function boot() {
     $("subtitle").classList.add("demo");
   }
   $("version").textContent = "";
-  initStars();
-  initDust();
-  initWind();
-  initSnow();
   initBackground();
   startBackground();
   for (const button of document.querySelectorAll(".tab")) {

@@ -2,6 +2,10 @@ import { $ } from "../dom.js";
 import { layoutBackdrop } from "./layout.js";
 import { NearMeteors } from "./near-meteor.js";
 import { FarMeteors } from "./far-meteor.js";
+import { initStars, destroyStars } from "./stars.js";
+import { initDust, destroyDust } from "./dust.js";
+import { initWind, destroyWind } from "./wind.js";
+import { initSnow, destroySnow } from "./snow.js";
 
 // 背景生命周期的统一入口：全局监听只在这里注册，各效果模块只提供方法。
 // resize 顺序固定：布局 → 近景（它自己会重算色相场与画布尺寸）。
@@ -25,6 +29,10 @@ export function init() {
   layoutBackdrop();
   if (inited) return;
   inited = true;
+  initStars();
+  initDust();
+  initWind();
+  initSnow();
   window.addEventListener("resize", resize);
   reducedMotion.addEventListener("change", onReducedMotionChange);
 }
@@ -45,6 +53,10 @@ export function stop() {
 
 export function destroy() {
   stop();
+  destroyStars();
+  destroyDust();
+  destroyWind();
+  destroySnow();
   window.removeEventListener("resize", resize);
   reducedMotion.removeEventListener("change", onReducedMotionChange);
   inited = false;
