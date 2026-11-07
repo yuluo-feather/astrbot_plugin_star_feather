@@ -15,6 +15,7 @@ const thumbInflight = new Map();
 let detailSeq = 0;
 const CARD_BACK_ID = "__back__";
 let cardBackURL = "";
+let cardBackPromise = null;
 
 const SUIT_NAMES = {
   major: "大阿卡纳", wands: "权杖", cups: "圣杯", swords: "宝剑", pentacles: "星币",
@@ -163,11 +164,20 @@ function el(tag, cls, text) {
   return node;
 }
 
+let toastTimer = 0;
 function showToast(message) {
   const toast = $("toast");
   toast.textContent = message || "";
   toast.classList.toggle("show", Boolean(message));
-  if (message) setTimeout(() => toast.classList.remove("show"), 4200);
+  // 只留一个定时器：否则前一条提示到点会把后一条一起关掉
+  clearTimeout(toastTimer);
+  toastTimer = 0;
+  if (message) {
+    toastTimer = setTimeout(() => {
+      toast.classList.remove("show");
+      toastTimer = 0;
+    }, 4200);
+  }
 }
 
 // 近流星固定青碧色；远景 CSS 流星另有固定淡青蓝，两套都不再随机取色
@@ -490,6 +500,8 @@ class NearMeteors {
   }
 
   resize() {
+    const prevW = this.vw;
+    const prevH = this.vh;
     this.dpr = Math.min(window.devicePixelRatio || 1, 2);
     this.vw = window.innerWidth;
     this.vh = window.innerHeight;
@@ -501,7 +513,27 @@ class NearMeteors {
     this.hueField = buildHueField(this.vw, this.vh);
     this.fit(this.sky, this.vw, this.vh);
     if (this.water) this.fit(this.water, this.vw, this.waterH);
+    // 存活的流星按视口比例重映射：否则窗口缩放后它们和色相区域、
+    // 水面倒影都会错位。构造期 prevW/prevH 为 0，跳过。
+    if (prevW > 0 && prevH > 0) this.rescale(prevW, prevH);
     this.paint();
+  }
+
+  rescale(prevW, prevH) {
+    const sx = this.vw / prevW;
+    const sy = this.vh / prevH;
+    for (const list of [this.list, this.groupList]) {
+      for (const m of list) {
+        m.x *= sx;
+        m.y *= sy;
+        m.vx *= sx;
+        m.vy *= sy;
+        for (const point of m.trail) {
+          point.x *= sx;
+          point.y *= sy;
+        }
+      }
+    }
   }
 
   fit(canvas, w, h) {
@@ -868,6 +900,9 @@ let nearField = null;
 let nearTimer = 0;
 let nearGroupTimer = 0;
 let nearGroupTimers = [];
+// 单颗流星的 15% 补发：单独一把计时器，不和群组的 reset 混用，
+// 否则群组下一次重置会把还没触发的补发句柄丢掉、停不下来
+let nearSpawnTimers = [];
 let farEnabled = false;
 let farTimer = 0;
 
@@ -890,6 +925,8 @@ function stopNearMeteors() {
   nearGroupTimer = 0;
   for (const timer of nearGroupTimers) clearTimeout(timer);
   nearGroupTimers = [];
+  for (const timer of nearSpawnTimers) clearTimeout(timer);
+  nearSpawnTimers = [];
   if (nearField) nearField.stop();
 }
 
@@ -917,7 +954,11 @@ function scheduleMeteor(near) {
       if (nearField) {
         nearField.spawn();
         if (Math.random() < 0.15) {
-          setTimeout(() => { if (nearField) nearField.spawn(); }, 400 + Math.random() * 400);
+          const timer = setTimeout(() => {
+            nearSpawnTimers = nearSpawnTimers.filter((t) => t !== timer);
+            if (nearField) nearField.spawn();
+          }, 400 + Math.random() * 400);
+          nearSpawnTimers.push(timer);
         }
       }
     } else {
@@ -1180,16 +1221,25 @@ async function thumbURL(cardId, upright, width) {
 
 async function ensureCardBack(width = 150) {
   if (cardBackURL) return cardBackURL;
-  const url = await thumbURL(CARD_BACK_ID, true, width);
-  if (!url) return "";
-  await new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = resolve;
-    img.onerror = reject;
-    img.src = url;
-  });
-  cardBackURL = url;
-  return url;
+  // 并发调用共享同一次解码：预览表单与抽牌渲染会同时要牌背
+  if (!cardBackPromise) {
+    cardBackPromise = (async () => {
+      const url = await thumbURL(CARD_BACK_ID, true, width);
+      if (!url) return "";
+      await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = url;
+      });
+      cardBackURL = url;
+      return url;
+    })().finally(() => {
+      // 失败也要清掉，下次调用能重新解码
+      cardBackPromise = null;
+    });
+  }
+  return cardBackPromise;
 }
 function loadThumb(img) {
   if (img._thumbPromise) return img._thumbPromise;
