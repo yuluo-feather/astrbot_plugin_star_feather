@@ -40,9 +40,10 @@ def daily_remaining(limit: int, data, today: str) -> int:
         return limit
     try:
         count = int(data.get("count", 0))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return limit
-    return max(0, limit - count)
+    # 计数不可能为负：坏记录归一为 0，别让「limit - 负数」反而放大配额
+    return max(0, limit - max(0, count))
 
 
 def daily_touch(data, today: str) -> dict:
@@ -50,8 +51,9 @@ def daily_touch(data, today: str) -> dict:
     if isinstance(data, dict) and data.get("date") == today:
         try:
             count = int(data.get("count", 0))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             count = 0
     else:
         count = 0
-    return {"date": today, "count": count + 1}
+    # 负数记录在本次请求后直接回到 1，不留在负值上继续累加
+    return {"date": today, "count": max(0, count) + 1}

@@ -13,6 +13,7 @@ main.py 只做入口编排：「读写 KV + 生成拦截文案」收敛于此。
 """
 # 本模块不打日志：闸门放行/拒绝的读数由调用点（main 的三入口）负责打，避免同一事件两处留痕。
 import asyncio
+import math
 import time
 
 from ..adapters.clock import Clock
@@ -54,6 +55,9 @@ class LimitGate:
                 last_ts = float(last_ts or 0)
             except (TypeError, ValueError):
                 last_ts = 0.0  # 坏数据当「没有记录」：放行，别把入口拦成「这场断了」
+            if not math.isfinite(last_ts):
+                # NaN 进 cooldown_remaining 会在 math.ceil 处抛 ValueError；±Inf 同属坏时间戳
+                last_ts = 0.0
             remain = cooldown_remaining(last_ts, time.time(), cooldown)
             if remain > 0:
                 return remain

@@ -56,6 +56,15 @@ class TestDailyRemaining:
         assert daily_remaining(5, None, "20260824") == 5
         assert daily_remaining(5, "not-a-dict", "20260824") == 5
 
+    def test_negative_count_treated_as_no_record(self):
+        # 负数计数是坏记录：不能因为 limit - (-3) 反而放大配额
+        assert daily_remaining(5, {"date": "20260824", "count": -3}, "20260824") == 5
+
+    def test_infinite_count_treated_as_no_record(self):
+        # int(inf) 抛 OverflowError，不能漏到入口变成「占卜失败」
+        assert daily_remaining(5, {"date": "20260824", "count": float("inf")}, "20260824") == 5
+        assert daily_remaining(5, {"date": "20260824", "count": float("-inf")}, "20260824") == 5
+
 
 # ---------- 计数 +1 daily_touch ----------
 class TestDailyTouch:
@@ -70,3 +79,11 @@ class TestDailyTouch:
 
     def test_corrupt_count_resets(self):
         assert daily_touch({"date": "20260824", "count": "x"}, "20260824") == {"date": "20260824", "count": 1}
+
+    def test_negative_count_recovers_to_one(self):
+        # 一次有效请求就把坏计数拉回 1，不留在负值上继续累加
+        assert daily_touch({"date": "20260824", "count": -3}, "20260824") == {"date": "20260824", "count": 1}
+
+    def test_infinite_count_resets_to_one(self):
+        assert daily_touch({"date": "20260824", "count": float("inf")}, "20260824") == {"date": "20260824", "count": 1}
+        assert daily_touch({"date": "20260824", "count": float("-inf")}, "20260824") == {"date": "20260824", "count": 1}

@@ -1,6 +1,7 @@
 """限流闸门单测：会话节流 / 每日计数 / KV 异常静默放行（gating 粘合层）。
 ——连刷的念头，掐死在摇篮里。"""
 import asyncio
+import math
 import types
 
 from data.plugins.astrbot_plugin_star_feather.core.dto import IncomingEvent
@@ -137,6 +138,15 @@ class TestSessionThrottle:
         kv.store["k"] = "not-a-timestamp"
         g = _gate(kv, cmd=100)
         assert asyncio.run(g.session_throttle("k", 100)) == 0
+
+    def test_non_finite_timestamp_treated_as_no_record(self):
+        """NaN / ±Inf 同属坏时间戳：NaN 进 math.ceil 会抛 ValueError，必须放行。"""
+        for bad in (float("nan"), float("inf"), float("-inf")):
+            kv = FakeKV()
+            kv.store["k"] = bad
+            g = _gate(kv, cmd=100)
+            assert asyncio.run(g.session_throttle("k", 100)) == 0
+            assert math.isfinite(kv.store["k"])  # 放行后写回的是新的墙钟时间戳
 
 class TestGateCheck:
     def test_command_throttle_block_message(self):
