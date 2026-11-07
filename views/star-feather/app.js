@@ -100,7 +100,7 @@ async function openDaily(uid) {
   const seq = ++detailSeq;
   renderDailyList();
   const box = $("daily-detail");
-  box.replaceChildren(el("p", "empty", "读取中…"));
+  box.replaceChildren(detailSkeleton());
   try {
     const data = await apiGet("daily/detail", { uid });
     if (seq !== detailSeq || state.selected !== uid) return;
@@ -110,6 +110,22 @@ async function openDaily(uid) {
     if (seq !== detailSeq || state.selected !== uid) return;
     box.replaceChildren(el("p", "empty", error.message || "读取失败"));
   }
+}
+
+function detailSkeleton() {
+  const wrap = el("div", "detail-loading");
+  const head = el("div", "detail-head");
+  head.append(el("div", "detail-card skeleton-card"));
+  const info = el("div", "detail-info");
+  info.append(el("div", "skeleton-line wide"));
+  info.append(el("div", "skeleton-line"));
+  info.append(el("div", "skeleton-line short"));
+  head.append(info);
+  wrap.append(head);
+  for (const cls of ["wide", "", "short"]) {
+    wrap.append(el("div", `skeleton-line ${cls}`.trim()));
+  }
+  return wrap;
 }
 
 function renderDetail(data) {
