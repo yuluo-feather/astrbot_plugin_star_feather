@@ -770,6 +770,7 @@ h1 {
   padding: 24px;
   background: rgba(10, 8, 18, 0.62);
   z-index: 60;
+  animation: modal-fade var(--motion-base) var(--ease-out);
 }
 
 .modal-panel {
@@ -782,6 +783,17 @@ h1 {
   border-radius: var(--radius);
   background: rgba(17, 22, 46, 0.94);
   box-shadow: var(--shadow), var(--inset-highlight);
+  animation: modal-pop var(--motion-slow) var(--ease-out);
+}
+
+@keyframes modal-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modal-pop {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: none; }
 }
 
 .modal-close {
@@ -846,7 +858,7 @@ h1 {
 .seg button.active[data-upright="0"] { color: var(--rev); }
 
 .card-modal-body { margin-top: 18px; }
-.kw-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+.kw-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 10px; }
 
 .kw {
   padding: 2px 10px;
@@ -975,7 +987,7 @@ h1 {
 
 /* 占卜预览 */
 .preview-form {
-  padding: 16px 18px;
+  padding: 20px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel);
@@ -985,36 +997,41 @@ h1 {
 .preview-row {
   display: flex;
   align-items: flex-end;
-  gap: 12px;
+  gap: 14px;
   flex-wrap: wrap;
 }
 
 .field { display: flex; flex-direction: column; gap: 4px; min-width: 140px; }
-.field span { color: var(--muted); font-size: 12px; }
+.field span { color: var(--muted); font-size: 11px; letter-spacing: 0.04em; }
 .field-grow { flex: 1 1 240px; }
 
 .field select,
 .field input {
   padding: 8px 10px;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--panel-2);
+  border-radius: var(--radius-md);
+  background: var(--panel-l3);
   color: var(--ink);
   font: inherit;
   outline: none;
 }
 
 .field select:focus,
-.field input:focus { border-color: var(--gold); }
+.field input:focus {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 2px rgba(230, 196, 122, 0.15);
+}
 
 .primary {
-  padding: 9px 22px;
+  padding: 9px 24px;
   border: 0;
   border-radius: 999px;
   background: linear-gradient(135deg, var(--indigo), var(--gold));
   color: #fff;
   font: inherit;
   cursor: pointer;
+  transition: filter var(--motion-fast) var(--ease-out),
+              transform var(--motion-fast) var(--ease-out);
 }
 
 .primary:disabled { opacity: 0.55; cursor: default; }
@@ -1024,8 +1041,10 @@ h1 {
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  margin-top: 12px;
+  margin-top: 14px;
 }
+
+#preview-note { font-size: 11px; opacity: 0.8; }
 
 .preview-result { margin-top: 18px; }
 
@@ -1037,20 +1056,21 @@ h1 {
   margin-bottom: 12px;
 }
 
-.preview-head h2 { margin: 0; font-size: 18px; }
+.preview-head h2 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: 0.02em; }
 .preview-question { color: var(--muted); font-size: 13px; }
 
 .preview-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 360px));
+  justify-content: center;
+  gap: 16px;
 }
 
 .pick-card {
   display: grid;
-  grid-template-columns: 96px minmax(0, 1fr);
+  grid-template-columns: 100px minmax(0, 1fr);
   gap: 12px;
-  padding: 12px;
+  padding: 14px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel);
@@ -1058,7 +1078,7 @@ h1 {
 }
 
 .pick-figure { display: flex; flex-direction: column; gap: 4px; }
-.pick-pos { color: var(--muted); font-size: 11px; text-align: center; }
+.pick-pos { color: var(--muted); font-size: 11px; letter-spacing: 0.04em; text-align: center; }
 .pick-body { min-width: 0; }
 
 .pick-title {
@@ -1066,24 +1086,31 @@ h1 {
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 
-.pick-text { margin: 0 0 6px; font-size: 13px; }
-.pick-advice { margin: 0 0 4px; color: var(--gold); font-size: 12px; }
+.pick-title strong { font-size: 15px; font-weight: 600; }
+.pick-text { margin: 0 0 8px; font-size: 13.5px; line-height: 1.75; }
+.pick-advice {
+  margin: 0 0 6px;
+  padding-left: 8px;
+  border-left: 2px solid var(--gold);
+  color: var(--gold);
+  font-size: 12.5px;
+}
 .pick-energy { margin: 0; color: var(--muted); font-size: 11px; }
 
 .ai-result {
-  margin-top: 16px;
-  padding: 16px 18px;
+  margin-top: 20px;
+  padding: 18px 20px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel);
   box-shadow: var(--inset-highlight);
 }
 
-.ai-result h3 { margin: 0 0 8px; font-size: 15px; color: var(--gold); }
-.ai-text { margin: 0; white-space: pre-wrap; word-break: break-word; }
+.ai-result h3 { margin: 0 0 10px; font-size: 16px; color: var(--gold); letter-spacing: 0.04em; }
+.ai-text { margin: 0; font-size: 13.5px; line-height: 1.8; white-space: pre-wrap; word-break: break-word; }
 
 @media (max-width: 820px) {
   body { padding: 16px 14px 36px; }
@@ -1134,8 +1161,11 @@ h1 {
 /* ---- 交互反馈：按压 / hover / 焦点（PR 1） ---- */
 
 .ghost, .tab, .primary, .user, .card-cell, .seg button, .modal-close {
-  transition: transform 0.12s ease, border-color 0.15s ease, color 0.15s ease,
-              background-color 0.15s ease, filter 0.15s ease;
+  transition: transform var(--motion-fast) var(--ease-out),
+              border-color var(--motion-fast) var(--ease-out),
+              color var(--motion-fast) var(--ease-out),
+              background-color var(--motion-fast) var(--ease-out),
+              filter var(--motion-fast) var(--ease-out);
 }
 
 .tab:hover { color: var(--ink); }
@@ -1159,7 +1189,7 @@ h1 {
   outline-offset: 2px;
 }
 
-.panel { animation: panel-in 180ms ease-out; }
+.panel { animation: panel-in var(--motion-base) var(--ease-out); }
 
 @keyframes panel-in {
   from { opacity: 0; transform: translateY(6px); }
@@ -1168,6 +1198,7 @@ h1 {
 
 @media (prefers-reduced-motion: reduce) {
   .panel { animation: none; }
+  .modal, .modal-panel { animation: none; }
   .ghost.is-loading .icon { animation: none; }
   .user:hover, .card-cell:hover { transform: none; }
   .ghost:active, .tab:active, .primary:active:not(:disabled), .user:active,
@@ -1268,7 +1299,7 @@ h1 {
 .pick-card.flip-animate .pick-body { opacity: 0; }
 
 .preview-cards.flips-ready .pick-card.flip-animate .pick-body {
-  animation: body-in 200ms ease-out both;
+  animation: body-in var(--motion-base) var(--ease-out) both;
   animation-delay: calc(var(--flip-delay, 0ms) + 450ms);
 }
 
@@ -1299,7 +1330,7 @@ h1 {
   display: none;
 }
 
-.ai-result.ai-reveal { animation: ai-in 200ms ease-out; }
+.ai-result.ai-reveal { animation: ai-in var(--motion-slow) var(--ease-out); }
 
 @keyframes ai-in {
   from { opacity: 0; transform: translateY(4px); }
