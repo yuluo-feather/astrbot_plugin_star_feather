@@ -670,6 +670,30 @@ h1 {
   margin-bottom: 14px;
 }
 
+.suit-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.suit-chip {
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color var(--motion-fast) var(--ease-out),
+              color var(--motion-fast) var(--ease-out),
+              background var(--motion-fast) var(--ease-out);
+}
+
+.suit-chip:hover { border-color: var(--gold); color: var(--ink); }
+.suit-chip.active { border-color: var(--gold); background: var(--accent-soft); color: var(--gold); }
+
 .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
 .switch input { accent-color: var(--gold); }
 .hint { color: var(--muted); font-size: 12px; }

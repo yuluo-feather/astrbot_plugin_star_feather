@@ -8,7 +8,7 @@ import {
 } from "./feathers/card-images.js";
 
 const state = {
-  items: [], selected: null, cards: [], spreads: [], reversed: false,
+  items: [], selected: null, cards: [], spreads: [], reversed: false, suitFilter: "all",
   overview: null, cardDetail: null, detailUpright: true,
   preview: null, aiEnabled: true,
   listIndexedTotal: 0, listShown: 0, listTruncated: false,
@@ -170,23 +170,45 @@ function renderDetail(data) {
 
 // ---- 牌面预览 ----
 async function loadCards() {
-  if (state.cards.length) {
-    renderCards();
-    return;
+  if (!state.cards.length) {
+    try {
+      const data = await apiGet("cards");
+      state.cards = data.items || [];
+    } catch (error) {
+      showToast(error.message || "牌面清单加载失败");
+      return;
+    }
   }
-  try {
-    const data = await apiGet("cards");
-    state.cards = data.items || [];
-    renderCards();
-  } catch (error) {
-    showToast(error.message || "牌面清单加载失败");
+  renderSuitFilter();
+  renderCards();
+}
+
+function renderSuitFilter() {
+  const box = $("suit-filter");
+  box.replaceChildren();
+  for (const [key, label] of [["all", "全部"], ...Object.entries(SUIT_NAMES)]) {
+    const button = el("button", "suit-chip" + (state.suitFilter === key ? " active" : ""));
+    button.type = "button";
+    button.dataset.suit = key;
+    button.textContent = label;
+    button.addEventListener("click", () => {
+      state.suitFilter = key;
+      renderCards();
+    });
+    box.append(button);
   }
 }
 
 function renderCards() {
   const grid = $("card-grid");
   grid.replaceChildren();
-  for (const card of state.cards) {
+  for (const button of $("suit-filter").querySelectorAll(".suit-chip")) {
+    button.classList.toggle("active", button.dataset.suit === state.suitFilter);
+  }
+  const cards = state.suitFilter === "all"
+    ? state.cards
+    : state.cards.filter((card) => card.suit === state.suitFilter);
+  for (const card of cards) {
     const cell = el("button", "card-cell");
     cell.type = "button";
     const figure = el("div", "card-figure");

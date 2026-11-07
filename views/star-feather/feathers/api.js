@@ -5,18 +5,18 @@ export const isDemo = !bridge;
 export const CARD_BACK_ID = "__back__";
 
 const DEMO_CARDS = [
-  { id: "major_00", cn: "愚者", en: "The Fool" },
-  { id: "major_01", cn: "魔术师", en: "The Magician" },
-  { id: "major_02", cn: "女祭司", en: "The High Priestess" },
-  { id: "major_03", cn: "皇后", en: "The Empress" },
-  { id: "major_06", cn: "恋人", en: "The Lovers" },
-  { id: "major_10", cn: "命运之轮", en: "Wheel of Fortune" },
-  { id: "major_13", cn: "死神", en: "Death" },
-  { id: "major_17", cn: "星星", en: "The Star" },
-  { id: "major_18", cn: "月亮", en: "The Moon" },
-  { id: "major_19", cn: "太阳", en: "The Sun" },
-  { id: "cups_01", cn: "圣杯王牌", en: "Ace of Cups" },
-  { id: "swords_01", cn: "宝剑王牌", en: "Ace of Swords" },
+  { id: "major_00", cn: "愚者", en: "The Fool", suit: "major" },
+  { id: "major_01", cn: "魔术师", en: "The Magician", suit: "major" },
+  { id: "major_02", cn: "女祭司", en: "The High Priestess", suit: "major" },
+  { id: "major_03", cn: "皇后", en: "The Empress", suit: "major" },
+  { id: "major_06", cn: "恋人", en: "The Lovers", suit: "major" },
+  { id: "major_10", cn: "命运之轮", en: "Wheel of Fortune", suit: "major" },
+  { id: "major_13", cn: "死神", en: "Death", suit: "major" },
+  { id: "major_17", cn: "星星", en: "The Star", suit: "major" },
+  { id: "major_18", cn: "月亮", en: "The Moon", suit: "major" },
+  { id: "major_19", cn: "太阳", en: "The Sun", suit: "major" },
+  { id: "cups_01", cn: "圣杯王牌", en: "Ace of Cups", suit: "cups" },
+  { id: "swords_01", cn: "宝剑王牌", en: "Ace of Swords", suit: "swords" },
 ];
 
 const DEMO_RECORDS = {
