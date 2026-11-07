@@ -1,7 +1,7 @@
 """导入模型红线：插件模块只有一个身份（包名），插件自己不再备导入机关。
 
 2026-10-12 把插件从「顶层平铺名 + 手动清 sys.modules」换成包内相对导入
-（from .daily import ...）。收益靠这三条守住——别处的用例全绿替代不了它们：
+（from .daily import ...）。收益靠这四条守住——别处的用例全绿替代不了它们：
 
 1. 一份文件一个身份：插件目录下的模块只能注册成 data.plugins.<目录名>.*。
    老形态下同一个 daily.py 会是「顶层 daily」＋「data.plugins....daily」两份，
@@ -11,6 +11,9 @@
 3. 框架清得干净：按 data.plugins.<目录名>.* 前缀删，插件模块一个不剩、再导入拿到
    全新对象。顶层名永远匹配不到这个前缀——这正是当初 main.py 非写一段 pop 循环
    不可的原因。
+4. 应用层不碰宿主：core / services / ai / render / app 不 import astrbot，宿主差异
+   一律经 adapters/ 收窄（host-decoupling.md §4 准入条件 1）。函数体内的懒加载同样
+   算数——它一样让应用层知道了宿主是谁。
 """
 import ast
 import os
@@ -67,6 +70,34 @@ class TestNoImportMachineryInPlugin:
                         and node.value.id == "sys" and node.attr in ("path", "modules")):
                     hits.append(f"{fname}:{node.lineno} sys.{node.attr}")
         assert not hits, "插件根不该自备导入机关：" + "；".join(hits)
+
+
+class TestHostImportBoundary:
+    """宿主解耦准入条件 1：应用层不直接 import astrbot（adapters/ 与 main.py 除外）。"""
+
+    _LAYERS = {"core", "services", "ai", "render", "app"}
+
+    def test_app_layers_do_not_import_astrbot(self):
+        """扫描 AST，函数体内的懒加载同样算——它一样让应用层知道了宿主是谁。"""
+        hits = []
+        for fname, fpath in _plugin_sources():
+            if fname.split("/")[0] not in self._LAYERS:
+                continue
+            with open(fpath, encoding="utf-8") as f:
+                tree = ast.parse(f.read(), filename=fname)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom):
+                    root = (node.module or "").split(".")[0]
+                    if root == "astrbot":
+                        hits.append(f"{fname}:{node.lineno} from {node.module}")
+                elif isinstance(node, ast.Import):
+                    for alias in node.names:
+                        if alias.name.split(".")[0] == "astrbot":
+                            hits.append(f"{fname}:{node.lineno} import {alias.name}")
+        assert not hits, (
+            "应用层直接依赖了宿主，应改为经 adapters/ 收窄："
+            + "；".join(hits)
+        )
 
 
 _CHILD = r'''

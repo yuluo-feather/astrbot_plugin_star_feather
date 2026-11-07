@@ -127,10 +127,13 @@
 三项同时满足，才把「接入第二宿主」列为可开工任务：
 
 1. **导入隔离**：`core / services / ai / render / app` 不直接导入 AstrBot。
+   **已落测试**：`tests/test_import_model.py::TestHostImportBoundary` 用 AST 扫描，
+   函数体内的懒加载同样算数。2026-11-07 由它抓出 `app/webui.py` 的 5 处
+   `from astrbot.api.web import request`，已收进 `adapters/web.py`。
 2. **装配隔离**：一个测试能用替代适配器把 `Container` 装起来，不传 AstrBot 的 `context` / `plugin`。
 3. **行为隔离**：抽牌 → 身份 → 限流 → 解读 → 交付全链在假适配器下跑通。
 
-建议把这三项作为设计红线写进测试，而不是等接第二个宿主时人工检查。
+第 1 项已由测试守住，不再依赖记忆；第 2、3 项仍是人工判断，接第二宿主前逐条核。
 
 ## 5. 明确暂不处理
 

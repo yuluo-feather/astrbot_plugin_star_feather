@@ -17,6 +17,7 @@ from typing import TypedDict
 
 from PIL import Image
 
+from ..adapters.web import json_body, query_params
 from ..ai.parse import interpretation_from_record, validate_interpret_structure_strict
 from ..ai.persona import resolve_persona
 from ..core.draw import draw, render_detail
@@ -391,9 +392,7 @@ class WebUI:
         return await self.daily_list()
 
     async def h_daily_detail(self):
-        from astrbot.api.web import request
-
-        uid = str(request.query.get("uid", "") or "").strip()
+        uid = str(query_params().get("uid", "") or "").strip()
         if not uid:
             return {"status": "error", "message": "缺少 uid"}, 400
         data = await self.daily_detail(uid)
@@ -405,9 +404,7 @@ class WebUI:
         return {"items": self.cards()}
 
     async def h_card_detail(self):
-        from astrbot.api.web import request
-
-        card_id = str(request.query.get("id", "") or "").strip()
+        card_id = str(query_params().get("id", "") or "").strip()
         try:
             return self.card_detail(card_id)
         except FileNotFoundError as e:
@@ -417,9 +414,7 @@ class WebUI:
         return {"items": self.spreads()}
 
     async def h_preview_draw(self):
-        from astrbot.api.web import request
-
-        payload = await request.json(default={})
+        payload = await json_body(default={})
         payload = payload if isinstance(payload, dict) else {}
         spread = str(payload.get("spread", "") or "")
         try:
@@ -428,9 +423,7 @@ class WebUI:
             return {"status": "error", "message": str(e)}, 400
 
     async def h_preview_interpret(self):
-        from astrbot.api.web import request
-
-        payload = await request.json(default={})
+        payload = await json_body(default={})
         payload = payload if isinstance(payload, dict) else {}
         spread = str(payload.get("spread", "") or "")
         try:
@@ -445,12 +438,11 @@ class WebUI:
         return result
 
     async def h_card_image(self):
-        from astrbot.api.web import request
-
-        card_id = str(request.query.get("id", "") or "").strip()
-        upright = str(request.query.get("upright", "1")) != "0"
+        params = query_params()
+        card_id = str(params.get("id", "") or "").strip()
+        upright = str(params.get("upright", "1")) != "0"
         try:
-            width = int(request.query.get("w", 180))
+            width = int(params.get("w", 180))
         except (TypeError, ValueError):
             width = 180
         try:
