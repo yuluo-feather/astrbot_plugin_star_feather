@@ -352,7 +352,7 @@ export class NearMeteors {
       y = this.vh * (0.02 + Math.random() * 0.12);
     }
     const angle = (angleDeg * Math.PI) / 180;
-    const speed = 300 + Math.random() * 80;
+    const speed = 250 + Math.random() * 60;
     // 尾迹长度按 20% 短 / 60% 中 / 20% 长分布，避免每颗都一样
     const trailRoll = Math.random();
     const trailLen = trailRoll < 0.2
@@ -367,7 +367,7 @@ export class NearMeteors {
       vy: Math.sin(angle) * speed,
       age: 0,
       life: 1.7 + Math.random() * 0.5,
-      g: 6 + Math.random() * 6,
+      g: 18 + Math.random() * 10,
       drag: 0.02 + Math.random() * 0.02,
       trailLen,
       trail: [],
