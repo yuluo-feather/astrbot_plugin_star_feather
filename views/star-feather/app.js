@@ -30,20 +30,30 @@ function renderStats(data) {
   const box = $("stats");
   box.replaceChildren();
   const settings = data.settings || {};
-  const chips = [
+  const cards = [
     ["今日用户", data.users],
     ["主题解读", data.topics],
-    ["牌灵话", data.with_spirit],
+    ["有牌灵话", data.with_spirit],
+  ];
+  const strip = [
     ["缓存过期", data.stale, data.stale > 0 ? "warn" : ""],
     ["AI", settings.enable_ai ? "开" : "关"],
     ["结构校验", settings.structure_check],
     ["发送", SEND_MODES[settings.send_mode] || settings.send_mode],
   ];
-  for (const [label, value, cls] of chips) {
-    const chip = el("div", `chip ${cls || ""}`);
-    chip.append(el("span", "chip-label", label), el("strong", "chip-value", String(value)));
-    box.append(chip);
+  const cardBox = el("div", "stat-cards");
+  for (const [label, value] of cards) {
+    const card = el("div", "stat-card");
+    card.append(el("span", "stat-label", label), el("strong", "stat-value", String(value)));
+    cardBox.append(card);
   }
+  const stripBox = el("div", "stat-strip");
+  for (const [label, value, cls] of strip) {
+    const item = el("span", `stat-item ${cls || ""}`);
+    item.append(el("span", "stat-label", label), el("strong", "stat-value", String(value)));
+    stripBox.append(item);
+  }
+  box.append(cardBox, stripBox);
 }
 
 // ---- 今日牌运 ----
@@ -539,38 +549,46 @@ function switchTab(tab) {
 }
 
 async function refresh() {
-  if (!$("panel-preview").classList.contains("hidden")) resetPreview();
+  const button = $("refresh");
+  button.classList.add("is-loading");
+  button.disabled = true;
   try {
-    const overview = await apiGet("overview");
-    state.overview = overview;
-    state.aiEnabled = Boolean(overview.settings && overview.settings.enable_ai);
-    $("version").textContent = overview.version ? `v${overview.version}` : "";
-    renderStats(overview);
-    updatePreviewAIButton();
-  } catch (error) {
-    showToast(error.message || "概览加载失败");
-  }
-  try {
-    const data = await apiGet("daily/list");
-    state.items = data.items || [];
-    state.listIndexedTotal = Number.isFinite(data.indexed_total)
-      ? data.indexed_total : state.items.length;
-    state.listShown = Number.isFinite(data.shown) ? data.shown : state.items.length;
-    state.listTruncated = Boolean(data.truncated);
-    const stillSelected = Boolean(state.selected)
-      && state.items.some((item) => item.uid === state.selected);
-    renderDailyList();
-    if (stillSelected) {
-      await openDaily(state.selected);  // 记录可能已变，刷新时重拉详情
-    } else if (state.items.length) {
-      await openDaily(state.items[0].uid);
-    } else {
-      state.selected = null;
-      renderDailyList();
-      $("daily-detail").replaceChildren(el("p", "empty", "今天还没有牌运记录。"));
+    if (!$("panel-preview").classList.contains("hidden")) resetPreview();
+    try {
+      const overview = await apiGet("overview");
+      state.overview = overview;
+      state.aiEnabled = Boolean(overview.settings && overview.settings.enable_ai);
+      $("version").textContent = overview.version ? `v${overview.version}` : "";
+      renderStats(overview);
+      updatePreviewAIButton();
+    } catch (error) {
+      showToast(error.message || "概览加载失败");
     }
-  } catch (error) {
-    showToast(error.message || "牌运列表加载失败");
+    try {
+      const data = await apiGet("daily/list");
+      state.items = data.items || [];
+      state.listIndexedTotal = Number.isFinite(data.indexed_total)
+        ? data.indexed_total : state.items.length;
+      state.listShown = Number.isFinite(data.shown) ? data.shown : state.items.length;
+      state.listTruncated = Boolean(data.truncated);
+      const stillSelected = Boolean(state.selected)
+        && state.items.some((item) => item.uid === state.selected);
+      renderDailyList();
+      if (stillSelected) {
+        await openDaily(state.selected);  // 记录可能已变，刷新时重拉详情
+      } else if (state.items.length) {
+        await openDaily(state.items[0].uid);
+      } else {
+        state.selected = null;
+        renderDailyList();
+        $("daily-detail").replaceChildren(el("p", "empty", "今天还没有牌运记录。"));
+      }
+    } catch (error) {
+      showToast(error.message || "牌运列表加载失败");
+    }
+  } finally {
+    button.classList.remove("is-loading");
+    button.disabled = false;
   }
 }
 
