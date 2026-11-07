@@ -859,10 +859,10 @@ h1 {
   border-radius: var(--radius);
   background: var(--panel);
   overflow: hidden;
-  transition: flex-basis var(--motion-slow) var(--ease-out);
+  transition: flex-grow var(--motion-slow) var(--ease-out);
 }
 
-.spread-card.expanded { flex-basis: 520px; }
+.spread-card.expanded { flex: 1 1 96px; }
 
 .spread-toggle {
   position: absolute;
@@ -881,7 +881,7 @@ h1 {
   writing-mode: vertical-rl;
   text-orientation: upright;
   letter-spacing: 0.22em;
-  transition: opacity var(--motion-base) var(--ease-out);
+  transition: opacity var(--motion-fast) var(--ease-out);
 }
 
 .spread-card.expanded .spread-toggle { opacity: 0; pointer-events: none; }
@@ -899,7 +899,7 @@ h1 {
   transition: opacity var(--motion-base) var(--ease-out);
 }
 
-.spread-card.expanded .spread-body { opacity: 1; pointer-events: auto; }
+.spread-card.expanded .spread-body { opacity: 1; pointer-events: auto; transition-delay: 80ms; }
 
 .spread-body-title { margin: 0 0 10px; font-size: 17px; font-weight: 600; }
 .spread-scenario { margin: 0 0 16px; color: var(--muted); font-size: 13px; line-height: 1.6; }
