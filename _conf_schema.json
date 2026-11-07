@@ -8,7 +8,7 @@
         "description": "是否启用 AI 深度解读",
         "type": "bool",
         "default": true,
-        "hint": "开启后占卜结果会调用 LLM 深度解读；关闭则仅使用内置牌义。"
+        "hint": "开启后占卜结果会调用 LLM 深度解读；关闭则仅使用内置牌义，牌灵的话回退到池内当日签文。"
       },
       "ai_provider": {
         "type": "string",

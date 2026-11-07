@@ -1077,7 +1077,8 @@ function initSnow() {
   }
 }
 
-function initSky() {  const box = $("sky-stars");
+function initSky() {
+  const box = $("sky-stars");
   if (!box || box.childElementCount) return;
   const count = 80;
   for (let i = 0; i < count; i += 1) {
@@ -1281,6 +1282,10 @@ function makeThumb(cardId, upright, width, alt) {
 
 // ---- 概览 ----
 const SEND_MODES = { forward: "合并转发", plain: "图文", text_only: "纯文字" };
+// 人设取值见 core/settings.py 的 PERSONA_VALUES，这里只负责显示成中文
+const PERSONA_NAMES = {
+  off: "中立", tsundere: "傲娇", gentle: "温柔", mystic: "神秘", random: "随机",
+};
 
 function renderStats(data) {
   const box = $("stats");
@@ -1376,7 +1381,7 @@ function renderDetail(data) {
   info.append(titleRow);
   info.append(el("p", "detail-uid", data.uid));
   info.append(el("p", "detail-meta",
-                 `日期 ${data.date} · 人设 ${data.persona || "默认"}`));
+                 `日期 ${data.date} · 人设 ${PERSONA_NAMES[data.persona] || data.persona || "默认"}`));
   if (data.spirit) {
     const spirit = el("blockquote", "detail-spirit");
     spirit.append(el("span", "quote-mark", "“"));
