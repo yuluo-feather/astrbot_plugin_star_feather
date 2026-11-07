@@ -1,7 +1,7 @@
 // 环境粒子系统（PR1：只实现雪）。
 // 风场状态、模拟时间与粒子都在这里；全局监听由 background/index.js 转交。
 import { advanceGustState, createGustState, sampleWind } from "./wind-field.js";
-import { drawDustSprite, drawSnowSprite, ensureDustSprites, ensureSnowSprites } from "./environment-sprites.js";
+import { drawDustSprite, drawGust, drawSnowSprite, ensureDustSprites, ensureGustSprite, ensureSnowSprites } from "./environment-sprites.js";
 
 const STEP = 1 / 60;
 const MAX_DELTA = 0.05;
@@ -35,6 +35,18 @@ const DUST = {
   twinkleMin: 2.6, twinkleMax: 6,
   alphaMin: 0.12, alphaMax: 0.9,
   scaleMin: 0.72, scaleMax: 1.12,
+};
+
+// 旧版 gust-sweep：-45vw → 125vw，6–12 s，18% 淡入 / 78% 后淡出，scaleX 0.65 → 1.2
+const GUST = {
+  count: 10,
+  lengthVwMin: 0.24, lengthVwMax: 0.58,
+  lifeMin: 6, lifeMax: 12,
+  travelVw: 1.70,
+  startVw: -0.45,
+  opacityMin: 0.08, opacityMax: 0.22,
+  angle: 1.6,
+  yMinRatio: 0.04, yMaxRatio: 0.66,
 };
 
 // 旧版 dust.js：金 12%、青 12%、其余白
@@ -76,8 +88,11 @@ export class Environment {
     this.ctx = canvas.getContext("2d");
     this.options = { wind: true, gust: true, seed: 0x5f3759df, ...options };
     this.particles = [];
+    this.gusts = [];
+    this.wind = { x: 1, y: 0, strength: 0, gust: 0 };
     this.sprites = ensureSnowSprites();
     this.dustSprites = ensureDustSprites();
+    this.gustSprite = ensureGustSprite();
     this.dpr = 1;
     this.vw = 0;
     this.vh = 0;
@@ -120,6 +135,7 @@ export class Environment {
   destroy() {
     this.pause();
     this.particles = [];
+    this.gusts = [];
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
   }
@@ -155,6 +171,12 @@ export class Environment {
         p.fallSpeed = p.travel / p.life;
         p.swayPeriod = 0.48 * p.life;
       }
+      for (const g of this.gusts) {
+        g.x *= sx;
+        g.y *= sy;
+        g.length *= sx;
+        g.speed = (GUST.travelVw * this.vw) / g.life;
+      }
     } else {
       this.spawnAll();
     }
@@ -167,6 +189,56 @@ export class Environment {
     for (let i = 0; i < DUST.count; i += 1) this.particles.push(this.makeDust());
     // 远处的先画，近处的后画
     this.particles.sort((a, b) => a.z - b.z);
+
+    this.gusts = [];
+    for (let i = 0; i < GUST.count; i += 1) {
+      const g = this.makeGust();
+      g.age = Math.random() * g.life;
+      g.x = (GUST.startVw + GUST.travelVw * (g.age / g.life)) * this.vw;
+      this.gusts.push(g);
+    }
+  }
+
+  makeGust() {
+    const life = GUST.lifeMin + Math.random() * (GUST.lifeMax - GUST.lifeMin);
+    const length = (GUST.lengthVwMin + Math.random() * (GUST.lengthVwMax - GUST.lengthVwMin)) * this.vw;
+    return {
+      type: "gust",
+      life,
+      age: 0,
+      length,
+      speed: (GUST.travelVw * this.vw) / life,
+      x: GUST.startVw * this.vw,
+      y: (GUST.yMinRatio + Math.random() * (GUST.yMaxRatio - GUST.yMinRatio)) * this.vh,
+      alpha: GUST.opacityMin + Math.random() * (GUST.opacityMax - GUST.opacityMin),
+      angle: GUST.angle,
+    };
+  }
+
+  resetGust(g) {
+    const life = GUST.lifeMin + Math.random() * (GUST.lifeMax - GUST.lifeMin);
+    g.life = life;
+    g.age = 0;
+    g.length = (GUST.lengthVwMin + Math.random() * (GUST.lengthVwMax - GUST.lengthVwMin)) * this.vw;
+    g.speed = (GUST.travelVw * this.vw) / life;
+    g.x = GUST.startVw * this.vw;
+    g.y = (GUST.yMinRatio + Math.random() * (GUST.yMaxRatio - GUST.yMinRatio)) * this.vh;
+    g.alpha = GUST.opacityMin + Math.random() * (GUST.opacityMax - GUST.opacityMin);
+  }
+
+  renderGust(ctx, g) {
+    if (g.y >= this.horizon) return;
+    const t = g.age / g.life;
+    let alpha;
+    if (t < 0.18) alpha = g.alpha * (t / 0.18);
+    else if (t <= 0.78) alpha = g.alpha;
+    else alpha = g.alpha * (1 - (t - 0.78) / 0.22);
+    alpha *= 1 + this.wind.gust * 0.3;
+    if (alpha <= 0.002) return;
+
+    const len = g.length * (0.65 + 0.55 * t);
+    const angle = g.angle + (Math.atan2(this.wind.y, this.wind.x) * 180) / Math.PI * 0.2;
+    drawGust(ctx, this.gustSprite, g.x, g.y, len, alpha, angle);
   }
 
   makeParticle() {
@@ -244,12 +316,18 @@ export class Environment {
     this.simTime += dt;
     advanceGustState(this.gustState, this.simTime);
     const wind = this.currentWind();
+    this.wind = wind;
     const snowA = 1 - Math.exp(-dt / SNOW.inertia);
     const dustA = 1 - Math.exp(-dt / DUST.inertia);
 
     for (const p of this.particles) {
       if (p.type === "dust") this.stepDust(p, dt, wind, dustA);
       else this.stepSnow(p, dt, wind, snowA);
+    }
+    for (const g of this.gusts) {
+      g.age += dt;
+      if (g.age >= g.life) this.resetGust(g);
+      g.x += g.speed * dt;
     }
   }
 
@@ -306,6 +384,7 @@ export class Environment {
     ctx.clearRect(0, 0, this.vw, this.vh);
     ctx.globalCompositeOperation = "source-over";
 
+    for (const g of this.gusts) this.renderGust(ctx, g);
     for (const p of this.particles) {
       if (p.type === "dust") this.renderDust(ctx, p);
       else this.renderSnow(ctx, p);

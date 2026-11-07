@@ -94,10 +94,41 @@ export function drawDustSprite(ctx, sprites, z, colorIndex, x, y, size, alpha) {
   if (i1 !== i0 && t > 0) draw(group[i1], alpha * t);
 }
 
+let gustCache = null;
+
+// 横向渐变带：中间亮、两端透明，与旧版 .gust 的 linear-gradient + blur(3px) 一致
+export function ensureGustSprite() {
+  if (gustCache) return gustCache;
+  const w = 512;
+  const line = 3;
+  const pad = 6;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = line + pad * 2;
+  const g = canvas.getContext("2d");
+  const grad = g.createLinearGradient(0, 0, w, 0);
+  grad.addColorStop(0, "rgba(198,224,255,0)");
+  grad.addColorStop(0.48, "rgba(222,240,255,0.7)");
+  grad.addColorStop(1, "rgba(198,224,255,0)");
+  g.fillStyle = grad;
+  g.filter = "blur(3px)";
+  g.fillRect(0, pad, w, line);
+  gustCache = { canvas, h: line + pad * 2 };
+  return gustCache;
+}
+
+export function drawGust(ctx, sprite, x, y, length, alpha, angleDeg) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate((angleDeg * Math.PI) / 180);
+  ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+  ctx.drawImage(sprite.canvas, -length / 2, -sprite.h / 2, length, sprite.h);
+  ctx.restore();
+}
+
 // z = 1 近景用最清晰档，z = 0 远景用最模糊档；相邻两档按透明度加权，避免跨档跳变。
 export function drawSnowSprite(ctx, sprites, z, x, y, size, alpha) {
-  const pos = (1 - z) * (sprites.length - 1);
-  const i0 = Math.floor(pos);
+  const pos = (1 - z) * (sprites.length - 1);  const i0 = Math.floor(pos);
   const i1 = Math.min(sprites.length - 1, i0 + 1);
   const t = pos - i0;
 
