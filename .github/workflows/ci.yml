@@ -232,6 +232,7 @@ jobs:
           python tests/frontend/detail_race_smoke.py
           python tests/frontend/preview_async_smoke.py
           python tests/frontend/thumb_dedupe_smoke.py
+          python tests/frontend/background_isolation_smoke.py
 
   smoke:
     name: 真框架启动冒烟（手动）
