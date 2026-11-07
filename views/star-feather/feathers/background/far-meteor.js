@@ -6,7 +6,8 @@ export class FarMeteors {
   constructor() {
     this.enabled = false;
     this.timer = 0;
-    this.burstTimers = [];
+    this.burstTimers = new Set();
+    this.emberTimers = new Set();
   }
 
   start() {
@@ -21,7 +22,23 @@ export class FarMeteors {
     clearTimeout(this.timer);
     this.timer = 0;
     for (const timer of this.burstTimers) clearTimeout(timer);
-    this.burstTimers = [];
+    this.burstTimers.clear();
+    for (const timer of this.emberTimers) clearTimeout(timer);
+    this.emberTimers.clear();
+    this.clearNodes();
+  }
+
+  clearNodes() {
+    // 减动效下 CSS 把 animation 设为 none，浏览器触发的是 animationcancel 而不是
+    // animationend：节点不会自己走掉，stop 时必须主动收
+    const sky = document.querySelector(".sky");
+    const pool = $("water-meteors");
+    if (sky) {
+      for (const node of sky.querySelectorAll(".meteor:not(.reflect), .ember")) node.remove();
+    }
+    if (pool) {
+      for (const node of pool.querySelectorAll(".meteor.reflect")) node.remove();
+    }
   }
 
   schedule() {
@@ -31,10 +48,13 @@ export class FarMeteors {
       if (!this.enabled) return;
       const bursts = Math.random() < 0.3 ? 2 : 1;
       for (let i = 0; i < bursts; i += 1) {
-        this.burstTimers.push(setTimeout(() => {
+        const id = setTimeout(() => {
+          // 先删登记：删不到说明已被 stop 清掉，别在停止后补生成
+          if (!this.burstTimers.delete(id)) return;
           if (!this.enabled) return;
           this.spawn();
-        }, i * (140 + Math.random() * 220)));
+        }, i * (140 + Math.random() * 220));
+        this.burstTimers.add(id);
       }
       this.schedule();
     }, delay);
@@ -74,7 +94,9 @@ export class FarMeteors {
     const startY = (yPct / 100) * window.innerHeight;
     for (let i = 0; i < 5; i += 1) {
       const at = 0.12 + i * 0.14;
-      setTimeout(() => {
+      const id = setTimeout(() => {
+        // 与连发定时器同一套代际校验：stop 清空集合后，已排队的旧回调自行失效
+        if (!this.emberTimers.delete(id)) return;
         const along = 140 + travel * at;
         const ember = el("span", "ember");
         const size = 2 + Math.random() * 2.5;
@@ -90,6 +112,7 @@ export class FarMeteors {
         setTimeout(() => ember.remove(), 1800);
         sky.append(ember);
       }, at * duration * 1000);
+      this.emberTimers.add(id);
     }
 
     const pool = $("water-meteors");
