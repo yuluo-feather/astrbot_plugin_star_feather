@@ -189,8 +189,11 @@ function renderCards() {
   for (const card of state.cards) {
     const cell = el("button", "card-cell");
     cell.type = "button";
-    cell.append(makeThumb(card.id, !state.reversed, 150, card.cn));
+    const figure = el("div", "card-figure");
+    figure.append(makeThumb(card.id, !state.reversed, 150, card.cn));
+    cell.append(figure);
     cell.append(el("span", "card-name", card.cn));
+    if (card.en) cell.append(el("span", "card-en", card.en));
     cell.addEventListener("click", () => openCardDetail(card));
     grid.append(cell);
   }

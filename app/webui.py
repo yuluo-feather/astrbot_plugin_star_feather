@@ -243,8 +243,8 @@ class WebUI:
 
     def cards(self) -> list[dict]:
         return [
-            {"id": c["id"], "cn": c["cn"], "suit": c.get("suit", ""),
-             "num": str(c.get("num", ""))}
+            {"id": c["id"], "cn": c["cn"], "en": c.get("en", ""),
+             "suit": c.get("suit", ""), "num": str(c.get("num", ""))}
             for c in TAROT_CARDS
         ]
 

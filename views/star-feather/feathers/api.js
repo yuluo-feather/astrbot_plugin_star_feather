@@ -5,12 +5,18 @@ export const isDemo = !bridge;
 export const CARD_BACK_ID = "__back__";
 
 const DEMO_CARDS = [
-  { id: "major_00", cn: "愚者" }, { id: "major_01", cn: "魔术师" },
-  { id: "major_02", cn: "女祭司" }, { id: "major_03", cn: "皇后" },
-  { id: "major_06", cn: "恋人" }, { id: "major_10", cn: "命运之轮" },
-  { id: "major_13", cn: "死神" }, { id: "major_17", cn: "星星" },
-  { id: "major_18", cn: "月亮" }, { id: "major_19", cn: "太阳" },
-  { id: "cups_01", cn: "圣杯王牌" }, { id: "swords_01", cn: "宝剑王牌" },
+  { id: "major_00", cn: "愚者", en: "The Fool" },
+  { id: "major_01", cn: "魔术师", en: "The Magician" },
+  { id: "major_02", cn: "女祭司", en: "The High Priestess" },
+  { id: "major_03", cn: "皇后", en: "The Empress" },
+  { id: "major_06", cn: "恋人", en: "The Lovers" },
+  { id: "major_10", cn: "命运之轮", en: "Wheel of Fortune" },
+  { id: "major_13", cn: "死神", en: "Death" },
+  { id: "major_17", cn: "星星", en: "The Star" },
+  { id: "major_18", cn: "月亮", en: "The Moon" },
+  { id: "major_19", cn: "太阳", en: "The Sun" },
+  { id: "cups_01", cn: "圣杯王牌", en: "Ace of Cups" },
+  { id: "swords_01", cn: "宝剑王牌", en: "Ace of Swords" },
 ];
 
 const DEMO_RECORDS = {
@@ -83,7 +89,7 @@ const DEMO_SPREADS = [
 function demoCardDetail(cardId) {
   const card = DEMO_CARDS.find((item) => item.id === cardId) || { id: cardId, cn: cardId };
   return {
-    id: card.id, cn: card.cn, en: "Demo Card", suit: "major", num: "",
+    id: card.id, cn: card.cn, en: card.en || "Demo Card", suit: "major", num: "",
     up: DEMO_MEANING.up, down: DEMO_MEANING.down,
   };
 }
@@ -119,7 +125,7 @@ function demoApi(endpoint, params = {}) {
       const upright = index % 2 === 0;
       const meaning = upright ? DEMO_MEANING.up : DEMO_MEANING.down;
       return {
-        id: card.id, cn: card.cn, en: "Demo Card", suit: "major", num: "",
+        id: card.id, cn: card.cn, en: card.en || "Demo Card", suit: "major", num: "",
         upright, keywords: meaning.keywords, what: meaning.what,
         advice: upright ? meaning.how : meaning.turn,
         energy: upright ? "" : meaning.energy,

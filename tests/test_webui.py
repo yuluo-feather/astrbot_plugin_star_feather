@@ -201,6 +201,13 @@ def test_cards_returns_the_whole_deck():
     assert len({card["id"] for card in cards}) == 78
 
 
+def test_cards_expose_english_names():
+    _, ui = _make({})
+    cards = ui.cards()
+    assert all(isinstance(card.get("en"), str) for card in cards)
+    assert cards[0]["en"] == TAROT_CARDS[0]["en"]
+
+
 def test_card_detail_exposes_both_orientations():
     _, ui = _make({})
     detail = ui.card_detail(PICK["card"]["id"])

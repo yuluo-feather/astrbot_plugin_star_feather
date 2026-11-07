@@ -659,28 +659,52 @@ h1 {
 
 .card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 16px;
 }
 
 .card-cell {
-  padding: 8px;
+  padding: 9px;
   border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--panel);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
   color: inherit;
   font: inherit;
   cursor: pointer;
-  transition: border-color 0.15s, transform 0.15s;
+  transition: border-color var(--motion-fast) var(--ease-out),
+              background var(--motion-fast) var(--ease-out),
+              transform var(--motion-fast) var(--ease-out);
 }
 
 .card-cell:hover { border-color: var(--gold); transform: translateY(-2px); }
+.card-cell:active { transform: translateY(0) scale(0.99); }
+
+.card-figure {
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+}
+
+.card-figure img { transition: transform var(--motion-base) var(--ease-out); }
+.card-cell:hover .card-figure img { transform: scale(1.02); }
+
 .card-name {
   display: block;
-  margin-top: 6px;
-  font-size: 12px;
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: center;
+  color: var(--ink);
+}
+
+.card-en {
+  display: block;
+  margin-top: 1px;
+  font-size: 11px;
   text-align: center;
   color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .lightbox {
@@ -739,7 +763,7 @@ h1 {
   padding: 22px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--panel);
+  background: rgba(17, 22, 46, 0.94);
   box-shadow: var(--shadow), var(--inset-highlight);
 }
 
@@ -762,13 +786,20 @@ h1 {
 
 .card-modal-head {
   display: grid;
-  grid-template-columns: 150px minmax(0, 1fr);
-  gap: 18px;
+  grid-template-columns: 160px minmax(0, 1fr);
+  gap: 20px;
   align-items: start;
 }
 
-.card-modal-img { width: 150px; cursor: zoom-in; }
-.card-modal-info h2 { margin: 0; font-size: 20px; }
+.card-modal-img {
+  width: 160px;
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  cursor: zoom-in;
+}
+
+.card-modal-info h2 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: 0.02em; }
+.card-modal-info #card-modal-en { letter-spacing: 0.04em; }
 
 .seg {
   display: inline-flex;
@@ -794,6 +825,9 @@ h1 {
   box-shadow: var(--inset-highlight);
 }
 
+.seg button.active[data-upright="1"] { color: var(--gold); }
+.seg button.active[data-upright="0"] { color: var(--rev); }
+
 .card-modal-body { margin-top: 18px; }
 .kw-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
 
@@ -814,10 +848,11 @@ h1 {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 16px;
+  align-items: start;
 }
 
 .spread-card {
-  padding: 18px;
+  padding: 20px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel);
@@ -830,23 +865,25 @@ h1 {
   gap: 10px;
 }
 
-.spread-head h3 { margin: 0; font-size: 17px; }
-.spread-scenario { margin: 8px 0 14px; color: var(--muted); font-size: 13px; }
-.spread-layout { display: flex; flex-wrap: wrap; gap: 8px; }
+.spread-head h3 { margin: 0; font-size: 17px; font-weight: 600; }
+.spread-scenario { margin: 8px 0 16px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.spread-layout { display: flex; flex-direction: column; gap: 8px; }
 
 .spread-slot {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 96px;
-  flex: 1 1 96px;
-  padding: 10px;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  row-gap: 2px;
+  padding: 10px 12px;
   border: 1px dashed var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   background: var(--panel-2);
 }
 
 .spread-num {
+  grid-row: 1 / span 2;
+  align-self: start;
   display: grid;
   place-items: center;
   width: 20px;
@@ -857,8 +894,8 @@ h1 {
   font-size: 11px;
 }
 
-.spread-pos { font-size: 13px; }
-.spread-mean { color: var(--muted); font-size: 11px; }
+.spread-pos { grid-column: 2; font-size: 13px; font-weight: 600; }
+.spread-mean { grid-column: 2; color: var(--muted); font-size: 11px; line-height: 1.5; }
 
 /* 占卜预览 */
 .preview-form {
