@@ -26,5 +26,5 @@ class AstrBotProviderGateway:
             prompt=prompt, session_id=None, contexts=[], image_urls=[],
             system_prompt=system_prompt,
         )
-        text = resp.completion_text
+        text = resp.completion_text if resp is not None else ""
         return text if isinstance(text, str) else ""
