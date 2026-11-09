@@ -8,7 +8,7 @@
 # 别处抄来的「最新版」。要升版本，先按同一套全量验证跑绿，再改这里。
 pytest==9.2.0
 pytest-timeout==2.4.0
-ruff==0.17.3
+ruff==0.17.4
 mypy==2.4.1
 #
 # Pillow 不在这里：它是运行时依赖（requirements.txt），而且 CI 要按「对用户承诺的

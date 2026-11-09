@@ -7,4 +7,4 @@
 #
 # 钉的依据：本机跑通三条 smoke（Edge 口径）用的就是这一版；CI 里装 Playwright
 # 自带的 chromium，脚本会自动在 Edge 缺失时退回去。
-playwright==1.60.0
+playwright==1.64.1
