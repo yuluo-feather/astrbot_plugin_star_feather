@@ -165,7 +165,8 @@ class TestLayerDependencyDirection:
         return parts[len(prefix):] if parts[:len(prefix)] == prefix else parts
 
     @classmethod
-    def _target_paths(cls, fname: str, node: ast.AST) -> list[list[str]]:
+    def _target_paths(cls, fname: str,
+                      node: ast.Import | ast.ImportFrom) -> list[list[str]]:
         """把 Import / ImportFrom 解析成目标模块的层级路径。"""
         if isinstance(node, ast.Import):
             return [cls._normalize(alias.name.split(".")) for alias in node.names]
