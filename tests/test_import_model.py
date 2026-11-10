@@ -154,18 +154,28 @@ class TestLayerDependencyDirection:
         "ai": {"services", "render", "adapters", "app"},
         "render": {"services", "ai", "adapters", "app"},
         "services": {"app"},
+        # 适配器是基础设施，不得反向依赖组合根；core / ai 是它允许的下层。
+        "adapters": {"app"},
     }
 
     @staticmethod
-    def _target_paths(fname: str, node: ast.ImportFrom) -> list[list[str]]:
-        """把 ImportFrom 解析成目标模块的层级路径（相对导入按文件所在包上溯）。"""
+    def _normalize(parts: list[str]) -> list[str]:
+        """完全限定的插件路径收敛到层名开头，避免 `data...` 绕过检查。"""
+        prefix = _PLUGIN_PKG.split(".")
+        return parts[len(prefix):] if parts[:len(prefix)] == prefix else parts
+
+    @classmethod
+    def _target_paths(cls, fname: str, node: ast.AST) -> list[list[str]]:
+        """把 Import / ImportFrom 解析成目标模块的层级路径。"""
+        if isinstance(node, ast.Import):
+            return [cls._normalize(alias.name.split(".")) for alias in node.names]
         if node.level == 0:
-            return [node.module.split(".")] if node.module else []
+            return [cls._normalize(node.module.split("."))] if node.module else []
         pkg = os.path.dirname(fname).split("/")
         base = pkg[:len(pkg) - (node.level - 1)] if node.level > 1 else pkg
         if node.module:
-            return [base + node.module.split(".")]
-        return [base + [alias.name] for alias in node.names]
+            return [cls._normalize(base + node.module.split("."))]
+        return [cls._normalize(base + [alias.name]) for alias in node.names]
 
     def test_layers_only_depend_downwards(self):
         hits = []
@@ -176,12 +186,33 @@ class TestLayerDependencyDirection:
             with open(fpath, encoding="utf-8") as f:
                 tree = ast.parse(f.read(), filename=fname)
             for node in ast.walk(tree):
-                if not isinstance(node, ast.ImportFrom):
+                if not isinstance(node, (ast.Import, ast.ImportFrom)):
                     continue
                 for parts in self._target_paths(fname, node):
                     if parts and parts[0] in forbidden:
                         hits.append(f"{fname}:{node.lineno} -> {'.'.join(parts)}")
         assert not hits, "依赖方向反了（下层认识了上层）：" + "；".join(hits)
+
+    def test_forbidden_imports_are_reported(self, monkeypatch, tmp_path):
+        """三种绕过都该被拦下：普通 import、完全限定路径、adapters → app。"""
+        cases = [
+            ("core/_bad.py", "import services.reading\n"),
+            ("core/_bad.py",
+             "from data.plugins.astrbot_plugin_star_feather.app import handlers\n"),
+            ("adapters/_bad.py", "from ..app import handlers\n"),
+        ]
+        for fname, source in cases:
+            bad = tmp_path / "bad.py"
+            bad.write_text(source, encoding="utf-8")
+            monkeypatch.setattr(
+                sys.modules[__name__], "_plugin_sources",
+                lambda fname=fname, bad=bad: iter([(fname, str(bad))]))
+            try:
+                TestLayerDependencyDirection().test_layers_only_depend_downwards()
+            except AssertionError as e:
+                assert fname in str(e)
+            else:
+                raise AssertionError("未拦下跨层导入：" + fname + " -> " + source.strip())
 
 
 _NO_HOST_CHILD = r'''
