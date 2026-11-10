@@ -244,7 +244,7 @@
   - AI 层：`ai/`（`chain.py` 候选链、`gateway.py` Provider 端口、`budget.py` 预算、`prompts.py` / `persona.py` / `parse.py` / `hardening.py`）
   - 渲染实现：`render/`（`layout` / `assets` / `draw` / `store` / `fonts`）
   - 纯逻辑层：`core/`（`dto` / `models` / `draw` / `ports` / `intent` / `identity` / `limiter` / `spreads` / `dailylines` / `tarot_data` / `texts` / `config` / `settings`，不 import astrbot——日志走中立门面 `log.py`；判据是「能否独立单测」）
-- **设计原则（本羽给自己定下的三条）**：① 任何存储/渲染/模型失败都不阻塞主流程（`adapters/kv_utils` 吞异常、渲染回退文字版、AI 回退本地牌义（图片成功仅卡面关键词），逐级降级）；② 确定性优先——今日固定牌/解读/签文同人同日同牌相同，惊喜感由 AI 人设化口吻承担；③ 解读格式协议（【第N张·位置】标记）单源在 `ai/prompts`，`adapters/deliver` 切段与 `ai/hardening` 校验共用同一正则
+- **设计原则（本羽给自己定下的三条）**：① 任何存储/渲染/模型失败都不阻塞主流程（`adapters/kv_utils` 吞异常、渲染回退文字版、AI 回退本地牌义（图片成功仅卡面关键词；渲染失败或纯文字模式发完整牌义），逐级降级）；② 确定性优先——今日固定牌/解读/签文同人同日同牌相同，惊喜感由 AI 人设化口吻承担；③ 解读格式协议（【第N张·位置】标记）单源在 `ai/prompts`，`adapters/deliver` 切段与 `ai/hardening` 校验共用同一正则
 - **取舍与踩坑记录**：为什么这么实现、当初踩过什么，按主题记在 [`docs/design-notes/`](docs/design-notes/README.md)（一个主题一个文件）；代码注释只保留当前规则与该主题的指路
 - 牌库完整内置于 `core/tarot_data.py`，牌面图片素材位于 `assets/`（幻星集 78 张牌；牌背 `Extra/背景.png` 在素材包里保留，当前渲染以本签牌面做底、不读这张；素材以 WebP 格式内置，同名 `.png` 存在时优先用 PNG，其次 `.webp` / `.jpg`）
 - `render/draw.py` 负责拼图渲染：背景从本签抽出的牌里随机挑一张的牌面做底——cover 放大 + 深藏青遮罩（与今日牌运卡同一套风味），所有牌统一白边卡牌样式（素材底色差异不影响观感），逆位时只把内部牌面图旋转 180°（白卡框与信息区保持正向）——本羽最得意的就是这块：牌要出得好看，才配得上占卜
