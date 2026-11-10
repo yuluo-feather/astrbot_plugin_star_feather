@@ -12,7 +12,7 @@ gating 需要前者放行且不计数、后者正常计数，搅在一起会改�
 把「存储故障」与「无记录」折叠成同一个 default。经过见
 docs/design-notes/kv-degradation.md。
 """
-from astrbot.api import logger
+from ..core.log import log
 
 
 async def kv_get(kv, key: str, default=None, what: str = "KV") -> tuple:
@@ -27,7 +27,7 @@ async def kv_get(kv, key: str, default=None, what: str = "KV") -> tuple:
     try:
         return await kv.get_kv_data(key, default), True
     except Exception as e:
-        logger.warning(f"{what}读取失败，走调用点降级: {e}")
+        log.warning(f"{what}读取失败，走调用点降级: {e}")
         return default, False
 
 
@@ -37,7 +37,7 @@ async def kv_put(kv, key: str, value, what: str = "KV") -> bool:
         await kv.put_kv_data(key, value)
         return True
     except Exception as e:
-        logger.warning(f"{what}写入失败: {e}")
+        log.warning(f"{what}写入失败: {e}")
         return False
 
 
@@ -49,5 +49,5 @@ async def kv_delete(kv, key: str, what: str = "KV") -> bool:
         await kv.delete_kv_data(key)
         return True
     except Exception as e:
-        logger.warning(f"{what}删除失败: {e}")
+        log.warning(f"{what}删除失败: {e}")
         return False

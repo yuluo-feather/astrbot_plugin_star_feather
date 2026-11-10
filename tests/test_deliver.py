@@ -341,9 +341,7 @@ class TestInterpretationReuse:
     """AI 返回时已经解析过结构：发送层不再用正则重新切一遍。"""
 
     def test_structured_interpretation_skips_resplitting(self, monkeypatch):
-        from data.plugins.astrbot_plugin_star_feather.adapters import (
-            deliver as deliver_mod,
-        )
+        import data.plugins.astrbot_plugin_star_feather.adapters.deliver as deliver_mod
         from data.plugins.astrbot_plugin_star_feather.ai.parse import (
             parse_interpretation,
         )

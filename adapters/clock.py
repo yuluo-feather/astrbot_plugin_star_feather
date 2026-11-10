@@ -18,7 +18,7 @@
 import datetime
 from zoneinfo import ZoneInfo
 
-from astrbot.api import logger
+from ..core.log import log
 
 # 周中文名：日期文本用（「8月27日·周四」）
 _WEEKDAY_CN = "一二三四五六日"
@@ -40,14 +40,14 @@ def resolve_timezone(context) -> tuple[datetime.tzinfo | None, str]:
         cfg = context.get_config()
         name = str((cfg or {}).get("timezone") or "").strip()
     except Exception as e:
-        logger.warning(f"读取框架时区配置失败，日期边界改为跟随系统本地时区: {e}")
+        log.warning(f"读取框架时区配置失败，日期边界改为跟随系统本地时区: {e}")
         return None, ""
     if not name:
         return None, ""
     try:
         return ZoneInfo(name), name
     except Exception as e:
-        logger.warning(f"框架时区配置「{name}」无法解析（{e}），日期边界退回系统本地时区")
+        log.warning(f"框架时区配置「{name}」无法解析（{e}），日期边界退回系统本地时区")
         return None, ""
 
 

@@ -140,3 +140,106 @@ class TestFrameworkPurgeReachesEverything:
             "子进程导入模型自证失败：\n" + proc.stdout + "\n" + proc.stderr
         )
         assert proc.stdout.startswith("OK:"), proc.stdout
+
+
+class TestLayerDependencyDirection:
+    """依赖方向：下层不许认识上层。
+
+    `services -> adapters` 是 2026-11-10 已登记的例外：clock / kv_utils 是宿主
+    存储与时区的窄封装；移除它们需要先抽 KV / Clock 端口，另行评估。
+    """
+
+    _FORBIDDEN = {
+        "core": {"services", "ai", "render", "adapters", "app"},
+        "ai": {"services", "render", "adapters", "app"},
+        "render": {"services", "ai", "adapters", "app"},
+        "services": {"app"},
+    }
+
+    @staticmethod
+    def _target_paths(fname: str, node: ast.ImportFrom) -> list[list[str]]:
+        """把 ImportFrom 解析成目标模块的层级路径（相对导入按文件所在包上溯）。"""
+        if node.level == 0:
+            return [node.module.split(".")] if node.module else []
+        pkg = os.path.dirname(fname).split("/")
+        base = pkg[:len(pkg) - (node.level - 1)] if node.level > 1 else pkg
+        if node.module:
+            return [base + node.module.split(".")]
+        return [base + [alias.name] for alias in node.names]
+
+    def test_layers_only_depend_downwards(self):
+        hits = []
+        for fname, fpath in _plugin_sources():
+            forbidden = self._FORBIDDEN.get(fname.split("/")[0])
+            if not forbidden:
+                continue
+            with open(fpath, encoding="utf-8") as f:
+                tree = ast.parse(f.read(), filename=fname)
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.ImportFrom):
+                    continue
+                for parts in self._target_paths(fname, node):
+                    if parts and parts[0] in forbidden:
+                        hits.append(f"{fname}:{node.lineno} -> {'.'.join(parts)}")
+        assert not hits, "依赖方向反了（下层认识了上层）：" + "；".join(hits)
+
+
+_NO_HOST_CHILD = r'''
+import importlib
+import importlib.machinery
+import sys
+import types
+
+
+class _BlockHost:
+    """任何 astrbot 导入都判失败：应用层不该顺着依赖链认识宿主。"""
+
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "astrbot" or fullname.startswith("astrbot."):
+            raise ImportError("blocked host import: " + fullname)
+        return None
+
+
+sys.meta_path.insert(0, _BlockHost())
+
+# 与 conftest._install_plugin_package 同一套包链，但不装 astrbot 桩——
+# 这里要验证的正是「没有宿主也能导入 services」。
+pkg = "{pkg}"
+path = r"{plugin_root}"
+parts = pkg.split(".")
+parent = None
+for i, part in enumerate(parts):
+    name = ".".join(parts[:i + 1])
+    mod = sys.modules.get(name)
+    if mod is None:
+        mod = types.ModuleType(name)
+        mod.__path__ = [path] if i == len(parts) - 1 else []
+        mod.__package__ = name
+        mod.__spec__ = importlib.machinery.ModuleSpec(name, None, is_package=True)
+        sys.modules[name] = mod
+    if parent is not None:
+        setattr(parent, part, mod)
+    parent = mod
+
+importlib.import_module(pkg + ".services.daily")
+importlib.import_module(pkg + ".services.gating")
+left = sorted(n for n in sys.modules if n == "astrbot" or n.startswith("astrbot."))
+assert left == [], "host modules loaded while importing services: " + repr(left)
+print("OK")
+'''
+
+
+class TestApplicationLayersDoNotPullHost:
+    def test_services_import_does_not_load_astrbot(self):
+        """导入 services.daily / gating 不得触达 astrbot（间接链也要断）。
+
+        2026-11-10：`adapters/__init__.py` 曾急切导入 `astrbot_io`，只改两处
+        logger 不够；这条测试钉住的是整条导入链，不是单个 import 语句。
+        """
+        code = _NO_HOST_CHILD.format(plugin_root=_PLUGIN_ROOT, pkg=_PLUGIN_PKG)
+        proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", cwd=_TESTS_DIR)
+        assert proc.returncode == 0, (
+            "子进程验证失败（services 仍会拉起宿主）：\n" + proc.stdout + "\n" + proc.stderr
+        )
+        assert proc.stdout.startswith("OK"), proc.stdout
