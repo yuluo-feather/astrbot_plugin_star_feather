@@ -33,19 +33,19 @@
 
 ---
 
-🎀 An AstrBot tarot reading plugin — written by me. All 78 cards built in, card art from the 幻星集 set, AI deep interpretation with local meanings as fallback — no external image resources needed. Got a question? Ask the deck. Hmph, but read the docs first. Don't make me repeat myself.
+🎀 An AstrBot tarot reading plugin, written by me. All 78 cards built in, card art from the 幻星集 set, AI deep interpretation with local meanings as fallback (image mode keeps only the card's keywords), no external image resources needed. Ask the deck if you have a question.
 
 ## 🌸 Features
 
 - 🔮 **All 78 cards, built in**: 22 Major Arcana and 56 Minor Arcana (Wands, Cups, Swords and Pentacles). Every card has a Chinese and an English name and a layered meaning: upright readings give keywords, what's unfolding and what to do about it; reversed readings give keywords, the state you're in, where the energy sticks and how to turn it around.
 - 🃏 **Four spreads**: Feather Sign, Feather Hour Three, Feather Mirror and Lovers' Feather Cross. The classic names work just as well — Single Question, Time Flow, Three-Card Timeline, Three-Card Spread, Lovers' Cross.
 - 🧠 **It picks the spread for you**: Star Feather reads the keywords in your question and draws on the spread that fits. One less decision to make.
-- 🤖 **AI deep reading**: the draw goes to an LLM (pin a dedicated model with `ai.ai_provider`) and comes back as one paragraph per card plus a summary. If the call fails, the built-in meanings take over, so a reading never stalls halfway.
+- 🤖 **AI deep reading**: the draw goes to an LLM (pin a dedicated model with `ai.ai_provider`) and comes back as one paragraph per card plus a summary. If the call fails, the built-in meanings take over: image mode keeps only the card's keywords, while text-only mode sends the full per-card meanings. The reading never stalls halfway.
 - 🗣️ **A spirit with a personality**: the reading is spoken by the deck's spirit in one of three voices — tsundere, gentle or mystic (`ai.persona`; `off` restores the neutral tone). Each voice comes with its own tone rules and a sample of its signature style, which also shapes the spirit's opening line (`ai.spirit_line` can turn it off). `random` locks one voice per reading. Tone only: content and structure stay as they are.
 - 💬 **Ask in plain words**: "帮我算一卦" or "看看我今天的运势" is enough to start a reading (natural-language entry, on when `llm_tool_enabled` is set). Nothing to memorise.
 - 🗓️ **One fixed reading a day**: `/今日牌运` (aliases `/运势`, `/每日一签`) and requests carrying fortune words (运势 / 运气 / 牌运 …) return the same card and the same reading for the same person, until midnight resets it. Asking again won't reroll it. `/单抽` is separate: every call draws a fresh Feather Sign with a freshly generated reading, no cache.
 - 🎴 **Card art**: all 78 faces and the card back ship inside `assets/` (WebP; a same-name .png takes precedence when present). A white border keeps the look consistent, and a reversed card rotates only the artwork — the frame and the info bar stay upright. Cards that look good are half the reading.
-- 🛡️ **Two layers of fallback**: if the AI fails, the built-in meanings take over; if rendering fails, plain text does. Whichever part misbehaves, I won't let you go home empty-handed.
+- 🛡️ **Two layers of fallback**: if the AI fails, the built-in meanings take over (image mode keeps only the card's keywords; text-only mode sends the full per-card meanings); if rendering fails, plain text does. Whichever part misbehaves, I won't let you go home empty-handed.
 
 ## 🃏 Commands
 
@@ -175,7 +175,7 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `ai.enable_ai` | bool | `true` | Enable AI deep interpretation. When off, only built-in meanings are used (the spirit line also falls back to the pool). |
+| `ai.enable_ai` | bool | `true` | Enable AI deep interpretation. When off, only built-in meanings are used (image mode keeps only the card's keywords; text-only mode sends the full per-card meanings; the spirit line also falls back to the pool). |
 | `ai.ai_provider` | string | `(empty)` | Provider used for AI interpretation (dropdown). Empty = current session model; when set, the reading prefers this model (falls back to others if unavailable) without affecting the chat model. |
 | `ai.spirit_line` | bool | `true` | Spirit-line toggle. When on, every reading opens with one line from the spirit (AI-generated in the chosen persona, falling back to the day's pool line when AI is unavailable); turn it off to skip the line entirely (the sign-off on the `/今日牌运` poster is hidden too) — one less AI call and one less lead-in message. |
 | `ai.ai_timeout` | int | `30` | Per-request timeout for AI calls — the spirit line and the deep reading (seconds). On timeout the plugin tries the next available provider; if all fail it falls back to built-in meanings. Set to `0` to leave a single request uncapped (the total AI budget and the spirit-line stage cap still apply); any other value is floored at 5 seconds. |
@@ -325,7 +325,7 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 
 ## 🌙 Notes
 
-- AI reading follows a **provider chain**: pinned model (`ai.ai_provider`) → current session provider → global default (`ai.all_providers_fallback` is off by default; turn it on to enumerate every loaded provider); if all fail or none is configured, built-in meanings are used automatically so the reading never stalls
+- AI reading follows a **provider chain**: pinned model (`ai.ai_provider`) → current session provider → global default (`ai.all_providers_fallback` is off by default; turn it on to enumerate every loaded provider); if all fail or none is configured, built-in meanings are used automatically (image mode keeps only the card's keywords) so the reading never stalls
 - Readings are for entertainment only — take them with a grain of salt 🍀 The cards point at a direction; the walking is yours. Laying them out clearly is my part.
 
 ---
