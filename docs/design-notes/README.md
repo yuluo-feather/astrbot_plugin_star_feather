@@ -13,6 +13,7 @@
 | [ai-chain-and-budget.md](ai-chain-and-budget.md) | AI 候选链与总预算 |
 | [kv-degradation.md](kv-degradation.md) | KV 降级契约：存储故障与无记录的区分 |
 | [host-decoupling.md](host-decoupling.md) | 宿主解耦任务书：日志 / Event DTO / LLM 网关三阶段与第二宿主准入条件 |
+| [doc-voice.md](doc-voice.md) | 文档口吻与精简规则：口吻配额、破折号与 AI 味句式 |
 
 约定：
 

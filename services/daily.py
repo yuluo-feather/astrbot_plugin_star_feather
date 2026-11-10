@@ -8,7 +8,7 @@
 - KV 读写全部 try-except 静默降级：任何存储故障不阻塞占卜主流程。
 - 缓存结构与三条写回保护的来历见 docs/design-notes/daily-cache.md。
 
-说人话：今天这张牌，本羽说了算——问一百遍也是它，别想改命。
+说人话：今天这张牌，本羽说了算。问一百遍也是它，别想改命。
 """
 import asyncio
 import hashlib
