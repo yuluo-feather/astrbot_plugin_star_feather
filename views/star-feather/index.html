@@ -73,8 +73,9 @@
     <button id="connection-retry" class="ghost" type="button">重试连接</button>
   </div>
 
-  <nav class="tabs" role="tablist">
-    <button class="tab active" data-tab="daily" type="button">
+  <nav class="tabs" role="tablist" aria-label="观测台页面">
+    <button id="tab-daily" class="tab active" data-tab="daily" type="button"
+            role="tab" aria-selected="true" aria-controls="panel-daily" tabindex="0">
       <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
            stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <rect x="4" y="5" width="16" height="15" rx="2" />
@@ -82,7 +83,8 @@
       </svg>
       <span>今日牌运</span>
     </button>
-    <button class="tab" data-tab="cards" type="button">
+    <button id="tab-cards" class="tab" data-tab="cards" type="button"
+            role="tab" aria-selected="false" aria-controls="panel-cards" tabindex="-1">
       <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
            stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <rect x="4" y="6" width="12" height="15" rx="2" />
@@ -90,7 +92,8 @@
       </svg>
       <span>牌意图鉴</span>
     </button>
-    <button class="tab" data-tab="spreads" type="button">
+    <button id="tab-spreads" class="tab" data-tab="spreads" type="button"
+            role="tab" aria-selected="false" aria-controls="panel-spreads" tabindex="-1">
       <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
            stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <rect x="4" y="4" width="7" height="7" rx="1.5" />
@@ -100,7 +103,8 @@
       </svg>
       <span>牌阵介绍</span>
     </button>
-    <button class="tab" data-tab="preview" type="button">
+    <button id="tab-preview" class="tab" data-tab="preview" type="button"
+            role="tab" aria-selected="false" aria-controls="panel-preview" tabindex="-1">
       <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
            stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z" />
@@ -110,7 +114,7 @@
   </nav>
 
   <main>
-    <section id="panel-daily" class="panel">
+    <section id="panel-daily" class="panel" role="tabpanel" aria-labelledby="tab-daily" aria-hidden="false">
       <div id="stats" class="stats"></div>
       <p id="daily-note" class="hint hidden"></p>
       <div class="split">
@@ -121,7 +125,7 @@
       </div>
     </section>
 
-    <section id="panel-cards" class="panel hidden">
+    <section id="panel-cards" class="panel hidden" role="tabpanel" aria-labelledby="tab-cards" aria-hidden="true">
       <div class="cards-toolbar">
         <label class="switch">
           <input type="checkbox" id="reversed" />
@@ -133,11 +137,11 @@
       <div class="card-grid" id="card-grid"></div>
     </section>
 
-    <section id="panel-spreads" class="panel hidden">
+    <section id="panel-spreads" class="panel hidden" role="tabpanel" aria-labelledby="tab-spreads" aria-hidden="true">
       <div class="spread-grid" id="spread-grid"></div>
     </section>
 
-    <section id="panel-preview" class="panel hidden">
+    <section id="panel-preview" class="panel hidden" role="tabpanel" aria-labelledby="tab-preview" aria-hidden="true">
       <div class="preview-form">
         <div class="preview-row">
           <label class="field">

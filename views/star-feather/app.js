@@ -23,6 +23,8 @@ const SUIT_NAMES = {
   major: "大阿卡纳", wands: "权杖", cups: "圣杯", swords: "宝剑", pentacles: "星币",
 };
 const SUBTITLE_DEFAULT = "今日牌运与牌面，只读";
+const TABS = new Set(["daily", "cards", "spreads", "preview"]);
+let currentTab = "daily";
 
 // ---- 概览 ----
 const SEND_MODES = { forward: "合并转发", plain: "图文", text_only: "纯文字" };
@@ -597,17 +599,57 @@ function closeLightbox() {
 }
 
 // ---- 装配 ----
-function switchTab(tab) {
-  for (const button of document.querySelectorAll(".tab")) {
-    button.classList.toggle("active", button.dataset.tab === tab);
+function tabFromURL() {
+  const raw = new URLSearchParams(window.location.search).get("tab");
+  return TABS.has(raw) ? raw : "daily";
+}
+
+function syncTabURL(tab, { replace = false } = {}) {
+  const url = new URL(window.location.href);
+  if (tab === "daily") url.searchParams.delete("tab");
+  else url.searchParams.set("tab", tab);
+  if (url.href === window.location.href) return;
+  history[replace ? "replaceState" : "pushState"](null, "", url);
+}
+
+function normalizeTabURL() {
+  const raw = new URLSearchParams(window.location.search).get("tab");
+  if (raw === null || TABS.has(raw)) return;
+  const url = new URL(window.location.href);
+  url.searchParams.delete("tab");
+  history.replaceState(null, "", url);
+}
+
+function resetScroll() {
+  const reduce = window.matchMedia
+    && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
+  for (const node of document.querySelectorAll(".list, .detail")) {
+    node.scrollTop = 0;
   }
-  $("panel-daily").classList.toggle("hidden", tab !== "daily");
-  $("panel-cards").classList.toggle("hidden", tab !== "cards");
-  $("panel-spreads").classList.toggle("hidden", tab !== "spreads");
-  $("panel-preview").classList.toggle("hidden", tab !== "preview");
-  if (tab === "cards") loadCards();
-  if (tab === "spreads") loadSpreads();
-  if (tab === "preview") loadPreviewForm();
+}
+
+function switchTab(tab, { push = false, scroll = true, load = true } = {}) {
+  const next = TABS.has(tab) ? tab : "daily";
+  const changed = next !== currentTab;
+  currentTab = next;
+  for (const button of document.querySelectorAll(".tab")) {
+    const active = button.dataset.tab === next;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+    button.tabIndex = active ? 0 : -1;
+  }
+  for (const panel of document.querySelectorAll(".panel")) {
+    const active = panel.id === `panel-${next}`;
+    panel.classList.toggle("hidden", !active);
+    panel.setAttribute("aria-hidden", String(!active));
+  }
+  if (push) syncTabURL(next);
+  if (scroll && changed) resetScroll();
+  if (!load) return;
+  if (next === "cards") loadCards();
+  if (next === "spreads") loadSpreads();
+  if (next === "preview") loadPreviewForm();
 }
 
 async function refresh() {
@@ -736,9 +778,28 @@ async function boot() {
   $("version").textContent = "";
   initBackground();
   startBackground();
+  normalizeTabURL();
+  switchTab(tabFromURL(), { scroll: false, load: false });
   for (const button of document.querySelectorAll(".tab")) {
-    button.addEventListener("click", () => switchTab(button.dataset.tab));
+    button.addEventListener("click", () => switchTab(button.dataset.tab, { push: true }));
   }
+  const tablist = document.querySelector(".tabs");
+  tablist.addEventListener("keydown", (event) => {
+    const tabs = [...tablist.querySelectorAll('[role="tab"]')];
+    const index = tabs.indexOf(document.activeElement);
+    if (index < 0) return;
+    let target = null;
+    if (event.key === "ArrowRight") target = (index + 1) % tabs.length;
+    else if (event.key === "ArrowLeft") target = (index - 1 + tabs.length) % tabs.length;
+    else if (event.key === "Home") target = 0;
+    else if (event.key === "End") target = tabs.length - 1;
+    if (target === null) return;
+    event.preventDefault();
+    const next = tabs[target];
+    switchTab(next.dataset.tab, { push: true });
+    next.focus();
+  });
+  window.addEventListener("popstate", () => switchTab(tabFromURL()));
   $("refresh").addEventListener("click", refresh);
   $("reversed").addEventListener("change", (event) => {
     state.reversed = event.target.checked;
@@ -800,6 +861,7 @@ async function boot() {
 
   if (status.state === "connected" || status.state === "demo") {
     await refresh();
+    reloadVisiblePanel();
   }
   // context 可能在 connect 返回与订阅之间到达
   if (status.state !== "connected" && connectionState() === "connected") {
