@@ -85,14 +85,21 @@ FAKE_BRIDGE = r"""
       if (endpoint === "cards") {
         calls.cards += 1;
         if (scenario === "cards") {
-          await wait(400);
+          await wait(1200);
           if (calls.cards === 1) throw new Error("牌面接口失败");
         }
         return records.cards;
       }
+      if (endpoint === "spreads") {
+        if (scenario === "preview") await wait(1200);
+        return records.spreads;
+      }
       if (endpoint === "card-image") {
         calls.image += 1;
         if (params.w === 420) calls.image420 += 1;
+        if (scenario === "decode" && params.w === 420) {
+          return { mime: "image/png", base64: "AAAA" };
+        }
         if (scenario === "lightbox" && params.w === 420) {
           await wait(400);
           if (calls.image420 === 1) throw new Error("大图失败");
@@ -148,6 +155,11 @@ def main():
             freshness = page.locator("#freshness").inner_text()
             check("base.freshness", "概览" in freshness and "列表" in freshness, freshness)
             check("base.date", "2026-11-21" in freshness, freshness)
+            check(
+                "base.freshness_values",
+                "概览 —" not in freshness and "列表 —" not in freshness,
+                freshness,
+            )
 
             page.click("#refresh")
             page.wait_for_selector("#error-detail:not(.hidden)", timeout=5000)
@@ -179,6 +191,10 @@ def main():
                 "cross.no_old",
                 page.locator(".detail-title h2").count() == 0,
             )
+            check(
+                "cross.retry",
+                page.locator("#error-detail .error-retry").is_visible(),
+            )
             page.close()
 
             page = open_page(browser, "cards")
@@ -200,6 +216,39 @@ def main():
             page.click("#error-cards .error-retry")
             page.wait_for_selector(".card-cell", timeout=5000)
             check("cards.retry", page.locator("#error-cards").is_hidden())
+            check(
+                "cards.freshness",
+                "牌面" in page.locator("#freshness").inner_text(),
+            )
+            page.close()
+
+            page = open_page(browser, "preview")
+            page.wait_for_selector(".user", timeout=5000)
+            page.click("#tab-preview")
+            page.wait_for_timeout(200)
+            check(
+                "preview.loading",
+                page.locator("#preview-spread").is_disabled(),
+            )
+            check(
+                "preview.loading_text",
+                "牌阵加载中" in page.locator("#preview-spread").inner_text(),
+            )
+            page.click("#preview-draw")
+            check(
+                "preview.blocked",
+                "牌阵还在加载" in page.locator("#toast").inner_text(),
+            )
+            page.wait_for_function(
+                "!document.querySelector('#preview-spread').disabled"
+                " && document.querySelectorAll('#preview-spread option').length > 0",
+                timeout=5000,
+            )
+            check(
+                "preview.ready",
+                page.locator("#preview-spread option").first.get_attribute("value")
+                == "羽签",
+            )
             page.close()
 
             page = open_page(browser, "lightbox")
@@ -222,6 +271,25 @@ def main():
             page.click("#lightbox-retry")
             page.wait_for_selector("#lightbox-img[src^='data:']", timeout=3000)
             check("lightbox.retry", page.locator("#lightbox-status").is_hidden())
+            page.close()
+
+            page = open_page(browser, "decode")
+            page.wait_for_selector(".user", timeout=5000)
+            page.click("#tab-cards")
+            page.wait_for_selector(".card-cell", timeout=5000)
+            page.click(".card-cell")
+            page.wait_for_selector("#card-modal:not(.hidden)", timeout=3000)
+            page.wait_for_timeout(300)
+            page.click("#card-modal-img")
+            page.wait_for_function(
+                "document.querySelector('#lightbox-status')?.textContent"
+                " === '大图加载失败'",
+                timeout=5000,
+            )
+            check(
+                "decode.retry_visible",
+                page.locator("#lightbox-retry").is_visible(),
+            )
             page.close()
 
             page = open_page(browser, "slow")

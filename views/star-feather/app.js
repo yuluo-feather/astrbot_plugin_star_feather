@@ -25,8 +25,8 @@ const state = {
 let detailSeq = 0;
 let refreshSeq = 0;
 let dataEpoch = 0;
-let cardsPromise = null;
-let spreadsPromise = null;
+let cardsRequest = null;
+let spreadsRequest = null;
 let lightboxTarget = null;
 
 const SUIT_NAMES = {
@@ -51,9 +51,14 @@ function formatDay(value) {
 function renderFreshness() {
   const day = state.overview && state.overview.date
     ? formatDay(state.overview.date) : "";
-  const prefix = day ? `数据 ${day} · ` : "";
-  $("freshness").textContent = `${prefix}概览 ${formatTime(state.fetchedAt.overview)}`
-    + ` · 列表 ${formatTime(state.fetchedAt.daily)}`;
+  const parts = [];
+  if (day) parts.push(`数据 ${day}`);
+  parts.push(`概览 ${formatTime(state.fetchedAt.overview)}`);
+  parts.push(`列表 ${formatTime(state.fetchedAt.daily)}`);
+  for (const [key, label] of [["detail", "详情"], ["cards", "牌面"], ["spreads", "牌阵"]]) {
+    if (state.fetchedAt[key]) parts.push(`${label} ${formatTime(state.fetchedAt[key])}`);
+  }
+  $("freshness").textContent = parts.join(" · ");
 }
 
 function setError(key, message, retry) {
@@ -71,9 +76,9 @@ function clearError(key) {
   setError(key, "", null);
 }
 
-function delayedPlaceholder(box, build, ms = 150) {
+function delayedPlaceholder(box, build, isCurrent = () => true, ms = 150) {
   const timer = setTimeout(() => {
-    box.replaceChildren(build());
+    if (isCurrent()) box.replaceChildren(build());
   }, ms);
   return () => clearTimeout(timer);
 }
@@ -166,7 +171,9 @@ async function openDaily(uid, { preserve = false } = {}) {
   let cancelSkeleton = () => {};
   if (!preserve || !sameDetail) {
     box.replaceChildren();
-    cancelSkeleton = delayedPlaceholder(box, detailSkeleton);
+    cancelSkeleton = delayedPlaceholder(
+      box, detailSkeleton,
+      () => seq === detailSeq && state.selected === uid);
   }
   try {
     const data = await apiGet("daily/detail", { uid });
@@ -174,6 +181,7 @@ async function openDaily(uid, { preserve = false } = {}) {
     if (!data) throw new Error("没有这条记录");
     state.detailUid = uid;
     state.fetchedAt.detail = Date.now();
+    renderFreshness();
     renderDetail(data);
   } catch (error) {
     if (seq !== detailSeq || state.selected !== uid) return;
@@ -186,6 +194,7 @@ async function openDaily(uid, { preserve = false } = {}) {
       const text = previousUid && previousUid !== uid
         ? `该用户读取失败：${message}` : message;
       box.replaceChildren(el("p", "empty", text));
+      setError("detail", text, () => openDaily(uid));
     }
   } finally {
     cancelSkeleton();
@@ -258,18 +267,24 @@ async function loadCards({ force = false } = {}) {
   }
   const box = $("card-grid");
   const cancel = state.cards.length ? () => {} : delayedPlaceholder(
-    box, () => el("p", "empty loading", "牌面加载中…"));
+    box, () => el("p", "empty loading", "牌面加载中…"),
+    () => epoch === dataEpoch);
+  let request = null;
   try {
-    if (!cardsPromise) {
-      cardsPromise = apiGet("cards")
-        .then((data) => data.items || [])
-        .finally(() => { cardsPromise = null; });
+    if (!cardsRequest || cardsRequest.epoch !== dataEpoch) {
+      const requestEpoch = dataEpoch;
+      cardsRequest = {
+        epoch: requestEpoch,
+        promise: apiGet("cards").then((data) => data.items || []),
+      };
     }
-    const items = await cardsPromise;
-    if (epoch !== dataEpoch) return;
+    request = cardsRequest;
+    const items = await request.promise;
+    if (request.epoch !== dataEpoch) return;
     state.cards = items;
     state.cardsLoaded = true;
     state.fetchedAt.cards = Date.now();
+    renderFreshness();
     clearError("cards");
     renderSuitFilter();
     renderCards();
@@ -283,6 +298,7 @@ async function loadCards({ force = false } = {}) {
              () => loadCards({ force: true }));
   } finally {
     cancel();
+    if (cardsRequest === request) cardsRequest = null;
   }
 }
 
@@ -401,33 +417,43 @@ function closeCardDetail() {
 
 // ---- 牌阵介绍 ----
 async function ensureSpreads({ force = false } = {}) {
-  const epoch = dataEpoch;
   if (state.spreadsLoaded && !force) {
     return { ok: true, items: state.spreads };
   }
+  let request = null;
   try {
-    if (!spreadsPromise) {
-      spreadsPromise = apiGet("spreads")
-        .then((data) => data.items || [])
-        .finally(() => { spreadsPromise = null; });
+    if (!spreadsRequest || spreadsRequest.epoch !== dataEpoch) {
+      const requestEpoch = dataEpoch;
+      spreadsRequest = {
+        epoch: requestEpoch,
+        promise: apiGet("spreads").then((data) => data.items || []),
+      };
     }
-    const items = await spreadsPromise;
-    if (epoch !== dataEpoch) return { ok: false, stale: true };
+    request = spreadsRequest;
+    const items = await request.promise;
+    if (request.epoch !== dataEpoch) return { ok: false, stale: true };
     state.spreads = items;
     state.spreadsLoaded = true;
     state.fetchedAt.spreads = Date.now();
+    renderFreshness();
     clearError("spreads");
     return { ok: true, items };
   } catch (error) {
-    if (epoch !== dataEpoch) return { ok: false, stale: true };
+    if (!request || request.epoch !== dataEpoch) {
+      return { ok: false, stale: true };
+    }
     return { ok: false, error };
+  } finally {
+    if (spreadsRequest === request) spreadsRequest = null;
   }
 }
 
 async function loadSpreads({ force = false } = {}) {
+  const epoch = dataEpoch;
   const box = $("spread-grid");
   const cancel = state.spreads.length ? () => {} : delayedPlaceholder(
-    box, () => el("p", "empty loading", "牌阵加载中…"));
+    box, () => el("p", "empty loading", "牌阵加载中…"),
+    () => dataEpoch === epoch);
   const result = await ensureSpreads({ force });
   cancel();
   if (result.stale) return;
@@ -451,9 +477,21 @@ let previewSeq = 0;
 async function loadPreviewForm({ force = false } = {}) {
   const select = $("preview-spread");
   if (select.dataset.ready === "1" && !force) return;
+  select.dataset.ready = "";
+  select.disabled = true;
+  const loading = el("option", "", "牌阵加载中…");
+  loading.value = "";
+  select.replaceChildren(loading);
   const result = await ensureSpreads({ force });
-  if (result.stale) return;
+  if (result.stale) {
+    select.disabled = false;
+    return;
+  }
+  select.disabled = false;
   if (!result.ok) {
+    const failed = el("option", "", "牌阵加载失败");
+    failed.value = "";
+    select.replaceChildren(failed);
     setError("preview",
              `牌阵加载失败：${result.error.message || "读取失败"}`,
              () => loadPreviewForm({ force: true }));
@@ -479,8 +517,12 @@ async function loadPreviewForm({ force = false } = {}) {
 
 async function drawPreview() {
   if (previewBusy) return;
-  const spread = $("preview-spread").value;
-  if (!spread) return;
+  const select = $("preview-spread");
+  const spread = select.value;
+  if (!spread) {
+    showToast(select.disabled ? "牌阵还在加载，请稍候" : "暂无可选牌阵");
+    return;
+  }
   const seq = ++previewSeq;
   previewBusy = true;
   previewAiSeq += 1;  // 抽牌一开始就作废上一轮 AI，不必等抽牌结果返回
@@ -734,7 +776,15 @@ async function openLightbox(card, upright = !state.reversed) {
     const url = await thumbURL(card.id, upright, 420);
     if (seq !== lightboxSeq) return;  // 已关闭或已换牌
     if (!url) throw new Error("empty image");
+    const loaded = new Promise((resolve, reject) => {
+      img.addEventListener("load", resolve, { once: true });
+      img.addEventListener("error", () => reject(new Error("image load failed")), {
+        once: true,
+      });
+    });
     img.src = url;
+    await loaded;
+    if (seq !== lightboxSeq) return;
     status.classList.add("hidden");
   } catch {
     if (seq !== lightboxSeq) return;
@@ -867,16 +917,19 @@ async function refresh({ announce = false } = {}) {
       }
     }
     if (seq === refreshSeq && state.spreads.length) renderSpreads();
+    const retries = [];
     if (seq === refreshSeq && state.errors.cards) {
-      loadCards({ force: true });
+      retries.push(loadCards({ force: true }));
     }
     if (seq === refreshSeq && state.errors.spreads) {
-      loadSpreads({ force: true });
+      retries.push(loadSpreads({ force: true }));
     }
     if (seq === refreshSeq && state.errors.preview) {
-      loadPreviewForm({ force: true });
+      retries.push(loadPreviewForm({ force: true }));
     }
-    if (announce && seq === refreshSeq) {
+    if (retries.length) await Promise.all(retries);
+    if (seq !== refreshSeq) return;
+    if (announce) {
       const keys = Object.keys(state.errors);
       const failed = keys.filter((key) => state.errors[key]);
       if (!failed.length) showToast("已刷新");
@@ -928,6 +981,8 @@ function clearHostData() {
   refreshSeq += 1;
   detailSeq += 1;
   dataEpoch += 1;
+  cardsRequest = null;
+  spreadsRequest = null;
   closeLightbox();
   closeCardDetail();
   state.items = [];
@@ -946,6 +1001,12 @@ function clearHostData() {
   };
   for (const key of Object.keys(state.errors)) clearError(key);
   resetPreview();
+  const select = $("preview-spread");
+  if (select) {
+    select.dataset.ready = "";
+    select.disabled = false;
+    select.replaceChildren();
+  }
   renderFreshness();
   const button = $("refresh");
   button.classList.remove("is-loading");
