@@ -27,8 +27,15 @@ FAKE_BRIDGE = r"""
   const ready = new Promise((resolve) => { resolveReady = resolve; });
   const markReady = () => { resolved = true; resolveReady(); };
 
-  if (scenario === "ready" || scenario === "light") setTimeout(markReady, 50);
+  if (scenario === "ready" || scenario === "light" || scenario === "hang"
+      || scenario === "drop") {
+    setTimeout(markReady, 50);
+  }
   if (scenario === "late") setTimeout(markReady, 4200);
+  if (scenario === "drop") {
+    setTimeout(() => { window.__starFeatherBridge = window.AstrBotPluginView; }, 0);
+    setTimeout(() => { delete window.AstrBotPluginView; }, 1500);
+  }
   if (scenario === "light") {
     const applyTheme = () => {
       if (document.documentElement) {
@@ -74,6 +81,7 @@ FAKE_BRIDGE = r"""
     t: (_key, fallback) => fallback,
     apiGet: async (endpoint) => {
       if (!resolved) throw new Error("bridge not ready");
+      if (scenario === "hang") return new Promise(() => {});
       if (!(endpoint in records)) throw new Error("unknown endpoint " + endpoint);
       return records[endpoint];
     },
@@ -167,16 +175,21 @@ def main():
                 "late.degraded_first",
                 page.locator("#connection-banner").is_visible(),
             )
+            page.click('.tab[data-tab="cards"]')
+            page.wait_for_timeout(200)
+            check("late.panel_empty", page.locator(".card-cell").count() == 0)
             page.wait_for_function(
                 "document.querySelector('#connection-banner')"
                 ".classList.contains('hidden')",
                 timeout=5000,
             )
-            page.wait_for_selector(".user", timeout=5000)
+            page.wait_for_selector(".user", state="attached", timeout=5000)
+            page.wait_for_selector(".card-cell", timeout=5000)
             check(
                 "late.recovered",
                 page.locator("#connection-banner").is_hidden()
-                and page.locator(".user").count() == 1,
+                and page.locator(".user").count() == 1
+                and page.locator(".card-cell").count() == 1,
             )
             page.close()
 
@@ -202,6 +215,48 @@ def main():
                 != "rgb(255, 255, 255)",
             )
             check("light.banner", page.locator("#connection-banner").is_hidden())
+            page.close()
+
+            page = browser.new_page(viewport={"width": 1180, "height": 900})
+            page.add_init_script(FAKE_BRIDGE)
+            page.goto(base + "/?host=hang", wait_until="load")
+            page.wait_for_timeout(500)
+            message = page.evaluate(
+                "async () => {"
+                "  const mod = await import('/feathers/api.js');"
+                "  try {"
+                "    await mod.apiGet('overview', {}, { timeoutMs: 100 });"
+                "    return 'resolved';"
+                "  } catch (error) {"
+                "    return error.message;"
+                "  }"
+                "}"
+            )
+            check("hang.timeout", "请求超时" in message)
+            page.close()
+
+            page = browser.new_page(viewport={"width": 1180, "height": 900})
+            page.add_init_script(FAKE_BRIDGE)
+            page.goto(base + "/?host=drop", wait_until="load")
+            page.wait_for_selector(".user", timeout=5000)
+            page.wait_for_timeout(1800)
+            page.click("#refresh")
+            page.wait_for_timeout(300)
+            check("drop.banner", page.locator("#connection-banner").is_visible())
+            check("drop.cleared", page.locator(".user").count() == 0)
+            check(
+                "drop.empty",
+                "连接 AstrBot 后显示今日牌运"
+                in page.locator("#daily-list").inner_text(),
+            )
+            page.evaluate("window.AstrBotPluginView = window.__starFeatherBridge")
+            page.click("#connection-retry")
+            page.wait_for_selector(".user", timeout=5000)
+            check(
+                "drop.recovered",
+                page.locator("#connection-banner").is_hidden()
+                and page.locator(".user").count() == 1,
+            )
             page.close()
 
             browser.close()

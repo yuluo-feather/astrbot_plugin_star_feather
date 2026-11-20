@@ -4,6 +4,7 @@
 const TITLE_KEY = "views.star-feather.title";
 const DEFAULT_TITLE = "星羽塔罗 · 观测台";
 const CONNECT_TIMEOUT_MS = 3000;
+const REQUEST_TIMEOUT_MS = 20000;
 const BRIDGE_METHODS = ["ready", "t", "apiGet", "apiPost"];
 
 const bridgeAtLoad = window.AstrBotPluginView;
@@ -15,6 +16,7 @@ export const CARD_BACK_ID = "__back__";
 let state = isDemo ? "demo" : "connecting";
 let lastError = "";
 let readyPromise = null;
+let readyBridge = null;
 const listeners = new Set();
 
 const DEMO_CARDS = [
@@ -174,7 +176,12 @@ function notify(next, error = "") {
   lastError = error;
   for (const listener of listeners) {
     try {
-      listener(state, error);
+      const result = listener(state, error);
+      if (result && typeof result.catch === "function") {
+        result.catch((listenerError) => {
+          console.error("connection listener failed", listenerError);
+        });
+      }
     } catch (listenerError) {
       // 监听方异常不该影响连接状态本身
       console.error("connection listener failed", listenerError);
@@ -195,6 +202,11 @@ export function onConnectionChange(listener) {
   return () => listeners.delete(listener);
 }
 
+export function connectionTitle() {
+  const bridge = getBridge();
+  return usableBridge(bridge) ? titleOf(bridge) : DEFAULT_TITLE;
+}
+
 function titleOf(bridge) {
   try {
     return bridge.t(TITLE_KEY, DEFAULT_TITLE) || DEFAULT_TITLE;
@@ -204,7 +216,8 @@ function titleOf(bridge) {
 }
 
 function waitReady(bridge) {
-  if (!readyPromise) {
+  if (!readyPromise || readyBridge !== bridge) {
+    readyBridge = bridge;
     readyPromise = Promise.resolve()
       .then(() => bridge.ready())
       .then(() => {
@@ -212,16 +225,22 @@ function waitReady(bridge) {
       })
       .catch((error) => {
         readyPromise = null;
+        readyBridge = null;
         throw error;
       });
   }
   return readyPromise;
 }
 
-function withTimeout(promise, ms) {
+function withTimeout(promise, ms, label = "操作") {
+  if (!ms) return promise;
   let timer = 0;
   const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error("连接 AstrBot 超时")), ms);
+    timer = setTimeout(() => {
+      const error = new Error(`${label}超时`);
+      error.code = "TIMEOUT";
+      reject(error);
+    }, ms);
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
@@ -231,8 +250,7 @@ export async function connect({ timeoutMs = CONNECT_TIMEOUT_MS } = {}) {
     return { state, title: DEFAULT_TITLE, error: "" };
   }
   if (state === "connected") {
-    const bridge = getBridge();
-    return { state, title: bridge ? titleOf(bridge) : DEFAULT_TITLE, error: "" };
+    return { state, title: connectionTitle(), error: "" };
   }
   const bridge = getBridge();
   if (!usableBridge(bridge)) {
@@ -241,13 +259,15 @@ export async function connect({ timeoutMs = CONNECT_TIMEOUT_MS } = {}) {
   }
   notify("connecting");
   try {
-    await withTimeout(waitReady(bridge), timeoutMs);
+    await withTimeout(waitReady(bridge), timeoutMs, "连接 AstrBot ");
   } catch (error) {
     const message = (error && error.message) || "连接 AstrBot 失败";
     if (state !== "connected") notify("degraded", message);
     return { state, title: DEFAULT_TITLE, error: message };
   }
-  return { state, title: titleOf(bridge), error: "" };
+  // 复用的 readyPromise 可能早已兑现，成功分支不会再次触发。
+  if (state !== "connected" && state !== "demo") notify("connected");
+  return { state, title: connectionTitle(), error: "" };
 }
 
 function requireBridge() {
@@ -263,16 +283,32 @@ function requireBridge() {
   throw new Error(lastError || "宿主连接不可用");
 }
 
-export async function apiGet(endpoint, params = {}) {
-  const bridge = requireBridge();
-  if (!bridge) return demoApi(endpoint, params);
-  return bridge.apiGet(endpoint, params);
+async function callBridge(call, timeoutMs) {
+  try {
+    return await withTimeout(
+      Promise.resolve().then(call), timeoutMs, "请求",
+    );
+  } catch (error) {
+    // 业务错误交给调用方按区域处理；只有桥接本身没了才算断连。
+    if (!usableBridge(getBridge())) notify("degraded", "宿主桥接已断开");
+    throw error;
+  }
 }
 
-export async function apiPost(endpoint, body = {}) {
+export async function apiGet(
+  endpoint, params = {}, { timeoutMs = REQUEST_TIMEOUT_MS } = {},
+) {
+  const bridge = requireBridge();
+  if (!bridge) return demoApi(endpoint, params);
+  return callBridge(() => bridge.apiGet(endpoint, params), timeoutMs);
+}
+
+export async function apiPost(
+  endpoint, body = {}, { timeoutMs = REQUEST_TIMEOUT_MS } = {},
+) {
   const bridge = requireBridge();
   if (!bridge) return demoApi(endpoint, body);
-  return bridge.apiPost(endpoint, body);
+  return callBridge(() => bridge.apiPost(endpoint, body), timeoutMs);
 }
 
 export function demoBackURL(width) {

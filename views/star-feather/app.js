@@ -2,7 +2,8 @@
 // 数据访问在 feathers/api.js，DOM 工具在 feathers/dom.js；这里只放页面功能与装配。
 import { $, el, showToast } from "./feathers/dom.js";
 import {
-  apiGet, apiPost, connect, connectionState, onConnectionChange,
+  apiGet, apiPost, connect, connectionState, connectionTitle,
+  onConnectionChange,
 } from "./feathers/api.js";
 import { init as initBackground, start as startBackground } from "./feathers/background/index.js";
 import {
@@ -16,6 +17,7 @@ const state = {
   listIndexedTotal: 0, listShown: 0, listTruncated: false,
 };
 let detailSeq = 0;
+let refreshSeq = 0;
 
 const SUIT_NAMES = {
   major: "大阿卡纳", wands: "权杖", cups: "圣杯", swords: "宝剑", pentacles: "星币",
@@ -398,7 +400,7 @@ async function requestPreviewAI() {
       spread: preview.spread,
       question: preview.question,
       picks: preview.picks.map((pick) => ({ id: pick.id, upright: pick.upright })),
-    });
+    }, { timeoutMs: 0 });  // AI 解读耗时由服务端预算控制，客户端不另设超时
     if (seq !== previewAiSeq || state.preview !== preview) return;
     preview.ai = data;
   } catch (error) {
@@ -609,6 +611,7 @@ function switchTab(tab) {
 }
 
 async function refresh() {
+  const seq = ++refreshSeq;
   const button = $("refresh");
   button.classList.add("is-loading");
   button.disabled = true;
@@ -616,16 +619,18 @@ async function refresh() {
     if (!$("panel-preview").classList.contains("hidden")) resetPreview();
     try {
       const overview = await apiGet("overview");
+      if (seq !== refreshSeq) return;
       state.overview = overview;
       state.aiEnabled = Boolean(overview.settings && overview.settings.enable_ai);
       $("version").textContent = overview.version ? `v${overview.version}` : "";
       renderStats(overview);
       updatePreviewAIButton();
     } catch (error) {
-      showToast(error.message || "概览加载失败");
+      if (seq === refreshSeq) showToast(error.message || "概览加载失败");
     }
     try {
       const data = await apiGet("daily/list");
+      if (seq !== refreshSeq) return;
       state.items = data.items || [];
       state.listIndexedTotal = Number.isFinite(data.indexed_total)
         ? data.indexed_total : state.items.length;
@@ -634,6 +639,7 @@ async function refresh() {
       const stillSelected = Boolean(state.selected)
         && state.items.some((item) => item.uid === state.selected);
       renderDailyList();
+      if (seq !== refreshSeq) return;
       if (stillSelected) {
         await openDaily(state.selected);  // 记录可能已变，刷新时重拉详情
       } else if (state.items.length) {
@@ -644,12 +650,14 @@ async function refresh() {
         $("daily-detail").replaceChildren(el("p", "empty", "今天还没有牌运记录。"));
       }
     } catch (error) {
-      showToast(error.message || "牌运列表加载失败");
+      if (seq === refreshSeq) showToast(error.message || "牌运列表加载失败");
     }
-    if (state.spreads.length) renderSpreads();
+    if (seq === refreshSeq && state.spreads.length) renderSpreads();
   } finally {
-    button.classList.remove("is-loading");
-    button.disabled = false;
+    if (seq === refreshSeq) {
+      button.classList.remove("is-loading");
+      button.disabled = false;
+    }
   }
 }
 
@@ -684,6 +692,34 @@ function applyConnection(status) {
   }
 }
 
+function clearHostData() {
+  refreshSeq += 1;
+  detailSeq += 1;
+  closeLightbox();
+  closeCardDetail();
+  state.items = [];
+  state.selected = null;
+  state.overview = null;
+  state.cards = [];
+  state.spreads = [];
+  state.listIndexedTotal = 0;
+  state.listShown = 0;
+  state.listTruncated = false;
+  resetPreview();
+  const button = $("refresh");
+  button.classList.remove("is-loading");
+  button.disabled = false;
+  renderConnectionEmpty();
+}
+
+function reloadVisiblePanel() {
+  const active = document.querySelector(".tab.active");
+  const tab = active ? active.dataset.tab : "daily";
+  if (tab === "cards") loadCards();
+  else if (tab === "spreads") loadSpreads();
+  else if (tab === "preview") loadPreviewForm();
+}
+
 async function retryConnection() {
   const button = $("connection-retry");
   const label = button.textContent;
@@ -693,7 +729,7 @@ async function retryConnection() {
   button.textContent = label;
   button.disabled = false;
   applyConnection(status);
-  if (status.state === "degraded") renderConnectionEmpty();
+  if (status.state === "degraded") clearHostData();
 }
 
 async function boot() {
@@ -743,9 +779,22 @@ async function boot() {
   if (status.state === "degraded") renderConnectionEmpty();
 
   let lastState = connectionState();
-  onConnectionChange((next, error) => {
-    applyConnection({ state: next, error });
-    if (lastState !== "connected" && next === "connected") refresh();
+  onConnectionChange(async (next, error) => {
+    if (next === "degraded") {
+      applyConnection({ state: next, error });
+      clearHostData();
+      lastState = next;
+      return;
+    }
+    applyConnection({
+      state: next,
+      error,
+      title: next === "connected" ? connectionTitle() : "",
+    });
+    if (lastState !== "connected" && next === "connected") {
+      await refresh();
+      reloadVisiblePanel();
+    }
     lastState = next;
   });
 
@@ -754,7 +803,9 @@ async function boot() {
   }
   // context 可能在 connect 返回与订阅之间到达
   if (status.state !== "connected" && connectionState() === "connected") {
-    refresh();
+    applyConnection({ state: "connected", title: connectionTitle() });
+    await refresh();
+    reloadVisiblePanel();
   }
 }
 
