@@ -301,6 +301,45 @@ body {
   flex: none;
 }
 
+.error-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 10px 0;
+  padding: 8px 12px;
+  border: 1px solid rgba(224, 138, 156, 0.4);
+  border-radius: var(--radius-md);
+  background: rgba(64, 24, 36, 0.45);
+  color: #f3c7cf;
+  font-size: 12px;
+}
+
+.error-strip .error-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.error-strip .error-retry {
+  flex: none;
+}
+
+.lightbox-status {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  margin: 0;
+  transform: translate(-50%, -50%);
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.lightbox-retry {
+  position: absolute;
+  left: 50%;
+  top: calc(50% + 28px);
+  transform: translateX(-50%);
+}
+
 .ghost, .pill, .tabs, .tab.active, .user, .detail, .card-cell, .modal-panel,
 .spread-card, .seg button.active, .toast {
   box-shadow: var(--inset-highlight);

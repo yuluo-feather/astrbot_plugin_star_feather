@@ -57,6 +57,7 @@
     </div>
     <div class="top-right">
       <span id="version" class="pill"></span>
+      <span id="freshness" class="pill" title="页面上次成功读取的时间"></span>
       <button id="refresh" class="ghost" type="button">
         <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
              stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -116,6 +117,18 @@
   <main>
     <section id="panel-daily" class="panel" role="tabpanel" aria-labelledby="tab-daily" aria-hidden="false" tabindex="0">
       <div id="stats" class="stats"></div>
+      <div id="error-overview" class="error-strip hidden" role="alert">
+        <span class="error-text"></span>
+        <button class="ghost error-retry" type="button">重试</button>
+      </div>
+      <div id="error-list" class="error-strip hidden" role="alert">
+        <span class="error-text"></span>
+        <button class="ghost error-retry" type="button">重试</button>
+      </div>
+      <div id="error-detail" class="error-strip hidden" role="alert">
+        <span class="error-text"></span>
+        <button class="ghost error-retry" type="button">重试</button>
+      </div>
       <p id="daily-note" class="hint hidden"></p>
       <div class="split">
         <aside class="list" id="daily-list" aria-label="今日用户"></aside>
@@ -126,6 +139,10 @@
     </section>
 
     <section id="panel-cards" class="panel hidden" role="tabpanel" aria-labelledby="tab-cards" aria-hidden="true">
+      <div id="error-cards" class="error-strip hidden" role="alert">
+        <span class="error-text"></span>
+        <button class="ghost error-retry" type="button">重试</button>
+      </div>
       <div class="cards-toolbar">
         <label class="switch">
           <input type="checkbox" id="reversed" />
@@ -138,10 +155,18 @@
     </section>
 
     <section id="panel-spreads" class="panel hidden" role="tabpanel" aria-labelledby="tab-spreads" aria-hidden="true">
+      <div id="error-spreads" class="error-strip hidden" role="alert">
+        <span class="error-text"></span>
+        <button class="ghost error-retry" type="button">重试</button>
+      </div>
       <div class="spread-grid" id="spread-grid"></div>
     </section>
 
     <section id="panel-preview" class="panel hidden" role="tabpanel" aria-labelledby="tab-preview" aria-hidden="true">
+      <div id="error-preview" class="error-strip hidden" role="alert">
+        <span class="error-text"></span>
+        <button class="ghost error-retry" type="button">重试</button>
+      </div>
       <div class="preview-form">
         <div class="preview-row">
           <label class="field">
@@ -189,6 +214,8 @@
   <div id="toast" class="toast" role="status"></div>
   <div id="lightbox" class="lightbox hidden" role="dialog" aria-modal="true">
     <img id="lightbox-img" alt="" />
+    <p id="lightbox-status" class="lightbox-status hidden"></p>
+    <button id="lightbox-retry" class="ghost lightbox-retry hidden" type="button">重试</button>
   </div>
 
   <script type="module" src="./app.js"></script>
