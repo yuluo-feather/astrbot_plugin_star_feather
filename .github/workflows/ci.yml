@@ -197,7 +197,8 @@ jobs:
         run: python -m mypy
 
   frontend:
-    # 前端 smoke：详情竞态、预览抽牌/AI 旧响应、缩略图请求去重、减少动态效果。
+    # 前端 smoke：详情竞态、预览抽牌/AI 旧响应、缩略图请求去重、减少动态效果、
+    # 宿主连接契约（超时降级 / 晚到恢复 / data-theme）。
     # 这几条测的是浏览器里的异步状态，Python 那几格测不到；脚本只依赖 views/ 静态页，
     # 不导入插件模块，也不需要 astrbot。
     #
@@ -233,6 +234,7 @@ jobs:
           python tests/frontend/preview_async_smoke.py
           python tests/frontend/thumb_dedupe_smoke.py
           python tests/frontend/background_isolation_smoke.py
+          python tests/frontend/host_contract_smoke.py
 
   smoke:
     name: 真框架启动冒烟（手动）

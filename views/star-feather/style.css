@@ -1,4 +1,5 @@
 :root {
+  color-scheme: dark;
   --bg: #050817;
   --panel: rgba(17, 22, 46, 0.76);
   --panel-2: rgba(34, 42, 82, 0.62);
@@ -281,6 +282,24 @@ body {
 }
 
 .hidden { display: none !important; }
+
+.connection-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 0 0;
+  padding: 10px 14px;
+  border: 1px solid rgba(224, 138, 156, 0.45);
+  border-radius: var(--radius-md);
+  background: rgba(64, 24, 36, 0.55);
+  color: #f3c7cf;
+  font-size: 13px;
+}
+
+.connection-banner button {
+  flex: none;
+}
 
 .ghost, .pill, .tabs, .tab.active, .user, .detail, .card-cell, .modal-panel,
 .spread-card, .seg button.active, .toast {

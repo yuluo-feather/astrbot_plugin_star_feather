@@ -1,8 +1,21 @@
-// 数据访问层：bridge 与演示数据都收在这里，页面只认 isDemo / apiGet / apiPost。
+// 数据访问层：bridge、连接状态与演示数据都收在这里。
+// 页面只认 apiGet / apiPost / connect，不直接碰 bridge。
 
-const bridge = window.AstrBotPluginView;
-export const isDemo = !bridge;
+const TITLE_KEY = "views.star-feather.title";
+const DEFAULT_TITLE = "星羽塔罗 · 观测台";
+const CONNECT_TIMEOUT_MS = 3000;
+const BRIDGE_METHODS = ["ready", "t", "apiGet", "apiPost"];
+
+const bridgeAtLoad = window.AstrBotPluginView;
+// 仅表示「加载时没有 bridge」：演示牌面由 card-images 按这个常量选择。
+// 连接状态是运行时的，见 connectionState()。
+export const isDemo = !bridgeAtLoad;
 export const CARD_BACK_ID = "__back__";
+
+let state = isDemo ? "demo" : "connecting";
+let lastError = "";
+let readyPromise = null;
+const listeners = new Set();
 
 const DEMO_CARDS = [
   { id: "major_00", cn: "愚者", en: "The Fool", suit: "major" },
@@ -146,19 +159,120 @@ function demoApi(endpoint, params = {}) {
   throw new Error("预览模式没有这个接口");
 }
 
+function getBridge() {
+  return window.AstrBotPluginView || null;
+}
+
+function usableBridge(bridge) {
+  return Boolean(bridge)
+    && BRIDGE_METHODS.every((name) => typeof bridge[name] === "function");
+}
+
+function notify(next, error = "") {
+  if (state === next && lastError === error) return;
+  state = next;
+  lastError = error;
+  for (const listener of listeners) {
+    try {
+      listener(state, error);
+    } catch (listenerError) {
+      // 监听方异常不该影响连接状态本身
+      console.error("connection listener failed", listenerError);
+    }
+  }
+}
+
+export function connectionState() {
+  return state;
+}
+
+export function connectionError() {
+  return lastError;
+}
+
+export function onConnectionChange(listener) {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+function titleOf(bridge) {
+  try {
+    return bridge.t(TITLE_KEY, DEFAULT_TITLE) || DEFAULT_TITLE;
+  } catch {
+    return DEFAULT_TITLE;
+  }
+}
+
+function waitReady(bridge) {
+  if (!readyPromise) {
+    readyPromise = Promise.resolve()
+      .then(() => bridge.ready())
+      .then(() => {
+        if (state !== "demo") notify("connected");
+      })
+      .catch((error) => {
+        readyPromise = null;
+        throw error;
+      });
+  }
+  return readyPromise;
+}
+
+function withTimeout(promise, ms) {
+  let timer = 0;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error("连接 AstrBot 超时")), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+export async function connect({ timeoutMs = CONNECT_TIMEOUT_MS } = {}) {
+  if (state === "demo") {
+    return { state, title: DEFAULT_TITLE, error: "" };
+  }
+  if (state === "connected") {
+    const bridge = getBridge();
+    return { state, title: bridge ? titleOf(bridge) : DEFAULT_TITLE, error: "" };
+  }
+  const bridge = getBridge();
+  if (!usableBridge(bridge)) {
+    notify("degraded", "宿主桥接不可用");
+    return { state, title: DEFAULT_TITLE, error: lastError };
+  }
+  notify("connecting");
+  try {
+    await withTimeout(waitReady(bridge), timeoutMs);
+  } catch (error) {
+    const message = (error && error.message) || "连接 AstrBot 失败";
+    if (state !== "connected") notify("degraded", message);
+    return { state, title: DEFAULT_TITLE, error: message };
+  }
+  return { state, title: titleOf(bridge), error: "" };
+}
+
+function requireBridge() {
+  if (state === "demo") return null;
+  if (state === "connected") {
+    const bridge = getBridge();
+    if (usableBridge(bridge)) return bridge;
+    notify("degraded", "宿主桥接已断开");
+  }
+  if (state === "connecting") {
+    throw new Error("正在连接 AstrBot，请稍后重试");
+  }
+  throw new Error(lastError || "宿主连接不可用");
+}
+
 export async function apiGet(endpoint, params = {}) {
-  if (isDemo) return demoApi(endpoint, params);
+  const bridge = requireBridge();
+  if (!bridge) return demoApi(endpoint, params);
   return bridge.apiGet(endpoint, params);
 }
 
 export async function apiPost(endpoint, body = {}) {
-  if (isDemo) return demoApi(endpoint, body);
+  const bridge = requireBridge();
+  if (!bridge) return demoApi(endpoint, body);
   return bridge.apiPost(endpoint, body);
-}
-
-export async function connect() {
-  await bridge.ready();
-  return bridge.t("views.star-feather.title", "星羽塔罗 · 观测台");
 }
 
 export function demoBackURL(width) {

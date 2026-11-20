@@ -1,7 +1,9 @@
 // 星羽塔罗 · 观测台：Dashboard iframe 里的只读视图。
 // 数据访问在 feathers/api.js，DOM 工具在 feathers/dom.js；这里只放页面功能与装配。
 import { $, el, showToast } from "./feathers/dom.js";
-import { isDemo, apiGet, apiPost, connect } from "./feathers/api.js";
+import {
+  apiGet, apiPost, connect, connectionState, onConnectionChange,
+} from "./feathers/api.js";
 import { init as initBackground, start as startBackground } from "./feathers/background/index.js";
 import {
   thumbURL, ensureCardBack, getCardBackURL, loadThumb, makeThumb,
@@ -18,6 +20,7 @@ let detailSeq = 0;
 const SUIT_NAMES = {
   major: "大阿卡纳", wands: "权杖", cups: "圣杯", swords: "宝剑", pentacles: "星币",
 };
+const SUBTITLE_DEFAULT = "今日牌运与牌面，只读";
 
 // ---- 概览 ----
 const SEND_MODES = { forward: "合并转发", plain: "图文", text_only: "纯文字" };
@@ -650,19 +653,50 @@ async function refresh() {
   }
 }
 
-async function boot() {
-  if (!isDemo) {
-    try {
-      const title = await connect();
-      $("heading").textContent = title;
-      document.title = title;
-    } catch {
-      /* bridge 上下文拿不到也不影响只读数据 */
-    }
-  } else {
+function renderConnectionEmpty() {
+  $("stats").replaceChildren(el("p", "empty", "连接 AstrBot 后显示今日概览。"));
+  $("daily-list").replaceChildren(el("p", "empty", "连接 AstrBot 后显示今日牌运。"));
+  $("daily-detail").replaceChildren(el("p", "empty", "连接 AstrBot 后显示解读。"));
+  $("card-grid").replaceChildren(el("p", "empty", "连接 AstrBot 后显示牌面。"));
+  $("spread-grid").replaceChildren(el("p", "empty", "连接 AstrBot 后显示牌阵。"));
+  $("preview-result").replaceChildren(el("p", "empty", "连接 AstrBot 后可预览抽牌。"));
+}
+
+function applyConnection(status) {
+  const banner = $("connection-banner");
+  const degraded = status.state === "degraded";
+  banner.classList.toggle("hidden", !degraded);
+  if (degraded) {
+    $("connection-text").textContent = status.error
+      ? `无法连接 AstrBot：${status.error}`
+      : "无法连接 AstrBot。";
+  }
+  if (status.state === "demo") {
     $("subtitle").textContent = "预览模式 · 未连接 AstrBot";
     $("subtitle").classList.add("demo");
+    return;
   }
+  $("subtitle").textContent = SUBTITLE_DEFAULT;
+  $("subtitle").classList.remove("demo");
+  if (status.state === "connected" && status.title) {
+    $("heading").textContent = status.title;
+    document.title = status.title;
+  }
+}
+
+async function retryConnection() {
+  const button = $("connection-retry");
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = "连接中…";
+  const status = await connect();
+  button.textContent = label;
+  button.disabled = false;
+  applyConnection(status);
+  if (status.state === "degraded") renderConnectionEmpty();
+}
+
+async function boot() {
   $("version").textContent = "";
   initBackground();
   startBackground();
@@ -696,13 +730,32 @@ async function boot() {
       renderCardDetail();
     });
   }
+  $("connection-retry").addEventListener("click", retryConnection);
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       closeLightbox();
       closeCardDetail();
     }
   });
-  await refresh();
+
+  const status = await connect();
+  applyConnection(status);
+  if (status.state === "degraded") renderConnectionEmpty();
+
+  let lastState = connectionState();
+  onConnectionChange((next, error) => {
+    applyConnection({ state: next, error });
+    if (lastState !== "connected" && next === "connected") refresh();
+    lastState = next;
+  });
+
+  if (status.state === "connected" || status.state === "demo") {
+    await refresh();
+  }
+  // context 可能在 connect 返回与订阅之间到达
+  if (status.state !== "connected" && connectionState() === "connected") {
+    refresh();
+  }
 }
 
 boot();
