@@ -404,8 +404,10 @@ function renderCardDetailSkeleton(card) {
   $("card-modal-en").textContent = "";
   $("card-modal-meta").textContent = "";
   $("card-modal-img").removeAttribute("src");
+  $("card-modal-open").disabled = true;
   for (const button of $("card-orient").querySelectorAll("button")) {
     button.classList.remove("active");
+    button.disabled = true;
   }
   $("card-modal-body").replaceChildren(
     el("div", "skeleton-line wide"),
@@ -420,6 +422,10 @@ function renderCardDetailError(card, error) {
   $("card-modal-en").textContent = card.en || "";
   $("card-modal-meta").textContent = suit;
   $("card-modal-img").removeAttribute("src");
+  $("card-modal-open").disabled = true;
+  for (const button of $("card-orient").querySelectorAll("button")) {
+    button.disabled = true;
+  }
   const body = $("card-modal-body");
   body.replaceChildren();
   body.append(el("p", "empty", `牌义加载失败：${error.message || "读取失败"}`));
@@ -432,6 +438,7 @@ function renderCardDetailError(card, error) {
 async function openCardDetail(card) {
   const seq = ++cardDetailSeq;
   state.cardDetail = null;
+  state.detailUpright = !state.reversed;
   openCardModal();
   renderCardDetailSkeleton(card);
   $("card-modal-close").focus();
@@ -440,7 +447,6 @@ async function openCardDetail(card) {
     if (seq !== cardDetailSeq) return;  // 已被更新的点击或关闭取代
     if ($("card-modal").classList.contains("hidden")) return;
     state.cardDetail = detail;
-    state.detailUpright = !state.reversed;
     renderCardDetail();
   } catch (error) {
     if (seq !== cardDetailSeq) return;
@@ -459,8 +465,10 @@ function renderCardDetail() {
   $("card-modal-en").textContent = detail.en || "";
   const suit = SUIT_NAMES[detail.suit] || detail.suit || "";
   $("card-modal-meta").textContent = `${suit}${detail.num ? ` · ${detail.num}` : ""}`;
+  $("card-modal-open").disabled = false;
 
   for (const button of $("card-orient").querySelectorAll("button")) {
+    button.disabled = false;
     button.classList.toggle("active", button.dataset.upright === (upright ? "1" : "0"));
   }
 

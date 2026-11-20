@@ -32,7 +32,7 @@ FAKE_BRIDGE = r"""
       || scenario === "slowcards") {
     setTimeout(markReady, 50);
   }
-  if (scenario === "late") setTimeout(markReady, 4200);
+  if (scenario === "late") window.__resolveReady = markReady;
   if (scenario === "drop") {
     setTimeout(() => { window.__starFeatherBridge = window.AstrBotPluginView; }, 0);
     setTimeout(() => { delete window.AstrBotPluginView; }, 1500);
@@ -186,6 +186,7 @@ def main():
             page.click('.tab[data-tab="cards"]')
             page.wait_for_timeout(200)
             check("late.panel_empty", page.locator(".card-cell").count() == 0)
+            page.evaluate("window.__resolveReady()")
             page.wait_for_function(
                 "document.querySelector('#connection-banner')"
                 ".classList.contains('hidden')",

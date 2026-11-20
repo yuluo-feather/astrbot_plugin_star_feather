@@ -127,17 +127,42 @@ def main():
                 page.get_attribute("#card-modal", "aria-labelledby")
                 == "card-modal-name",
             )
+            check(
+                "modal.image_disabled",
+                page.locator("#card-modal-open").is_disabled(),
+            )
+            check(
+                "modal.orient_disabled",
+                page.locator("#card-orient button").first.is_disabled(),
+            )
 
             page.wait_for_function(
                 "document.querySelectorAll('#card-modal-body .meaning').length > 0",
                 timeout=3000,
             )
-            for _ in range(10):
-                page.keyboard.press("Tab")
             check(
-                "modal.trap",
+                "modal.image_enabled",
+                not page.locator("#card-modal-open").is_disabled(),
+            )
+            check(
+                "modal.orient_enabled",
+                not page.locator("#card-orient button").first.is_disabled(),
+            )
+            page.focus("#card-modal-close")
+            page.keyboard.press("Tab")
+            check(
+                "modal.tab_moves",
                 page.evaluate(
-                    "Boolean(document.activeElement.closest('#card-modal'))"),
+                    "document.activeElement.id !== 'card-modal-close'"
+                    " && Boolean(document.activeElement.closest('#card-modal'))"),
+            )
+            page.focus("#card-modal-close")
+            page.keyboard.press("Shift+Tab")
+            check(
+                "modal.shift_tab_moves",
+                page.evaluate(
+                    "document.activeElement.id !== 'card-modal-close'"
+                    " && Boolean(document.activeElement.closest('#card-modal'))"),
             )
             check(
                 "modal.image_button",
@@ -214,10 +239,13 @@ def main():
                 first.locator(".spread-toggle").get_attribute("aria-expanded") == "true"
                 and first.locator(".spread-body").get_attribute("aria-hidden") == "false",
             )
+            body_id = first.locator(".spread-body").get_attribute("id")
+            check("spread.body_id", bool(body_id), body_id)
             check(
                 "spread.controls",
-                first.locator(".spread-toggle").get_attribute("aria-controls")
-                == first.locator(".spread-body").get_attribute("id"),
+                body_id is not None
+                and first.locator(".spread-toggle").get_attribute("aria-controls")
+                == body_id,
             )
             second.locator(".spread-toggle").click()
             check(
