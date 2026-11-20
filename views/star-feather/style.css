@@ -340,6 +340,20 @@ body {
   transform: translateX(-50%);
 }
 
+.lightbox-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 2;
+}
+
+.card-modal-open {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+}
+
 .ghost, .pill, .tabs, .tab.active, .user, .detail, .card-cell, .modal-panel,
 .spread-card, .seg button.active, .toast {
   box-shadow: var(--inset-highlight);
@@ -1266,7 +1280,10 @@ h1 {
 .ghost:focus-visible, .tab:focus-visible, .primary:focus-visible,
 .user:focus-visible, .card-cell:focus-visible, .seg button:focus-visible,
 .modal-close:focus-visible, .field select:focus-visible,
-.field input:focus-visible, .switch input:focus-visible {
+.field input:focus-visible, .switch input:focus-visible,
+.suit-chip:focus-visible, .spread-toggle:focus-visible,
+.card-modal-open:focus-visible, .lightbox-retry:focus-visible,
+.error-retry:focus-visible {
   outline: 2px solid var(--gold);
   outline-offset: 2px;
 }

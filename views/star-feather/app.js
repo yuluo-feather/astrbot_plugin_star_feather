@@ -6,6 +6,7 @@ import {
   onConnectionChange,
 } from "./feathers/api.js";
 import { init as initBackground, start as startBackground } from "./feathers/background/index.js";
+import { trap } from "./feathers/focus.js";
 import {
   thumbURL, ensureCardBack, getCardBackURL, loadThumb, makeThumb,
 } from "./feathers/card-images.js";
@@ -28,6 +29,11 @@ let dataEpoch = 0;
 let cardsRequest = null;
 let spreadsRequest = null;
 let lightboxTarget = null;
+let modalReturnFocus = null;
+let lightboxReturnFocus = null;
+let modalTrap = null;
+let lightboxTrap = null;
+let scrollLocked = false;
 
 const SUIT_NAMES = {
   major: "大阿卡纳", wands: "权杖", cups: "圣杯", swords: "宝剑", pentacles: "星币",
@@ -347,18 +353,99 @@ function renderCards() {
 let cardDetailSeq = 0;
 let cardImageSeq = 0;
 
+function setBackgroundInert(inert) {
+  for (const node of [
+    document.querySelector("header"),
+    document.querySelector("nav.tabs"),
+    document.querySelector("main"),
+    $("connection-banner"),
+  ]) {
+    if (!node) continue;
+    if (inert) node.setAttribute("inert", "");
+    else node.removeAttribute("inert");
+  }
+}
+
+function lockBodyScroll(lock) {
+  if (lock === scrollLocked) return;
+  scrollLocked = lock;
+  document.body.style.overflow = lock ? "hidden" : "";
+}
+
+function openCardModal() {
+  const modal = $("card-modal");
+  if (!modal.classList.contains("hidden")) return;
+  modalReturnFocus = document.activeElement;
+  modal.classList.remove("hidden");
+  setBackgroundInert(true);
+  lockBodyScroll(true);
+  modalTrap = trap(modal);
+  $("card-modal-close").focus();
+}
+
+function closeCardModal() {
+  const modal = $("card-modal");
+  if (modal.classList.contains("hidden")) return;
+  if (!$("lightbox").classList.contains("hidden")) closeLightbox();
+  modal.classList.add("hidden");
+  if (modalTrap) {
+    modalTrap();
+    modalTrap = null;
+  }
+  setBackgroundInert(false);
+  lockBodyScroll(false);
+  const target = modalReturnFocus;
+  modalReturnFocus = null;
+  if (target && document.contains(target)) target.focus();
+}
+
+function renderCardDetailSkeleton(card) {
+  $("card-modal-name").textContent = card.cn || "加载中…";
+  $("card-modal-en").textContent = "";
+  $("card-modal-meta").textContent = "";
+  $("card-modal-img").removeAttribute("src");
+  for (const button of $("card-orient").querySelectorAll("button")) {
+    button.classList.remove("active");
+  }
+  $("card-modal-body").replaceChildren(
+    el("div", "skeleton-line wide"),
+    el("div", "skeleton-line"),
+    el("div", "skeleton-line short"),
+  );
+}
+
+function renderCardDetailError(card, error) {
+  const suit = SUIT_NAMES[card.suit] || card.suit || "";
+  $("card-modal-name").textContent = card.cn || "";
+  $("card-modal-en").textContent = card.en || "";
+  $("card-modal-meta").textContent = suit;
+  $("card-modal-img").removeAttribute("src");
+  const body = $("card-modal-body");
+  body.replaceChildren();
+  body.append(el("p", "empty", `牌义加载失败：${error.message || "读取失败"}`));
+  const retry = el("button", "ghost", "重试");
+  retry.type = "button";
+  retry.addEventListener("click", () => openCardDetail(card));
+  body.append(retry);
+}
+
 async function openCardDetail(card) {
   const seq = ++cardDetailSeq;
+  state.cardDetail = null;
+  openCardModal();
+  renderCardDetailSkeleton(card);
+  $("card-modal-close").focus();
   try {
     const detail = await apiGet("card-detail", { id: card.id });
     if (seq !== cardDetailSeq) return;  // 已被更新的点击或关闭取代
+    if ($("card-modal").classList.contains("hidden")) return;
     state.cardDetail = detail;
     state.detailUpright = !state.reversed;
-    $("card-modal").classList.remove("hidden");
     renderCardDetail();
   } catch (error) {
     if (seq !== cardDetailSeq) return;
-    showToast(error.message || "牌义加载失败");
+    if ($("card-modal").classList.contains("hidden")) return;
+    renderCardDetailError(card, error);
   }
 }
 
@@ -411,8 +498,8 @@ function renderCardDetail() {
 function closeCardDetail() {
   cardDetailSeq += 1;  // 关掉后，未返回的详情请求作废
   cardImageSeq += 1;   // 未返回的缩略图请求同样作废
-  $("card-modal").classList.add("hidden");
   state.cardDetail = null;
+  closeCardModal();
 }
 
 // ---- 牌阵介绍 ----
@@ -729,15 +816,20 @@ function renderSpreads() {
     return;
   }
   let expanded = null;
-  for (const spread of state.spreads) {
+  state.spreads.forEach((spread, spreadIndex) => {
     const card = el("article", "spread-card");
     const toggle = el("button", "spread-toggle");
     toggle.type = "button";
     toggle.setAttribute("aria-expanded", "false");
+
+    const body = el("div", "spread-body");
+    const bodyId = `spread-body-${spreadIndex}`;
+    body.id = bodyId;
+    body.setAttribute("aria-hidden", "true");
+    toggle.setAttribute("aria-controls", bodyId);
     toggle.append(el("span", "spread-name", spread.name));
     toggle.append(el("span", "spread-count", `${spread.positions.length}张`));
 
-    const body = el("div", "spread-body");
     if (spread.scenario) body.append(el("p", "spread-scenario", spread.scenario));
     const layout = el("div", "spread-layout");
     spread.positions.forEach((position, index) => {
@@ -754,15 +846,17 @@ function renderSpreads() {
       if (expanded && expanded !== card) {
         expanded.classList.remove("expanded");
         expanded.querySelector(".spread-toggle").setAttribute("aria-expanded", "false");
+        expanded.querySelector(".spread-body").setAttribute("aria-hidden", "true");
       }
       card.classList.toggle("expanded", open);
       toggle.setAttribute("aria-expanded", String(open));
+      body.setAttribute("aria-hidden", String(!open));
       expanded = open ? card : null;
     });
 
     card.append(toggle, body);
     box.append(card);
-  }
+  });
 }
 
 let lightboxSeq = 0;
@@ -773,10 +867,19 @@ async function openLightbox(card, upright = !state.reversed) {
   const img = $("lightbox-img");
   const status = $("lightbox-status");
   const retry = $("lightbox-retry");
+  const modal = $("card-modal");
+  const wasOpen = !box.classList.contains("hidden");
+  if (!wasOpen) {
+    lightboxReturnFocus = document.activeElement;
+    modal.setAttribute("inert", "");
+    modal.setAttribute("aria-modal", "false");
+    lightboxTrap = trap(box);
+  }
   lightboxTarget = { card, upright };
   img.removeAttribute("src");
   img.alt = card.cn;
   box.classList.remove("hidden");
+  $("lightbox-close").focus();
   status.textContent = "大图加载中…";
   status.classList.remove("hidden");
   retry.classList.add("hidden");
@@ -805,7 +908,21 @@ async function openLightbox(card, upright = !state.reversed) {
 function closeLightbox() {
   lightboxSeq += 1;  // 关闭后，未返回的大图请求作废
   lightboxTarget = null;
-  $("lightbox").classList.add("hidden");
+  const box = $("lightbox");
+  if (box.classList.contains("hidden")) return;
+  box.classList.add("hidden");
+  if (lightboxTrap) {
+    lightboxTrap();
+    lightboxTrap = null;
+  }
+  const modal = $("card-modal");
+  modal.removeAttribute("inert");
+  if (!modal.classList.contains("hidden")) {
+    modal.setAttribute("aria-modal", "true");
+  }
+  const target = lightboxReturnFocus;
+  lightboxReturnFocus = null;
+  if (target && document.contains(target)) target.focus();
   $("lightbox-status").classList.add("hidden");
   $("lightbox-retry").classList.add("hidden");
 }
@@ -1087,6 +1204,10 @@ async function boot() {
     renderCards();
   });
   $("lightbox").addEventListener("click", closeLightbox);
+  $("lightbox-close").addEventListener("click", (event) => {
+    event.stopPropagation();
+    closeLightbox();
+  });
   $("preview-draw").addEventListener("click", drawPreview);
   $("preview-ai").addEventListener("click", requestPreviewAI);
   $("preview-question").addEventListener("keydown", (event) => {
@@ -1099,7 +1220,7 @@ async function boot() {
   $("card-modal").addEventListener("click", (event) => {
     if (event.target === $("card-modal")) closeCardDetail();
   });
-  $("card-modal-img").addEventListener("click", () => {
+  $("card-modal-open").addEventListener("click", () => {
     if (state.cardDetail) openLightbox(state.cardDetail, state.detailUpright);
   });
   for (const button of $("card-orient").querySelectorAll("button")) {
@@ -1110,10 +1231,12 @@ async function boot() {
   }
   $("connection-retry").addEventListener("click", retryConnection);
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
+    if (event.key !== "Escape") return;
+    if (!$("lightbox").classList.contains("hidden")) {
       closeLightbox();
-      closeCardDetail();
+      return;
     }
+    if (!$("card-modal").classList.contains("hidden")) closeCardDetail();
   });
 
   const status = await connect();
