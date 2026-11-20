@@ -28,13 +28,17 @@ FAKE_BRIDGE = r"""
   const markReady = () => { resolved = true; resolveReady(); };
 
   if (scenario === "ready" || scenario === "light" || scenario === "hang"
-      || scenario === "drop") {
+      || scenario === "drop" || scenario === "slowdaily"
+      || scenario === "slowcards") {
     setTimeout(markReady, 50);
   }
   if (scenario === "late") setTimeout(markReady, 4200);
   if (scenario === "drop") {
     setTimeout(() => { window.__starFeatherBridge = window.AstrBotPluginView; }, 0);
     setTimeout(() => { delete window.AstrBotPluginView; }, 1500);
+  }
+  if (scenario === "slowcards") {
+    setTimeout(() => { delete window.AstrBotPluginView; }, 400);
   }
   if (scenario === "light") {
     const applyTheme = () => {
@@ -82,6 +86,10 @@ FAKE_BRIDGE = r"""
     apiGet: async (endpoint) => {
       if (!resolved) throw new Error("bridge not ready");
       if (scenario === "hang") return new Promise(() => {});
+      const slow = (scenario === "slowdaily"
+        && (endpoint === "overview" || endpoint.startsWith("daily/")))
+        || (scenario === "slowcards" && endpoint === "cards");
+      if (slow) await new Promise((resolve) => setTimeout(resolve, 1500));
       if (!(endpoint in records)) throw new Error("unknown endpoint " + endpoint);
       return records[endpoint];
     },

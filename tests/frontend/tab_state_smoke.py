@@ -53,15 +53,19 @@ def main():
             "  const selected = tabs.filter("
             "    (tab) => tab.getAttribute('aria-selected') === 'true');"
             "  const visible = [...document.querySelectorAll('.panel')]"
-            "    .filter((panel) => !panel.classList.contains('hidden'))"
-            "    .map((panel) => panel.id);"
+            "    .filter((panel) => !panel.classList.contains('hidden'));"
             "  const hidden = [...document.querySelectorAll('.panel')]"
             "    .filter((panel) => panel.classList.contains('hidden'))"
             "    .every((panel) => panel.getAttribute('aria-hidden') === 'true');"
             "  return {"
             "    active: active.map((tab) => tab.dataset.tab),"
             "    selected: selected.map((tab) => tab.dataset.tab),"
-            "    visible, hidden,"
+            "    visible: visible.map((panel) => panel.id),"
+            "    visibleAria: visible.map((panel) => panel.getAttribute('aria-hidden')),"
+            "    hidden,"
+            "    focusId: document.activeElement ? document.activeElement.id : '',"
+            "    dailyTabIndex: document.querySelector('#panel-daily').tabIndex,"
+            "    scrollRestoration: history.scrollRestoration,"
             "    urlTab: new URL(location.href).searchParams.get('tab'),"
             "  };"
             "}"
@@ -80,6 +84,13 @@ def main():
             check("initial.selected", state["selected"] == ["cards"], state)
             check("initial.visible", state["visible"] == ["panel-cards"], state)
             check("initial.aria_hidden", state["hidden"], state)
+            check("initial.aria_visible", state["visibleAria"] == ["false"], state)
+            check("initial.daily_tabindex", state["dailyTabIndex"] == 0, state)
+            check(
+                "initial.scroll_restoration",
+                state["scrollRestoration"] == "manual",
+                state,
+            )
             check("initial.url", state["urlTab"] == "cards", state)
             page.close()
 
@@ -89,7 +100,36 @@ def main():
             page.wait_for_selector(".user", timeout=5000)
             state = tab_state(page)
             check("invalid.active", state["active"] == ["daily"], state)
-            check("invalid.url", state["urlTab"] is None, state)
+            check("invalid.url", state["urlTab"] == "daily", state)
+            page.close()
+
+            page = browser.new_page(viewport={"width": 1180, "height": 900})
+            page.add_init_script(FAKE_BRIDGE)
+            page.goto(base + "/?host=slowdaily&tab=cards", wait_until="load")
+            page.wait_for_selector(".card-cell", timeout=1200)
+            check(
+                "deeplink.slow_daily",
+                tab_state(page)["active"] == ["cards"],
+            )
+            page.close()
+
+            page = browser.new_page(viewport={"width": 1180, "height": 900})
+            page.add_init_script(FAKE_BRIDGE)
+            page.goto(base + "/?host=slowcards&tab=cards", wait_until="load")
+            page.wait_for_timeout(700)
+            page.click("#refresh")
+            page.wait_for_timeout(2200)
+            state = tab_state(page)
+            check(
+                "stale.cards_discarded",
+                page.locator(".card-cell").count() == 0,
+                state,
+            )
+            check(
+                "stale.banner",
+                page.locator("#connection-banner").is_visible(),
+                state,
+            )
             page.close()
 
             page = browser.new_page(viewport={"width": 1180, "height": 900})
@@ -108,12 +148,14 @@ def main():
             page.wait_for_selector(".card-cell", timeout=5000)
             state = tab_state(page)
             check("back.cards", state["active"] == ["cards"], state)
+            check("back.focus", state["focusId"] == "tab-cards", state)
             check("back.url", state["urlTab"] == "cards", state)
 
             page.go_forward()
             page.wait_for_selector(".spread-card", timeout=5000)
             state = tab_state(page)
             check("forward.spreads", state["active"] == ["spreads"], state)
+            check("forward.focus", state["focusId"] == "tab-spreads", state)
             check("forward.url", state["urlTab"] == "spreads", state)
 
             page.reload(wait_until="load")
@@ -124,15 +166,24 @@ def main():
 
             page.focus("#tab-spreads")
             page.keyboard.press("Home")
-            check("key.home", tab_state(page)["active"] == ["daily"])
+            state = tab_state(page)
+            check("key.home", state["active"] == ["daily"], state)
+            check("key.home_focus", state["focusId"] == "tab-daily", state)
+            check("key.home_url", state["urlTab"] == "daily", state)
             page.focus("#tab-daily")
             page.keyboard.press("ArrowRight")
-            check("key.right", tab_state(page)["active"] == ["cards"])
+            state = tab_state(page)
+            check("key.right", state["active"] == ["cards"], state)
+            check("key.right_focus", state["focusId"] == "tab-cards", state)
             page.focus("#tab-cards")
             page.keyboard.press("End")
-            check("key.end", tab_state(page)["active"] == ["preview"])
+            state = tab_state(page)
+            check("key.end", state["active"] == ["preview"], state)
+            check("key.end_focus", state["focusId"] == "tab-preview", state)
             page.keyboard.press("ArrowRight")
-            check("key.wrap", tab_state(page)["active"] == ["daily"])
+            state = tab_state(page)
+            check("key.wrap", state["active"] == ["daily"], state)
+            check("key.wrap_focus", state["focusId"] == "tab-daily", state)
 
             page.click('#tab-daily')
             page.wait_for_selector(".user", timeout=5000)

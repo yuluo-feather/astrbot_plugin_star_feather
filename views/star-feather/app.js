@@ -18,6 +18,7 @@ const state = {
 };
 let detailSeq = 0;
 let refreshSeq = 0;
+let dataEpoch = 0;
 
 const SUIT_NAMES = {
   major: "大阿卡纳", wands: "权杖", cups: "圣杯", swords: "宝剑", pentacles: "星币",
@@ -177,15 +178,18 @@ function renderDetail(data) {
 
 // ---- 牌面预览 ----
 async function loadCards() {
+  const epoch = dataEpoch;
   if (!state.cards.length) {
     try {
       const data = await apiGet("cards");
+      if (epoch !== dataEpoch) return;
       state.cards = data.items || [];
     } catch (error) {
-      showToast(error.message || "牌面清单加载失败");
+      if (epoch === dataEpoch) showToast(error.message || "牌面清单加载失败");
       return;
     }
   }
+  if (epoch !== dataEpoch) return;
   renderSuitFilter();
   renderCards();
 }
@@ -301,19 +305,23 @@ function closeCardDetail() {
 
 // ---- 牌阵介绍 ----
 async function ensureSpreads() {
+  const epoch = dataEpoch;
   if (!state.spreads.length) {
     try {
       const data = await apiGet("spreads");
+      if (epoch !== dataEpoch) return [];
       state.spreads = data.items || [];
     } catch (error) {
-      showToast(error.message || "牌阵清单加载失败");
+      if (epoch === dataEpoch) showToast(error.message || "牌阵清单加载失败");
     }
   }
-  return state.spreads;
+  return epoch === dataEpoch ? state.spreads : [];
 }
 
 async function loadSpreads() {
+  const epoch = dataEpoch;
   await ensureSpreads();
+  if (epoch !== dataEpoch) return;
   renderSpreads();
 }
 
@@ -323,7 +331,9 @@ let previewAiSeq = 0;
 let previewSeq = 0;
 
 async function loadPreviewForm() {
+  const epoch = dataEpoch;
   const spreads = await ensureSpreads();
+  if (epoch !== dataEpoch) return;
   const select = $("preview-spread");
   if (select.dataset.ready === "1") return;
   if (!spreads.length) {
@@ -606,8 +616,7 @@ function tabFromURL() {
 
 function syncTabURL(tab, { replace = false } = {}) {
   const url = new URL(window.location.href);
-  if (tab === "daily") url.searchParams.delete("tab");
-  else url.searchParams.set("tab", tab);
+  url.searchParams.set("tab", tab);
   if (url.href === window.location.href) return;
   history[replace ? "replaceState" : "pushState"](null, "", url);
 }
@@ -616,7 +625,7 @@ function normalizeTabURL() {
   const raw = new URLSearchParams(window.location.search).get("tab");
   if (raw === null || TABS.has(raw)) return;
   const url = new URL(window.location.href);
-  url.searchParams.delete("tab");
+  url.searchParams.set("tab", "daily");
   history.replaceState(null, "", url);
 }
 
@@ -737,6 +746,7 @@ function applyConnection(status) {
 function clearHostData() {
   refreshSeq += 1;
   detailSeq += 1;
+  dataEpoch += 1;
   closeLightbox();
   closeCardDetail();
   state.items = [];
@@ -776,6 +786,7 @@ async function retryConnection() {
 
 async function boot() {
   $("version").textContent = "";
+  if ("scrollRestoration" in history) history.scrollRestoration = "manual";
   initBackground();
   startBackground();
   normalizeTabURL();
@@ -799,7 +810,11 @@ async function boot() {
     switchTab(next.dataset.tab, { push: true });
     next.focus();
   });
-  window.addEventListener("popstate", () => switchTab(tabFromURL()));
+  window.addEventListener("popstate", () => {
+    switchTab(tabFromURL());
+    const active = document.querySelector(".tab.active");
+    if (active) active.focus();
+  });
   $("refresh").addEventListener("click", refresh);
   $("reversed").addEventListener("change", (event) => {
     state.reversed = event.target.checked;
@@ -853,21 +868,21 @@ async function boot() {
       title: next === "connected" ? connectionTitle() : "",
     });
     if (lastState !== "connected" && next === "connected") {
-      await refresh();
       reloadVisiblePanel();
+      await refresh();
     }
     lastState = next;
   });
 
   if (status.state === "connected" || status.state === "demo") {
-    await refresh();
     reloadVisiblePanel();
+    await refresh();
   }
   // context 可能在 connect 返回与订阅之间到达
   if (status.state !== "connected" && connectionState() === "connected") {
     applyConnection({ state: "connected", title: connectionTitle() });
-    await refresh();
     reloadVisiblePanel();
+    await refresh();
   }
 }
 
