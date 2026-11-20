@@ -221,7 +221,7 @@ function waitReady(bridge) {
     readyPromise = Promise.resolve()
       .then(() => bridge.ready())
       .then(() => {
-        if (state !== "demo") notify("connected");
+        if (readyBridge === bridge && state !== "demo") notify("connected");
       })
       .catch((error) => {
         readyPromise = null;
@@ -266,7 +266,10 @@ export async function connect({ timeoutMs = CONNECT_TIMEOUT_MS } = {}) {
     return { state, title: DEFAULT_TITLE, error: message };
   }
   // 复用的 readyPromise 可能早已兑现，成功分支不会再次触发。
-  if (state !== "connected" && state !== "demo") notify("connected");
+  if (state !== "connected" && state !== "demo"
+      && readyBridge === getBridge()) {
+    notify("connected");
+  }
   return { state, title: connectionTitle(), error: "" };
 }
 
