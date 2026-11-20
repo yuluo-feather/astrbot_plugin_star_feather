@@ -477,12 +477,20 @@ let previewSeq = 0;
 async function loadPreviewForm({ force = false } = {}) {
   const select = $("preview-spread");
   if (select.dataset.ready === "1" && !force) return;
+  const epoch = dataEpoch;
   select.dataset.ready = "";
   select.disabled = true;
-  const loading = el("option", "", "牌阵加载中…");
-  loading.value = "";
-  select.replaceChildren(loading);
+  const cancelLoading = delayedPlaceholder(
+    select,
+    () => {
+      const loading = el("option", "", "牌阵加载中…");
+      loading.value = "";
+      return loading;
+    },
+    () => epoch === dataEpoch,
+  );
   const result = await ensureSpreads({ force });
+  cancelLoading();
   if (result.stale) {
     select.disabled = false;
     return;
