@@ -117,7 +117,8 @@ class StarFeatherPlugin(Star):
         「她是不是不喜欢我」）不属于占卜请求，不得调用。相邻调用若在节流期内，直接说明并结束，
         不重复占卜。
 
-        发送约定：内容一律 event.send 直发，结尾 yield 一个字符串给 Agent Loop 生成收尾回复。
+        发送约定：内容一律 event.send 直发，固定收尾句也由插件直发；结尾 yield
+        一个字符串给 Agent Loop，只用于生成你自己的补充回复（不要重复收尾句）。
         不能 yield MessageEventResult 或 None —— 否则 runner 判定无返回值并 DONE，respond
         空消息跳过，收口钩子不触发、群聊防并发门闩死锁。
 

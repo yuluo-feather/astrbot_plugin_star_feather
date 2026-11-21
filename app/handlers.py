@@ -5,7 +5,6 @@
 - 工具入口 Presenter 直发结果后，入口返回一个字符串给 Agent Loop 生成收尾。
 """
 import asyncio
-import random
 
 from ..adapters.kv_utils import kv_get, kv_put
 from ..core.dto import DeliveryCapabilities, IncomingEvent
@@ -166,14 +165,14 @@ async def tool_entry(container, incoming: IncomingEvent,
             if not await messenger.send_text(block):
                 return TOOL_SEND_FAILED
             return "已提示用户今日次数限制。请自然回应一句，不必再调用工具。"
-        # 收尾引导放在所有早退分支之后取：早退路径不该白耗一次全局随机状态。
-        note = random.choice(TOOL_EPILOGUE)
+        # 收尾引导是固定字符串；固定收尾句由 Presenter 直发，模型只决定是否补充。
+        note = TOOL_EPILOGUE
         uid = incoming.user_id
         prepared = await container.reading.prepare(request, uid)
         reading = await container.reading.run(
             prepared, ReadingContext(uid, incoming.conversation_id, messenger,
                                      getattr(incoming, "conversation_scope", "group")),
-            question=request.question, fail_note=FAIL_NOTE_TOOL, epilogue=False)
+            question=request.question, fail_note=FAIL_NOTE_TOOL, epilogue=True)
         delivered = await container.presenter.present(reading, messenger, caps)
         if delivered:
             await _publish_memory(container, reading, incoming, version, messenger)

@@ -209,7 +209,7 @@ class TestToolEntry:
             assert "已发送" not in _tool(p, evt)
 
     def test_early_exits_do_not_consume_random_state(self):
-        """早退分支不得消耗全局随机状态：收尾池抽取只服务于真正走完的占卜。"""
+        """早退分支不消耗随机状态：随机收尾只在真正走完的占卜里抽。"""
         cases = [
             (_plugin(), _evt(text="")),
             (_plugin(throttle_remain=25), _evt()),
@@ -222,12 +222,11 @@ class TestToolEntry:
             _tool(p, evt)
             assert random.getstate() == before, "早退分支消耗了全局随机状态"
 
-    def test_normal_path_does_consume_random_state(self):
-        """反向对照：真正走完的占卜**应当**抽一次收尾。"""
-        random.seed(20260910)
-        before = random.getstate()
-        _tool(_plugin(), _evt("帮我算一卦"))
-        assert random.getstate() != before
+    def test_normal_path_requests_epilogue(self):
+        """真正走完的占卜要求 Presenter 直发固定收尾句；LLM 只负责补充回复。"""
+        p = _plugin()
+        _tool(p, _evt("帮我算一卦"))
+        assert p._reading.run_kwargs[0].get("epilogue") is True
 
     def test_missing_umo_falls_back_to_global_key(self):
         """事件缺 unified_msg_origin 时，工具节流键回退 sf_tool_cd_global。"""
@@ -282,7 +281,7 @@ class TestSendStatus:
 
     def test_delivered_result_returns_epilogue(self):
         out = _tool(_plugin(), _evt())
-        assert out.startswith("占卜结果已发送给用户")
+        assert out.startswith("占卜结果和固定收尾句")
 
     def test_help_send_failure_does_not_claim_sent(self):
         out = _tool(_plugin(), _evt(text="帮助", fail_sends=1))
