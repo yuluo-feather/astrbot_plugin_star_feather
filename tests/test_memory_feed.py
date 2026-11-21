@@ -12,7 +12,10 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
-from data.plugins.astrbot_plugin_star_feather.adapters.memory_feed import MemoryFeed
+from data.plugins.astrbot_plugin_star_feather.adapters.memory_feed import (
+    MemoryFeed,
+    PublishOutcome,
+)
 from data.plugins.astrbot_plugin_star_feather.ai.prompts import build_reading_prompt
 from data.plugins.astrbot_plugin_star_feather.app.handlers import _publish_memory
 from data.plugins.astrbot_plugin_star_feather.core.dto import IncomingEvent
@@ -25,6 +28,7 @@ from data.plugins.astrbot_plugin_star_feather.core.memory_contracts import (
     event_from_reading,
 )
 from data.plugins.astrbot_plugin_star_feather.core.memory_topic import classify_topic
+from data.plugins.astrbot_plugin_star_feather.core.texts import MEMORY_ENROLL_NOTICE
 from data.plugins.astrbot_plugin_star_feather.services.reading import ReadingContext
 
 
@@ -42,15 +46,18 @@ def _hash(user_key: str) -> str:
     return hashlib.sha256(user_key.encode("utf-8")).hexdigest()
 
 
-def _lease(root) -> None:
-    _write(root / "lease.json", {
+def _lease(root, *, auto_enroll: bool | None = None) -> None:
+    payload = {
         "schema": SCHEMA_LEASE,
         "instance_id": "test",
         "started_at": _iso(0),
         "refreshed_at": _iso(0),
         "expires_at": _iso(1),
         "source": "feather_memory/test",
-    })
+    }
+    if auto_enroll is not None:
+        payload["auto_enroll"] = auto_enroll
+    _write(root / "lease.json", payload)
 
 
 def _auth(root, user_key: str, *, auto: bool = True, topic: bool = False,
@@ -112,6 +119,54 @@ def test_publish_needs_lease_and_auth(tmp_path):
     assert written["schema"] == SCHEMA_EVENT
     assert written["topic_key"] == ""
     assert written["kind"] == "spread"
+
+
+def test_auto_enroll_notice_comes_before_publish(tmp_path):
+    feed = MemoryFeed("0.10.1", root=tmp_path)
+    _lease(tmp_path, auto_enroll=True)
+
+    notice = asyncio.run(feed.publish_event(_event(), enrollment_notified=False))
+    assert notice.published is False
+    assert notice.notice_needed is True
+    assert not list((tmp_path / "events").glob("*.json"))
+
+    first = asyncio.run(feed.publish_event(_event(), enrollment_notified=True))
+    assert first.published is True
+    assert first.notice_needed is False
+    written = json.loads(next((tmp_path / "events").glob("*.json")).read_text(encoding="utf-8"))
+    assert written["topic_key"] == "工作"
+
+
+def test_auto_enroll_absent_keeps_old_gate(tmp_path):
+    feed = MemoryFeed("0.10.1", root=tmp_path)
+    _lease(tmp_path)
+    outcome = asyncio.run(feed.publish_event(_event(), enrollment_notified=True))
+    assert outcome.published is False
+    assert outcome.notice_needed is False
+    assert not list((tmp_path / "events").glob("*.json"))
+
+
+def test_invalid_or_expired_auth_never_triggers_auto_enroll(tmp_path):
+    feed = MemoryFeed("0.10.1", root=tmp_path)
+    _lease(tmp_path, auto_enroll=True)
+    _auth(tmp_path, "aiocqhttp:1", auto=True, expires_in=-1)
+    expired = asyncio.run(feed.publish_event(_event(), enrollment_notified=False))
+    assert expired.published is False and expired.notice_needed is False
+
+    path = tmp_path / "auth" / f"{_hash('aiocqhttp:1')}.json"
+    path.write_text("{not json", encoding="utf-8")
+    broken = asyncio.run(feed.publish_event(_event(), enrollment_notified=True))
+    assert broken.published is False and broken.notice_needed is False
+    assert not list((tmp_path / "events").glob("*.json"))
+
+
+def test_opted_out_auth_blocks_auto_enroll(tmp_path):
+    feed = MemoryFeed("0.10.1", root=tmp_path)
+    _lease(tmp_path, auto_enroll=True)
+    _auth(tmp_path, "aiocqhttp:1", auto=False)
+    outcome = asyncio.run(feed.publish_event(_event(), enrollment_notified=True))
+    assert outcome.published is False
+    assert outcome.notice_needed is False
 
 
 def test_publish_rejects_group_and_daily(tmp_path):
@@ -281,6 +336,40 @@ class _FakeMemory:
         return True
 
 
+class _FakeKV:
+    def __init__(self):
+        self.data = {}
+
+    async def get_kv_data(self, key, default=None):
+        return self.data.get(key, default)
+
+    async def put_kv_data(self, key, value):
+        self.data[key] = value
+
+
+class _NoticeMemory:
+    def __init__(self):
+        self.calls = []
+
+    async def publish(self, event):
+        return True
+
+    async def publish_event(self, event, *, enrollment_notified=False):
+        self.calls.append(enrollment_notified)
+        return PublishOutcome(published=enrollment_notified,
+                              notice_needed=not enrollment_notified)
+
+
+class _Messenger:
+    def __init__(self, ok=True):
+        self.ok = ok
+        self.sent = []
+
+    async def send_text(self, text):
+        self.sent.append(text)
+        return self.ok
+
+
 def _reading(kind="spread", question="工作压力", spirit_line=False):
     return SimpleNamespace(
         request=SimpleNamespace(kind=kind, question=question),
@@ -312,6 +401,56 @@ def test_publish_memory_gates_on_flag_scope_and_daily():
     container.settings.memory.feed_enabled = False
     asyncio.run(_publish_memory(container, _reading(), _incoming(), "0.10.1"))
     assert len(memory.events) == 1
+
+
+def test_notice_is_sent_once_and_marked_after_success():
+    memory = _NoticeMemory()
+    kv = _FakeKV()
+    container = SimpleNamespace(
+        settings=SimpleNamespace(memory=SimpleNamespace(feed_enabled=True)),
+        memory=memory,
+        kv=kv,
+    )
+    messenger = _Messenger(ok=True)
+    asyncio.run(_publish_memory(container, _reading(), _incoming(), "0.10.1", messenger))
+    assert messenger.sent == [MEMORY_ENROLL_NOTICE]
+    assert kv.data["sf_memory_notice:aiocqhttp:1"] is True
+    assert memory.calls == [False]
+
+    again = _Messenger(ok=True)
+    asyncio.run(_publish_memory(container, _reading(), _incoming(), "0.10.1", again))
+    assert again.sent == []
+    assert memory.calls == [False, True]
+
+
+def test_notice_send_failure_does_not_consume_the_marker():
+    memory = _NoticeMemory()
+    kv = _FakeKV()
+    container = SimpleNamespace(
+        settings=SimpleNamespace(memory=SimpleNamespace(feed_enabled=True)),
+        memory=memory,
+        kv=kv,
+    )
+    messenger = _Messenger(ok=False)
+    asyncio.run(_publish_memory(container, _reading(), _incoming(), "0.10.1", messenger))
+    assert messenger.sent == [MEMORY_ENROLL_NOTICE]
+    assert kv.data == {}
+    assert memory.calls == [False]
+
+
+def test_notice_never_sent_in_group_or_daily():
+    memory = _NoticeMemory()
+    kv = _FakeKV()
+    container = SimpleNamespace(
+        settings=SimpleNamespace(memory=SimpleNamespace(feed_enabled=True)),
+        memory=memory,
+        kv=kv,
+    )
+    messenger = _Messenger()
+    asyncio.run(_publish_memory(container, _reading(), _incoming("group"), "0.10.1", messenger))
+    asyncio.run(_publish_memory(container, _reading(kind="daily"), _incoming(), "0.10.1", messenger))
+    assert messenger.sent == []
+    assert memory.calls == []
 
 
 def test_event_from_reading_keeps_fixed_fields():

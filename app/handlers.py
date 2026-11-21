@@ -6,6 +6,7 @@
 """
 import random
 
+from ..adapters.kv_utils import kv_get, kv_put
 from ..core.dto import DeliveryCapabilities, IncomingEvent
 from ..core.intent import build_request
 from ..core.log import log
@@ -16,6 +17,7 @@ from ..core.ports import ResultMessenger
 from ..core.texts import (
     FAIL_NOTE_TOOL,
     HELP_TEXT,
+    MEMORY_ENROLL_NOTICE,
     TOOL_EPILOGUE,
     TOOL_FAILED_SENT,
     TOOL_SEND_FAILED,
@@ -23,6 +25,7 @@ from ..core.texts import (
 from ..services.reading import ReadingContext
 
 EMPTY_FALLBACK = "（未提具体问题，请作一般运势解读）"
+MEMORY_NOTICE_KEY_PREFIX = "sf_memory_notice:"
 
 
 def _exc_detail(exc: BaseException) -> str:
@@ -32,8 +35,12 @@ def _exc_detail(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
-async def _publish_memory(container, reading, incoming, version: str) -> None:
-    """成功送达后投递羽忆事件；任何失败都不许影响已经发出的结果。"""
+async def _publish_memory(container, reading, incoming, version: str,
+                          messenger=None) -> None:
+    """成功送达后投递羽忆事件；任何失败都不许影响已经发出的结果。
+
+    没有授权但羽忆声明默认登记时，这一轮只发一次性提示、不投递；下一轮才登记。
+    """
     try:
         settings = getattr(getattr(container, "settings", None), "memory", None)
         if not getattr(settings, "feed_enabled", False):
@@ -47,7 +54,24 @@ async def _publish_memory(container, reading, incoming, version: str) -> None:
             return
         event = event_from_reading(
             reading, incoming, version, classify_topic(reading.request.question))
-        await memory.publish(event)
+        user_key = str(event.user_key)
+        kv = getattr(container, "kv", None)
+        notified = False
+        if kv is not None:
+            value, ok = await kv_get(kv, MEMORY_NOTICE_KEY_PREFIX + user_key,
+                                     False, "羽忆首次提示标记")
+            notified = bool(value) if ok else False
+        publisher = getattr(memory, "publish_event", None)
+        if publisher is None:
+            await memory.publish(event)
+            return
+        outcome = await publisher(event, enrollment_notified=notified)
+        if not outcome.notice_needed or messenger is None:
+            return
+        # 提示发送成功才落账：失败时下一场占卜会重新提示，不能永久消耗一次机会。
+        if await messenger.send_text(MEMORY_ENROLL_NOTICE) and kv is not None:
+            await kv_put(kv, MEMORY_NOTICE_KEY_PREFIX + user_key,
+                         True, "羽忆首次提示标记")
     except Exception as exc:
         log.warning(f"羽忆事件投递失败（不影响占卜）: {_exc_detail(exc)}")
 
@@ -83,7 +107,7 @@ async def command_entry(container, incoming: IncomingEvent,
             empty_fallback=empty_fallback, epilogue=True)
         delivered = await container.presenter.present(reading, messenger, caps)
         if delivered:
-            await _publish_memory(container, reading, incoming, version)
+            await _publish_memory(container, reading, incoming, version, messenger)
     except Exception as e:
         log.error(f"命令占卜失败: {_exc_detail(e)}", exc_info=True)
         # 异常细节只进日志：err_tpl 是纯友好文案
@@ -143,7 +167,7 @@ async def tool_entry(container, incoming: IncomingEvent,
             question=request.question, fail_note=FAIL_NOTE_TOOL, epilogue=False)
         delivered = await container.presenter.present(reading, messenger, caps)
         if delivered:
-            await _publish_memory(container, reading, incoming, version)
+            await _publish_memory(container, reading, incoming, version, messenger)
         return note if delivered else TOOL_SEND_FAILED
     except Exception as e:
         log.error(f"自然语言占卜失败: {_exc_detail(e)}")

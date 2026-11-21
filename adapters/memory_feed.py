@@ -12,6 +12,7 @@ import json
 import os
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -29,6 +30,14 @@ from ..core.memory_contracts import (
 
 EVENT_RETENTION_SECONDS = 7 * 24 * 3600
 SWEEP_INTERVAL_SECONDS = 3600
+
+
+@dataclass(frozen=True)
+class PublishOutcome:
+    """一次投递的结果：是否落盘，以及是否需要向用户展示首次登记提示。"""
+
+    published: bool = False
+    notice_needed: bool = False
 
 
 def _now() -> datetime:
@@ -57,11 +66,17 @@ class MemoryFeed:
     # ---- 端口实现 -----------------------------------------------------
 
     async def publish(self, event) -> bool:
+        return (await self.publish_event(event)).published
+
+    async def publish_event(self, event, *,
+                            enrollment_notified: bool = False) -> PublishOutcome:
+        """投递事件；没有授权但羽忆声明默认登记时，返回是否需要先提示用户。"""
         try:
-            return await asyncio.to_thread(self._publish_sync, event)
+            return await asyncio.to_thread(
+                self._publish_sync, event, enrollment_notified)
         except Exception as exc:
             self._warn_once("publish", f"羽忆事件投递失败（不影响占卜）: {exc}")
-            return False
+            return PublishOutcome()
 
     async def load_context(self, user_key: str, conversation_scope: str) -> str | None:
         if str(conversation_scope) != "private":
@@ -80,31 +95,51 @@ class MemoryFeed:
 
     # ---- 内部同步实现 -------------------------------------------------
 
-    def _publish_sync(self, event) -> bool:
-        if not self._lease_valid():
-            return False
+    def _publish_sync(self, event, enrollment_notified: bool) -> PublishOutcome:
+        lease = self._read_lease()
+        if lease is None:
+            return PublishOutcome()
         payload = event.to_dict()
         if str(payload.get("conversation_scope")) != "private":
-            return False
+            return PublishOutcome()
         if str(payload.get("kind")) not in ("spread", "single"):
-            return False
-        auth = self._read_auth(str(event.user_key))
-        if auth is None or not auth.get("auto_history"):
-            return False
-        if not auth.get("store_topic"):
+            return PublishOutcome()
+        auto_enroll = lease.get("auto_enroll") is True
+        user_key = str(event.user_key)
+        state, auth = self._auth_state(user_key)
+        if state == "invalid":
+            # 文件存在但过期/损坏：用户曾经有授权，不能当作新用户重新登记。
+            return PublishOutcome()
+        if state == "missing":
+            if not auto_enroll:
+                return PublishOutcome()
+            if not enrollment_notified:
+                return PublishOutcome(notice_needed=True)
+        elif not auth or not auth.get("auto_history"):
+            return PublishOutcome()
+        elif not auth.get("store_topic"):
             payload["topic_key"] = ""
         path = self.root / "events" / f"{event.event_id}.json"
         self._write_json(path, payload, EVENT_MAX_BYTES)
-        # 写入期间用户可能撤销授权：以落盘后的最新授权为准，必要时撤回事件。
-        fresh = self._read_auth(str(event.user_key))
-        if fresh is None or not fresh.get("auto_history"):
+        # 写入期间授权可能被撤销或被羽忆补建：以落盘后的最新状态为准。
+        fresh_state, fresh = self._auth_state(user_key)
+        if fresh_state == "valid":
+            if not fresh or not fresh.get("auto_history"):
+                path.unlink(missing_ok=True)
+                return PublishOutcome()
+            if not fresh.get("store_topic") and payload.get("topic_key"):
+                payload["topic_key"] = ""
+                self._write_json(path, payload, EVENT_MAX_BYTES)
+        elif fresh_state == "missing":
+            # 只有默认登记的首条事件允许没有授权；租约必须仍然允许登记。
+            if not (state == "missing" and auto_enroll and self._auto_enroll_now()):
+                path.unlink(missing_ok=True)
+                return PublishOutcome()
+        else:
             path.unlink(missing_ok=True)
-            return False
-        if not fresh.get("store_topic") and payload.get("topic_key"):
-            payload["topic_key"] = ""
-            self._write_json(path, payload, EVENT_MAX_BYTES)
+            return PublishOutcome()
         self._maybe_sweep()
-        return True
+        return PublishOutcome(published=True)
 
     def _load_context_sync(self, user_key: str) -> str | None:
         if not self._lease_valid():
@@ -132,46 +167,60 @@ class MemoryFeed:
         return context.text
 
     def _lease_valid(self) -> bool:
+        return self._read_lease() is not None
+
+    def _read_lease(self) -> dict | None:
         payload = self._read_json(self.root / "lease.json", LEASE_MAX_BYTES)
         if not isinstance(payload, dict) or payload.get("schema") != SCHEMA_LEASE:
-            return False
+            return None
         required = ("instance_id", "started_at", "refreshed_at", "expires_at", "source")
         for key in required:
             value = payload.get(key)
             if not isinstance(value, str) or not value.strip():
-                return False
+                return None
         try:
             parse_ts(str(payload["started_at"]))
             parse_ts(str(payload["refreshed_at"]))
-            return _now() < parse_ts(str(payload["expires_at"]))
+            return payload if _now() < parse_ts(str(payload["expires_at"])) else None
         except (TypeError, ValueError):
-            return False
+            return None
+
+    def _auto_enroll_now(self) -> bool:
+        lease = self._read_lease()
+        return bool(lease and lease.get("auto_enroll") is True)
 
     def _read_auth(self, user_key: str) -> dict | None:
+        state, payload = self._auth_state(user_key)
+        return payload if state == "valid" else None
+
+    def _auth_state(self, user_key: str) -> tuple[str, dict | None]:
+        """区分「没有文件」与「文件在但不可用」：只有前者允许自动登记。"""
         path = self.root / "auth" / f"{_user_hash(user_key)}.json"
+        if not path.exists():
+            return "missing", None
         payload = self._read_json(path, AUTH_MAX_BYTES)
         if not isinstance(payload, dict) or payload.get("schema") != SCHEMA_AUTH:
-            return None
+            return "invalid", None
         hash_value = payload.get("user_key_hash")
         if not isinstance(hash_value, str) or not hash_value.strip():
-            return None
+            return "invalid", None
         if hash_value != _user_hash(user_key):
-            return None
+            return "invalid", None
         if not isinstance(payload.get("auto_history"), bool):
-            return None
+            return "invalid", None
         if not isinstance(payload.get("store_topic"), bool):
-            return None
+            return "invalid", None
         for key in ("generated_at", "expires_at", "source"):
             value = payload.get(key)
             if not isinstance(value, str) or not value.strip():
-                return None
+                return "invalid", None
         try:
             parse_ts(str(payload["generated_at"]))
             if _now() >= parse_ts(str(payload["expires_at"])):
-                return None
+                return "invalid", None
         except (TypeError, ValueError):
-            return None
-        return payload
+            return "invalid", None
+        return "valid", payload
 
     def _read_json(self, path: Path, max_bytes: int, *,
                    require_dict: bool = True) -> object | None:

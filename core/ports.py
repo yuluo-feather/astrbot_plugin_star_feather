@@ -52,6 +52,11 @@ class MemoryEventPublisher(Protocol):
 
     async def publish(self, event: Any) -> bool: ...
 
+    async def publish_event(self, event: Any, *,
+                            enrollment_notified: bool = False) -> Any:
+        """返回 (是否投递, 是否需要首次提示)；实现见 adapters/memory_feed.py。"""
+        ...
+
 
 @runtime_checkable
 class MemoryContextReader(Protocol):

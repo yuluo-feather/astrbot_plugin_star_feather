@@ -217,7 +217,7 @@ I grouped the options by purpose — configure them in the AstrBot plugin manage
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `memory.feed_enabled` | bool | `false` | Publish reading events to Feather Memory. Only private, delivered spread/single readings with a valid user authorization are written; groups and the daily reading are never published. |
+| `memory.feed_enabled` | bool | `false` | Publish reading events to Feather Memory. Only private, delivered spread/single readings are considered; an authorized user is published directly, while an unauthorized user gets one notice first and is enrolled from the next reading when Feather Memory advertises default enrollment. Groups and the daily reading are never published. |
 | `memory.context_enabled` | bool | `false` | Read context produced by Feather Memory. Only private spread/single readings with a valid lease and context are injected as reference material; without a usable context the prompt is unchanged. |
 | `memory.share_topic_text` | bool | `false` | Reserved: contract v1 only stores a fixed topic enum, never the raw question; this key currently does not change event contents. |
 
