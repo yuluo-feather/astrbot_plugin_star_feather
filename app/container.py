@@ -5,6 +5,7 @@ from ..adapters.astrbot_io import PluginKV
 from ..adapters.clock import Clock
 from ..adapters.deliver import Deliverer
 from ..adapters.llm import AstrBotProviderGateway
+from ..adapters.memory_feed import MemoryFeed
 from ..adapters.presenter import Presenter
 from ..ai.chain import AiInterpreter
 from ..core.settings import Settings, parse
@@ -26,9 +27,10 @@ class Container:
     renderer: Renderer
     reading: ReadingService
     presenter: Presenter
+    memory: MemoryFeed
 
 
-def build_container(context, plugin, config) -> Container:
+def build_container(context, plugin, config, version: str) -> Container:
     """按一份原始配置装配全部依赖。"""
     settings = parse(config)
     clock = Clock.from_context(context)
@@ -51,10 +53,11 @@ def build_container(context, plugin, config) -> Container:
                          structure_check=settings.ai.structure_check)
     gate = LimitGate(kv, settings.tool.cmd_rate_limit, settings.limit.daily_count, clock)
     renderer = Renderer(new_instance_image_dir(), settings.output.send_mode)
+    memory = MemoryFeed(version)
     reading = ReadingService(
         settings=settings, clock=clock, daily=daily,
-        interpreter=interpreter, renderer=renderer)
+        interpreter=interpreter, renderer=renderer, memory_reader=memory)
     presenter = Presenter(Deliverer(
         settings.output.segment_size, settings.output.disclaimer))
     return Container(settings, clock, kv, interpreter, daily, gate, renderer,
-                     reading, presenter)
+                     reading, presenter, memory)

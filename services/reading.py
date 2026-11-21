@@ -24,7 +24,7 @@ from ..core.models import (
     Reading,
     ReadingRequest,
 )
-from ..core.ports import Messenger, Rng
+from ..core.ports import MemoryContextReader, Messenger, Rng
 from ..core.settings import Settings
 from ..core.texts import RESULT_EPILOGUE, SHUFFLE_LINES
 
@@ -36,6 +36,7 @@ class ReadingContext:
     uid: str
     umo: str | None
     messenger: Messenger
+    scope: str = "private"
 
 
 @dataclass(frozen=True)
@@ -60,13 +61,15 @@ class ReadingService:
     """三入口共用的占卜流水线。"""
 
     def __init__(self, *, settings: Settings, clock, daily, interpreter, renderer,
-                 rng: Rng | None = None):
+                 rng: Rng | None = None,
+                 memory_reader: MemoryContextReader | None = None):
         self.settings = settings
         self.clock = clock
         self.daily = daily
         self.interpreter = interpreter
         self.renderer = renderer
         self.rng = rng
+        self.memory_reader = memory_reader
 
     async def prepare(self, request: ReadingRequest, uid: str) -> PreparedReading:
         """按意图抽牌：今日固定走缓存，其余自由随机。
@@ -113,9 +116,16 @@ class ReadingService:
                 ctx.umo, prepared.uid, prepared.formation, positions, picks, clean,
                 persona_eff, budget, today=prepared.today)
         else:
+            memory_text = None
+            if (ctx.scope == "private"
+                    and self.settings.memory.context_enabled
+                    and self.memory_reader is not None):
+                memory_text = await self.memory_reader.load_context(
+                    prepared.uid, ctx.scope)
             interp_call = self.interpret(
                 ctx.umo, prepared.formation, positions, picks,
-                clean or empty_fallback, persona_eff, budget)
+                clean or empty_fallback, persona_eff, budget,
+                memory_context=memory_text)
 
         if spirit_call is None:
             spirit, interpretation = "", await interp_call
@@ -164,12 +174,18 @@ class ReadingService:
 
     async def interpret(self, umo: str | None, formation: str, positions: list[str],
                         picks: list[Pick], user_input: str,
-                        persona_eff: str | None = None, budget=None) -> str | None:
+                        persona_eff: str | None = None, budget=None,
+                        memory_context: str | None = None) -> str | None:
         """AI 结构化解读：牌面详情在这里格式化，解释器保持对塔罗结构零依赖。"""
         detail = render_detail(positions, picks)
+        if memory_context is None:
+            return await self.interpreter.interpret(
+                umo, formation, positions, picks, user_input, detail,
+                persona_eff=persona_eff, budget=budget)
         return await self.interpreter.interpret(
             umo, formation, positions, picks, user_input, detail,
-            persona_eff=persona_eff, budget=budget)
+            persona_eff=persona_eff, budget=budget,
+            memory_context=memory_context)
 
     def _shuffle_hint(self) -> str | None:
         if not self.settings.output.shuffle_lines:

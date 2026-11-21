@@ -96,6 +96,15 @@ class OutputSettings:
 
 
 @dataclass(frozen=True)
+class MemorySettings:
+    """羽忆文件契约：默认全关，只有管理员显式打开才投递 / 注入。"""
+
+    feed_enabled: bool = False
+    context_enabled: bool = False
+    share_topic_text: bool = False
+
+
+@dataclass(frozen=True)
 class Settings:
     """一份配置的解析结果：四组值，不可变。"""
 
@@ -103,6 +112,7 @@ class Settings:
     tool: ToolSettings = field(default_factory=ToolSettings)
     limit: LimitSettings = field(default_factory=LimitSettings)
     output: OutputSettings = field(default_factory=OutputSettings)
+    memory: MemorySettings = field(default_factory=MemorySettings)
 
 
 def resolve_send_mode(config) -> str:
@@ -256,5 +266,10 @@ def parse(config) -> Settings:
             daily_card=_cfg_bool(config, "output", "daily_card", DEFAULT_DAILY_CARD),
             shuffle_lines=_cfg_bool(config, "output", "shuffle_lines", True),
             disclaimer=str(_cfg_get(config, "output", "disclaimer", DEFAULT_DISCLAIMER)),
+        ),
+        memory=MemorySettings(
+            feed_enabled=_cfg_bool(config, "memory", "feed_enabled", False),
+            context_enabled=_cfg_bool(config, "memory", "context_enabled", False),
+            share_topic_text=_cfg_bool(config, "memory", "share_topic_text", False),
         ),
     )

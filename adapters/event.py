@@ -66,6 +66,14 @@ def platform_name(event) -> str:
         return ""
 
 
+def conversation_scope(event) -> str:
+    """私聊 / 群聊；判不出时按 group 处理，宁可少记也不误投。"""
+    try:
+        return "private" if event.is_private_chat() else "group"
+    except Exception:
+        return "group"
+
+
 def self_id(event) -> str:
     """转发节点 uin：取框架 get_self_id()，取不到兜底 "0"（现状口径）。"""
     try:
@@ -84,6 +92,7 @@ def incoming_from_event(event) -> IncomingEvent:
         conversation_id=getattr(event, "unified_msg_origin", None),
         message_text=getattr(event, "message_str", "") or "",
         platform_name=platform_name(event),
+        conversation_scope=conversation_scope(event),
     )
 
 

@@ -178,5 +178,30 @@
         "hint": "每次占卜结果之后单独发送的一条说明，可自定义文案；设为空字符串即可完全关闭。默认值：『✨ 占卜仅供娱乐参考，选择权永远在你手里。』"
       }
     }
+  },
+  "memory": {
+    "type": "object",
+    "description": "[羽忆] 共享记忆文件契约（默认关闭）",
+    "hint": "羽忆是独立插件；这里只控制星羽是否向它投递占卜事件、是否读取它生成的上下文。默认全关，安装羽忆后仍需显式开启。",
+    "items": {
+      "feed_enabled": {
+        "description": "向羽忆投递占卜事件",
+        "type": "bool",
+        "default": false,
+        "hint": "开启后，普通占卜/单抽成功送达且用户已授权时才写事件文件；群聊与今日牌运不投递。默认 false。"
+      },
+      "context_enabled": {
+        "description": "读取羽忆生成的记忆上下文",
+        "type": "bool",
+        "default": false,
+        "hint": "开启后，普通占卜/单抽在私聊中读取有效的 context 文件并作为参考资料注入提示词；没有文件时提示词保持不变。默认 false。"
+      },
+      "share_topic_text": {
+        "description": "预留：允许事件携带主题文本",
+        "type": "bool",
+        "default": false,
+        "hint": "契约 v1 只写固定主题枚举，不写原始问题；此键预留给后续版本，当前不改变事件内容。默认 false。"
+      }
+    }
   }
 }

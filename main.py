@@ -31,7 +31,7 @@ class StarFeatherPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         super().__init__(context)
         bind_host_logger()  # 核心层的中立日志出口从这里接上宿主；失败只降级
-        self.container = build_container(context, self, config)
+        self.container = build_container(context, self, config, VERSION)
         # 可视化视图（views/）的只读接口：老版本宿主没有 register_web_api 时
         # 只是少一个入口，插件加载照旧。
         register_web_apis(context, self.container, VERSION)
@@ -62,6 +62,11 @@ class StarFeatherPlugin(Star):
                 await asyncio.to_thread(cleanup_stale_images, image_dir)
             except Exception as e:
                 logger.warning(f"启动回收过期图片失败（不影响加载）: {e}")
+        # 羽忆共享目录清扫：没有启用 / 没有安装时只是扫描空目录，不建目录。
+        try:
+            await asyncio.to_thread(self.container.memory.sweep)
+        except Exception as e:
+            logger.warning(f"羽忆共享目录清扫失败（不影响加载）: {e}")
         # 登记当前代并打一行 [cfg] LOAD：诊断可以失效，插件加载不能失败。
         register_instance(self)
 

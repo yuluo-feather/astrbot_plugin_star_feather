@@ -44,3 +44,18 @@ class ResultMessenger(Messenger, Protocol):
     """
 
     def chain_result(self, chain: Any) -> Any: ...
+
+
+@runtime_checkable
+class MemoryEventPublisher(Protocol):
+    """把一次成功送达的占卜交给羽忆；授权 / 租约 / 文件失败都返回 False。"""
+
+    async def publish(self, event: Any) -> bool: ...
+
+
+@runtime_checkable
+class MemoryContextReader(Protocol):
+    """按用户读取羽忆上下文；没有有效上下文时返回 None。"""
+
+    async def load_context(self, user_key: str,
+                           conversation_scope: str) -> str | None: ...

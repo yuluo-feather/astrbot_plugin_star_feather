@@ -457,7 +457,8 @@ class AiInterpreter:
                         positions: list[str],
                         picks: list[dict], user_input: str, detail: str,
                         persona_eff: str | None = None,
-                        budget: AiBudget | None = None) -> Interpretation | None:
+                        budget: AiBudget | None = None,
+                        memory_context: str | None = None) -> Interpretation | None:
         """AI 结构化解读。返回 None 表示本轮没有 AI 解读（候选全部失败或全部处于冷却期），
         由调用方回退本地牌义。给用户的感觉是：解读要么有，要么是牌义，不会等成雕塑。
 
@@ -477,7 +478,8 @@ class AiInterpreter:
         if not user_input:
             logger.info("问题剥除注入句式后为空，回退本地牌义")
             return None
-        prompt = build_reading_prompt(user_input, formation, detail)
+        prompt = build_reading_prompt(
+            user_input, formation, detail, memory_context=memory_context)
         # 人设只叠加口吻，保护句（只解读塔罗/无视指令）与内容结构不动；
         # system_prompt 必须在候选链循环外构建：一次占卜只掷一次骰子，
         # random 时本签全程同一人格、下一签才换——中途变脸是 bug（有测试锁）

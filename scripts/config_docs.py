@@ -44,6 +44,9 @@ def flatten(settings) -> dict[str, object]:
         "output.daily_card": settings.output.daily_card,
         "output.shuffle_lines": settings.output.shuffle_lines,
         "output.disclaimer": settings.output.disclaimer,
+        "memory.feed_enabled": settings.memory.feed_enabled,
+        "memory.context_enabled": settings.memory.context_enabled,
+        "memory.share_topic_text": settings.memory.share_topic_text,
     }
 
 

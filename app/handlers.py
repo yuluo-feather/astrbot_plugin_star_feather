@@ -9,7 +9,9 @@ import random
 from ..core.dto import DeliveryCapabilities, IncomingEvent
 from ..core.intent import build_request
 from ..core.log import log
-from ..core.models import KIND_HELP
+from ..core.memory_contracts import event_from_reading
+from ..core.memory_topic import classify_topic
+from ..core.models import KIND_DAILY, KIND_HELP
 from ..core.ports import ResultMessenger
 from ..core.texts import (
     FAIL_NOTE_TOOL,
@@ -28,6 +30,26 @@ def _exc_detail(exc: BaseException) -> str:
     if isinstance(exc, BaseExceptionGroup):
         return " | ".join(f"{type(x).__name__}: {x}" for x in exc.exceptions)
     return f"{type(exc).__name__}: {exc}"
+
+
+async def _publish_memory(container, reading, incoming, version: str) -> None:
+    """成功送达后投递羽忆事件；任何失败都不许影响已经发出的结果。"""
+    try:
+        settings = getattr(getattr(container, "settings", None), "memory", None)
+        if not getattr(settings, "feed_enabled", False):
+            return
+        if getattr(incoming, "conversation_scope", "private") != "private":
+            return
+        if reading.request.kind == KIND_DAILY:
+            return
+        memory = getattr(container, "memory", None)
+        if memory is None:
+            return
+        event = event_from_reading(
+            reading, incoming, version, classify_topic(reading.request.question))
+        await memory.publish(event)
+    except Exception as exc:
+        log.warning(f"羽忆事件投递失败（不影响占卜）: {_exc_detail(exc)}")
 
 
 def help_text(version: str) -> str:
@@ -55,10 +77,13 @@ async def command_entry(container, incoming: IncomingEvent,
         uid = incoming.user_id
         prepared = await container.reading.prepare(request, uid)
         reading = await container.reading.run(
-            prepared, ReadingContext(uid, incoming.conversation_id, messenger),
+            prepared, ReadingContext(uid, incoming.conversation_id, messenger,
+                                     getattr(incoming, "conversation_scope", "private")),
             question=request.question, fail_note=fail_note,
             empty_fallback=empty_fallback, epilogue=True)
-        await container.presenter.present(reading, messenger, caps)
+        delivered = await container.presenter.present(reading, messenger, caps)
+        if delivered:
+            await _publish_memory(container, reading, incoming, version)
     except Exception as e:
         log.error(f"命令占卜失败: {_exc_detail(e)}", exc_info=True)
         # 异常细节只进日志：err_tpl 是纯友好文案
@@ -113,9 +138,12 @@ async def tool_entry(container, incoming: IncomingEvent,
         uid = incoming.user_id
         prepared = await container.reading.prepare(request, uid)
         reading = await container.reading.run(
-            prepared, ReadingContext(uid, incoming.conversation_id, messenger),
+            prepared, ReadingContext(uid, incoming.conversation_id, messenger,
+                                     getattr(incoming, "conversation_scope", "private")),
             question=request.question, fail_note=FAIL_NOTE_TOOL, epilogue=False)
         delivered = await container.presenter.present(reading, messenger, caps)
+        if delivered:
+            await _publish_memory(container, reading, incoming, version)
         return note if delivered else TOOL_SEND_FAILED
     except Exception as e:
         log.error(f"自然语言占卜失败: {_exc_detail(e)}")
