@@ -111,8 +111,11 @@ class MemoryFeed:
         if not self._lease_valid():
             return None
         path = self.root / "context" / f"{_user_hash(user_key)}.json"
-        payload = self._read_json(path, CONTEXT_MAX_BYTES)
+        payload = self._read_json(path, CONTEXT_MAX_BYTES, require_dict=False)
         if payload is None:
+            return None
+        if not isinstance(payload, dict):
+            self._warn_once(str(path), f"羽忆 context 不是 JSON 对象，已忽略: {path.name}")
             return None
         context = parse_context(payload)
         if context is None:
@@ -165,7 +168,8 @@ class MemoryFeed:
             return None
         return payload
 
-    def _read_json(self, path: Path, max_bytes: int) -> dict | None:
+    def _read_json(self, path: Path, max_bytes: int, *,
+                   require_dict: bool = True) -> object | None:
         try:
             if path.stat().st_size > max_bytes:
                 self._warn_once(str(path), f"羽忆文件超限，已忽略: {path.name}")
@@ -177,7 +181,9 @@ class MemoryFeed:
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             self._warn_once(str(path), f"羽忆文件读取失败，已忽略: {path.name} ({exc})")
             return None
-        return payload if isinstance(payload, dict) else None
+        if require_dict and not isinstance(payload, dict):
+            return None
+        return payload
 
     def _write_json(self, path: Path, payload: dict, max_bytes: int) -> None:
         data = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
@@ -220,7 +226,7 @@ class MemoryFeed:
                 except OSError:
                     continue
                 payload = self._read_json(path, AUTH_MAX_BYTES if sub == "auth" else CONTEXT_MAX_BYTES)
-                if payload is None:
+                if not isinstance(payload, dict):
                     continue
                 try:
                     expired = _now() >= parse_ts(str(payload.get("expires_at") or ""))

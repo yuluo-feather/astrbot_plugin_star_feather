@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import time
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -123,20 +124,23 @@ def test_publish_rejects_group_and_daily(tmp_path):
 
 def test_publish_requires_full_lease_and_auth(tmp_path):
     feed = MemoryFeed("0.10.1", root=tmp_path)
-    _lease(tmp_path)
-    _auth(tmp_path, "aiocqhttp:1", auto=True)
-    lease_path = tmp_path / "lease.json"
-    lease = json.loads(lease_path.read_text(encoding="utf-8"))
-    lease.pop("source")
-    _write(lease_path, lease)
-    assert asyncio.run(feed.publish(_event())) is False
+    for key in ("instance_id", "started_at", "refreshed_at", "expires_at", "source"):
+        _lease(tmp_path)
+        lease_path = tmp_path / "lease.json"
+        lease = json.loads(lease_path.read_text(encoding="utf-8"))
+        lease.pop(key)
+        _write(lease_path, lease)
+        assert asyncio.run(feed.publish(_event())) is False, key
 
-    _lease(tmp_path)
-    auth_path = tmp_path / "auth" / f"{_hash('aiocqhttp:1')}.json"
-    auth = json.loads(auth_path.read_text(encoding="utf-8"))
-    auth.pop("source")
-    _write(auth_path, auth)
-    assert asyncio.run(feed.publish(_event())) is False
+    for key in ("user_key_hash", "generated_at", "expires_at", "source",
+                "auto_history", "store_topic"):
+        _lease(tmp_path)
+        _auth(tmp_path, "aiocqhttp:1", auto=True)
+        auth_path = tmp_path / "auth" / f"{_hash('aiocqhttp:1')}.json"
+        auth = json.loads(auth_path.read_text(encoding="utf-8"))
+        auth.pop(key)
+        _write(auth_path, auth)
+        assert asyncio.run(feed.publish(_event())) is False, key
 
 
 def test_oversize_event_is_not_written(tmp_path):
@@ -161,14 +165,23 @@ def test_sweep_removes_old_and_expired_files(tmp_path):
     _auth(tmp_path, "aiocqhttp:1", auto=True, expires_in=-1)
     _context(tmp_path, "aiocqhttp:1", expires_in=-1)
     old_event = tmp_path / "events" / "old.json"
-    _write(old_event, {"schema": SCHEMA_EVENT})
+    _write(old_event, _event().to_dict())
+    fresh_event = tmp_path / "events" / "fresh.json"
+    _write(fresh_event, replace(_event(), event_id="fresh").to_dict())
     old = time.time() - 8 * 24 * 3600
     os.utime(old_event, (old, old))
     feed.sweep()
     assert not lease_path.exists()
     assert not old_event.exists()
-    assert not (tmp_path / "auth" / f"{_hash('aiocqhttp:1')}.json").exists()
-    assert not (tmp_path / "context" / f"{_hash('aiocqhttp:1')}.json").exists()
+    assert fresh_event.exists()
+
+
+def test_non_object_context_is_ignored(tmp_path):
+    feed = MemoryFeed("0.10.1", root=tmp_path)
+    _lease(tmp_path)
+    path = tmp_path / "context" / f"{_hash('aiocqhttp:1')}.json"
+    _write(path, [])
+    assert asyncio.run(feed.load_context("aiocqhttp:1", "private")) is None
 
 
 def test_load_context_requires_lease_private_and_fresh(tmp_path):
