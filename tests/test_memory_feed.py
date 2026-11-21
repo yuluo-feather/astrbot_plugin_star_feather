@@ -156,13 +156,9 @@ def test_oversize_event_is_not_written(tmp_path):
     assert not list((tmp_path / "events").glob("*.json"))
 
 
-def test_sweep_removes_old_and_expired_files(tmp_path):
+def test_sweep_removes_only_old_events(tmp_path):
     feed = MemoryFeed("0.10.1", root=tmp_path)
     _lease(tmp_path)
-    lease_path = tmp_path / "lease.json"
-    lease = json.loads(lease_path.read_text(encoding="utf-8"))
-    lease["expires_at"] = _iso(-2)
-    _write(lease_path, lease)
     _auth(tmp_path, "aiocqhttp:1", auto=True, expires_in=-1)
     _context(tmp_path, "aiocqhttp:1", expires_in=-1)
     old_event = tmp_path / "events" / "old.json"
@@ -172,11 +168,25 @@ def test_sweep_removes_old_and_expired_files(tmp_path):
     old = time.time() - 8 * 24 * 3600
     os.utime(old_event, (old, old))
     feed.sweep()
-    assert not lease_path.exists()
     assert not old_event.exists()
     assert fresh_event.exists()
-    assert not (tmp_path / "auth" / f"{_hash('aiocqhttp:1')}.json").exists()
-    assert not (tmp_path / "context" / f"{_hash('aiocqhttp:1')}.json").exists()
+    # auth / context / lease 由羽忆负责清扫，星羽只处理自己写的事件。
+    assert (tmp_path / "lease.json").exists()
+    assert (tmp_path / "auth" / f"{_hash('aiocqhttp:1')}.json").exists()
+    assert (tmp_path / "context" / f"{_hash('aiocqhttp:1')}.json").exists()
+
+
+def test_load_context_requires_valid_auth(tmp_path):
+    feed = MemoryFeed("0.10.1", root=tmp_path)
+    _lease(tmp_path)
+    _context(tmp_path, "aiocqhttp:1")
+    assert asyncio.run(feed.load_context("aiocqhttp:1", "private")) is None
+
+    _auth(tmp_path, "aiocqhttp:1", auto=True)
+    assert asyncio.run(feed.load_context("aiocqhttp:1", "private")) == "最近关注工作"
+
+    _auth(tmp_path, "aiocqhttp:1", auto=True, expires_in=-1)
+    assert asyncio.run(feed.load_context("aiocqhttp:1", "private")) is None
 
 
 def test_expired_auth_rejects_publish(tmp_path):
@@ -190,6 +200,7 @@ def test_expired_auth_rejects_publish(tmp_path):
 def test_non_object_context_is_ignored(tmp_path):
     feed = MemoryFeed("0.10.1", root=tmp_path)
     _lease(tmp_path)
+    _auth(tmp_path, "aiocqhttp:1")
     path = tmp_path / "context" / f"{_hash('aiocqhttp:1')}.json"
     _write(path, [])
     assert asyncio.run(feed.load_context("aiocqhttp:1", "private")) is None
@@ -198,6 +209,7 @@ def test_non_object_context_is_ignored(tmp_path):
 def test_null_context_is_ignored_with_warning(tmp_path, caplog):
     feed = MemoryFeed("0.10.1", root=tmp_path)
     _lease(tmp_path)
+    _auth(tmp_path, "aiocqhttp:1")
     path = tmp_path / "context" / f"{_hash('aiocqhttp:1')}.json"
     _write(path, None)
     with caplog.at_level(logging.WARNING):
@@ -211,6 +223,7 @@ def test_load_context_requires_lease_private_and_fresh(tmp_path):
     assert asyncio.run(feed.load_context("aiocqhttp:1", "private")) is None
 
     _lease(tmp_path)
+    _auth(tmp_path, "aiocqhttp:1")
     assert asyncio.run(feed.load_context("aiocqhttp:1", "private")) == "最近关注工作"
     assert asyncio.run(feed.load_context("aiocqhttp:1", "group")) is None
 
@@ -221,6 +234,7 @@ def test_load_context_requires_lease_private_and_fresh(tmp_path):
 def test_context_rejects_missing_required_fields(tmp_path):
     feed = MemoryFeed("0.10.1", root=tmp_path)
     _lease(tmp_path)
+    _auth(tmp_path, "aiocqhttp:1")
     path = tmp_path / "context" / f"{_hash('aiocqhttp:1')}.json"
     _write(path, {
         "schema": SCHEMA_CONTEXT,
