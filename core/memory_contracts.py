@@ -5,7 +5,8 @@
 """
 from __future__ import annotations
 
-import uuid
+import os
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -21,7 +22,22 @@ AUTH_MAX_BYTES = 4 * 1024
 CONTEXT_TEXT_MAX_CHARS = 600
 CONTEXT_ITEMS_MAX = 5
 
-ALLOWED_EVENT_KINDS = ("spread", "single")
+_ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+
+def _ulid_encode(value: int, length: int) -> str:
+    chars = []
+    for _ in range(length):
+        chars.append(_ULID_ALPHABET[value & 0x1F])
+        value >>= 5
+    return "".join(reversed(chars))
+
+
+def new_event_id() -> str:
+    """26 字符 ULID：48-bit 毫秒时间 + 80-bit 随机，按时间字典序可排。"""
+    millis = int(time.time() * 1000) & ((1 << 48) - 1)
+    randomness = int.from_bytes(os.urandom(10), "big")
+    return _ulid_encode(millis, 10) + _ulid_encode(randomness, 16)
 
 
 def utc_now_iso() -> str:
@@ -77,7 +93,7 @@ def event_from_reading(reading, incoming, version: str, topic_key: str = "") -> 
         for p in reading.picks
     )
     return ReadingEvent(
-        event_id=uuid.uuid4().hex,
+        event_id=new_event_id(),
         created_at=utc_now_iso(),
         source_version=str(version),
         platform_id=str(incoming.platform_id),
