@@ -5,6 +5,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import time
 from dataclasses import replace
@@ -174,6 +175,16 @@ def test_sweep_removes_old_and_expired_files(tmp_path):
     assert not lease_path.exists()
     assert not old_event.exists()
     assert fresh_event.exists()
+    assert not (tmp_path / "auth" / f"{_hash('aiocqhttp:1')}.json").exists()
+    assert not (tmp_path / "context" / f"{_hash('aiocqhttp:1')}.json").exists()
+
+
+def test_expired_auth_rejects_publish(tmp_path):
+    feed = MemoryFeed("0.10.1", root=tmp_path)
+    _lease(tmp_path)
+    _auth(tmp_path, "aiocqhttp:1", auto=True, expires_in=-1)
+    assert asyncio.run(feed.publish(_event())) is False
+    assert not list((tmp_path / "events").glob("*.json"))
 
 
 def test_non_object_context_is_ignored(tmp_path):
@@ -182,6 +193,16 @@ def test_non_object_context_is_ignored(tmp_path):
     path = tmp_path / "context" / f"{_hash('aiocqhttp:1')}.json"
     _write(path, [])
     assert asyncio.run(feed.load_context("aiocqhttp:1", "private")) is None
+
+
+def test_null_context_is_ignored_with_warning(tmp_path, caplog):
+    feed = MemoryFeed("0.10.1", root=tmp_path)
+    _lease(tmp_path)
+    path = tmp_path / "context" / f"{_hash('aiocqhttp:1')}.json"
+    _write(path, None)
+    with caplog.at_level(logging.WARNING):
+        assert asyncio.run(feed.load_context("aiocqhttp:1", "private")) is None
+    assert any("无法解析" in record.getMessage() for record in caplog.records)
 
 
 def test_load_context_requires_lease_private_and_fresh(tmp_path):

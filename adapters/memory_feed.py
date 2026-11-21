@@ -111,8 +111,11 @@ class MemoryFeed:
         if not self._lease_valid():
             return None
         path = self.root / "context" / f"{_user_hash(user_key)}.json"
+        if not path.exists():
+            return None
         payload = self._read_json(path, CONTEXT_MAX_BYTES, require_dict=False)
         if payload is None:
+            self._warn_once(str(path), f"羽忆 context 无法解析，已忽略: {path.name}")
             return None
         if not isinstance(payload, dict):
             self._warn_once(str(path), f"羽忆 context 不是 JSON 对象，已忽略: {path.name}")
