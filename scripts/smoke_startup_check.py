@@ -82,6 +82,7 @@ def _copy_plugin(dest: Path) -> int:
         cwd=REPO_ROOT,
         capture_output=True,
         check=False,
+        shell=False,
     )
     if tracked.returncode == 0 and tracked.stdout.strip():
         names = [n for n in tracked.stdout.decode("utf-8").split("\0") if n]
@@ -106,6 +107,7 @@ def _run_cli(smoke_root: Path, env: dict[str, str], *args: str) -> subprocess.Co
         env=env,
         capture_output=True,
         check=False,
+        shell=False,
     )
 
 
@@ -296,6 +298,7 @@ def main() -> int:
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
                 env=env,
+                shell=False,
             )
 
         print(f"拉起真框架（端口 {SMOKE_PORT}），等插件横幅……")
