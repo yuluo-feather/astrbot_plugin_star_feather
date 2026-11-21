@@ -52,7 +52,8 @@ class FakeReading:
         self.run_kwargs.append(kw)
         return Reading(prepared.request, prepared.uid, prepared.formation,
                        tuple(prepared.positions), tuple(prepared.picks),
-                       "sig", "AI", None, fail_note=kw.get("fail_note", ""))
+                       "sig", "AI", None, fail_note=kw.get("fail_note", ""),
+                       epilogue="✨ 固定收尾句" if kw.get("epilogue") else "")
 
 
 class FakePresenter:
@@ -135,6 +136,25 @@ class TestToolEntry:
         assert isinstance(out, str)
         assert len(evt.sent) == 1
         assert evt.sent[0].chain[0].text == "按规矩洗牌"
+
+    def test_tool_entry_sends_fixed_epilogue_before_supplement(self):
+        """真实 Presenter：结果先发、固定收尾后发；入口只返回补充引导。"""
+        from data.plugins.astrbot_plugin_star_feather.adapters.deliver import Deliverer
+        from data.plugins.astrbot_plugin_star_feather.adapters.presenter import (
+            Presenter,
+        )
+
+        settings = _settings()
+        presenter = Presenter(Deliverer(settings.output.segment_size,
+                                        settings.output.disclaimer))
+        p = _plugin(settings=settings, presenter=presenter)
+        evt = _evt()
+        out = _tool(p, evt)
+
+        first_texts = [getattr(part, "text", "") for part in evt.sent[0].chain]
+        assert any("AI" in text for text in first_texts)
+        assert evt.sent[-1].chain[0].text == "✨ 固定收尾句"
+        assert out.startswith("占卜结果和固定收尾句")
 
     def test_divine_tool_yields_only_str(self):
         p = StarFeatherPlugin.__new__(StarFeatherPlugin)

@@ -497,6 +497,24 @@ class TestRunReading:
         reading2, _ = self._run(_service(), epilogue=False)
         assert reading2.epilogue == ""
 
+    def test_epilogue_draws_exactly_once(self, monkeypatch):
+        """epilogue=True 只从收尾池抽一次；命令入口与工具入口共用这条路径。"""
+        from data.plugins.astrbot_plugin_star_feather.services import (
+            reading as reading_module,
+        )
+
+        calls = []
+        real_choice = reading_module.random.choice
+
+        def counting_choice(seq):
+            if seq is RESULT_EPILOGUE:
+                calls.append(1)
+            return real_choice(seq)
+
+        monkeypatch.setattr(reading_module.random, "choice", counting_choice)
+        self._run(_service(), epilogue=True)
+        assert len(calls) == 1
+
     def test_shuffle_hint_sent_for_multi_card_only(self):
         svc = _service()
         reading, messenger = self._run(svc, question="考研复习计划")
