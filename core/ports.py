@@ -54,7 +54,7 @@ class MemoryEventPublisher(Protocol):
 
     async def publish_event(self, event: Any, *,
                             enrollment_notified: bool = False) -> Any:
-        """返回 (是否投递, 是否需要首次提示)；实现见 adapters/memory_feed.py。"""
+        """返回 adapters.memory_feed.PublishOutcome（是否投递、是否需要提示）。"""
         ...
 
 

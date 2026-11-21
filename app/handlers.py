@@ -4,6 +4,7 @@
 - 命令入口由 Presenter 直发；
 - 工具入口 Presenter 直发结果后，入口返回一个字符串给 Agent Loop 生成收尾。
 """
+import asyncio
 import random
 
 from ..adapters.kv_utils import kv_get, kv_put
@@ -26,6 +27,9 @@ from ..services.reading import ReadingContext
 
 EMPTY_FALLBACK = "（未提具体问题，请作一般运势解读）"
 MEMORY_NOTICE_KEY_PREFIX = "sf_memory_notice:"
+# 同一用户的提示判定必须串行；KV 故障时用进程内集合兜底，避免反复提示。
+_notice_locks: dict[str, asyncio.Lock] = {}
+_notice_sent: set[str] = set()
 
 
 def _exc_detail(exc: BaseException) -> str:
@@ -55,23 +59,28 @@ async def _publish_memory(container, reading, incoming, version: str,
         event = event_from_reading(
             reading, incoming, version, classify_topic(reading.request.question))
         user_key = str(event.user_key)
-        kv = getattr(container, "kv", None)
-        notified = False
-        if kv is not None:
-            value, ok = await kv_get(kv, MEMORY_NOTICE_KEY_PREFIX + user_key,
-                                     False, "羽忆首次提示标记")
-            notified = bool(value) if ok else False
-        publisher = getattr(memory, "publish_event", None)
-        if publisher is None:
-            await memory.publish(event)
-            return
-        outcome = await publisher(event, enrollment_notified=notified)
-        if not outcome.notice_needed or messenger is None:
-            return
-        # 提示发送成功才落账：失败时下一场占卜会重新提示，不能永久消耗一次机会。
-        if await messenger.send_text(MEMORY_ENROLL_NOTICE) and kv is not None:
-            await kv_put(kv, MEMORY_NOTICE_KEY_PREFIX + user_key,
-                         True, "羽忆首次提示标记")
+        lock = _notice_locks.setdefault(user_key, asyncio.Lock())
+        async with lock:
+            kv = getattr(container, "kv", None)
+            notified = user_key in _notice_sent
+            if kv is not None:
+                value, ok = await kv_get(kv, MEMORY_NOTICE_KEY_PREFIX + user_key,
+                                         False, "羽忆首次提示标记")
+                if ok and value:
+                    notified = True
+            publisher = getattr(memory, "publish_event", None)
+            if publisher is None:
+                await memory.publish(event)
+                return
+            outcome = await publisher(event, enrollment_notified=notified)
+            if not outcome.notice_needed or messenger is None:
+                return
+            # 提示发送成功才落账：失败时下一场占卜会重新提示，不能永久消耗一次机会。
+            if await messenger.send_text(MEMORY_ENROLL_NOTICE):
+                _notice_sent.add(user_key)
+                if kv is not None:
+                    await kv_put(kv, MEMORY_NOTICE_KEY_PREFIX + user_key,
+                                 True, "羽忆首次提示标记")
     except Exception as exc:
         log.warning(f"羽忆事件投递失败（不影响占卜）: {_exc_detail(exc)}")
 

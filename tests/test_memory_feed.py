@@ -12,11 +12,13 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+import pytest
 from data.plugins.astrbot_plugin_star_feather.adapters.memory_feed import (
     MemoryFeed,
     PublishOutcome,
 )
 from data.plugins.astrbot_plugin_star_feather.ai.prompts import build_reading_prompt
+from data.plugins.astrbot_plugin_star_feather.app import handlers
 from data.plugins.astrbot_plugin_star_feather.app.handlers import _publish_memory
 from data.plugins.astrbot_plugin_star_feather.core.dto import IncomingEvent
 from data.plugins.astrbot_plugin_star_feather.core.memory_contracts import (
@@ -35,6 +37,15 @@ from data.plugins.astrbot_plugin_star_feather.services.reading import ReadingCon
 def _iso(delta_days: float) -> str:
     return (datetime.now(timezone.utc) + timedelta(days=delta_days)).isoformat().replace(
         "+00:00", "Z")
+
+
+@pytest.fixture(autouse=True)
+def _reset_notice_state():
+    handlers._notice_sent.clear()
+    handlers._notice_locks.clear()
+    yield
+    handlers._notice_sent.clear()
+    handlers._notice_locks.clear()
 
 
 def _write(path, payload) -> None:
@@ -61,8 +72,8 @@ def _lease(root, *, auto_enroll: bool | None = None) -> None:
 
 
 def _auth(root, user_key: str, *, auto: bool = True, topic: bool = False,
-          expires_in: float = 1) -> None:
-    _write(root / "auth" / f"{_hash(user_key)}.json", {
+          expires_in: float = 1, context_valid_after: str | None = None) -> None:
+    payload = {
         "schema": SCHEMA_AUTH,
         "user_key_hash": _hash(user_key),
         "generated_at": _iso(0),
@@ -70,7 +81,10 @@ def _auth(root, user_key: str, *, auto: bool = True, topic: bool = False,
         "auto_history": auto,
         "store_topic": topic,
         "source": "feather_memory/test",
-    })
+    }
+    if context_valid_after is not None:
+        payload["context_valid_after"] = context_valid_after
+    _write(root / "auth" / f"{_hash(user_key)}.json", payload)
 
 
 def _context(root, user_key: str, text: str = "最近关注工作", *, expires_in: float = 1) -> None:
@@ -167,6 +181,32 @@ def test_opted_out_auth_blocks_auto_enroll(tmp_path):
     outcome = asyncio.run(feed.publish_event(_event(), enrollment_notified=True))
     assert outcome.published is False
     assert outcome.notice_needed is False
+
+
+def test_post_write_revocation_removes_event(tmp_path, monkeypatch):
+    feed = MemoryFeed("0.10.1", root=tmp_path)
+    _lease(tmp_path, auto_enroll=True)
+    _auth(tmp_path, "aiocqhttp:1", auto=True, topic=True)
+    real = feed._auth_state
+    calls = {"n": 0}
+
+    def fake(user_key):
+        calls["n"] += 1
+        return real(user_key) if calls["n"] == 1 else ("missing", None)
+
+    monkeypatch.setattr(feed, "_auth_state", fake)
+    outcome = asyncio.run(feed.publish_event(_event(), enrollment_notified=True))
+    assert outcome.published is False
+    assert not list((tmp_path / "events").glob("*.json"))
+
+
+def test_auto_enroll_flip_removes_bootstrap_event(tmp_path, monkeypatch):
+    feed = MemoryFeed("0.10.1", root=tmp_path)
+    _lease(tmp_path, auto_enroll=True)
+    monkeypatch.setattr(feed, "_auto_enroll_now", lambda: False)
+    outcome = asyncio.run(feed.publish_event(_event(), enrollment_notified=True))
+    assert outcome.published is False
+    assert not list((tmp_path / "events").glob("*.json"))
 
 
 def test_publish_rejects_group_and_daily(tmp_path):
@@ -272,6 +312,43 @@ def test_null_context_is_ignored_with_warning(tmp_path, caplog):
     assert any("无法解析" in record.getMessage() for record in caplog.records)
 
 
+def test_context_hidden_after_context_valid_after(tmp_path):
+    feed = MemoryFeed("0.10.1", root=tmp_path)
+    _lease(tmp_path)
+    _context(tmp_path, "aiocqhttp:1")
+
+    # 墓碑：停用 + 失效时间，即使 context 残留也不注入
+    _auth(tmp_path, "aiocqhttp:1", auto=False, topic=False,
+          context_valid_after=_iso(0))
+    assert asyncio.run(feed.load_context("aiocqhttp:1", "private")) is None
+
+    # 清空但仍在记录：同样由失效时间挡住旧 context
+    _auth(tmp_path, "aiocqhttp:1", auto=True, topic=True,
+          context_valid_after=_iso(0))
+    assert asyncio.run(feed.load_context("aiocqhttp:1", "private")) is None
+
+    # 失效时间早于 context 生成时间：继续注入
+    _auth(tmp_path, "aiocqhttp:1", auto=True, topic=True,
+          context_valid_after=_iso(-1))
+    assert asyncio.run(feed.load_context("aiocqhttp:1", "private")) == "最近关注工作"
+
+
+def test_context_still_injected_when_auto_history_off(tmp_path):
+    feed = MemoryFeed("0.10.1", root=tmp_path)
+    _lease(tmp_path)
+    _context(tmp_path, "aiocqhttp:1")
+    _auth(tmp_path, "aiocqhttp:1", auto=False, topic=True)
+    assert asyncio.run(feed.load_context("aiocqhttp:1", "private")) == "最近关注工作"
+
+
+def test_unparseable_context_cutoff_invalidates_auth(tmp_path):
+    feed = MemoryFeed("0.10.1", root=tmp_path)
+    _lease(tmp_path)
+    _context(tmp_path, "aiocqhttp:1")
+    _auth(tmp_path, "aiocqhttp:1", context_valid_after="not-a-time")
+    assert asyncio.run(feed.load_context("aiocqhttp:1", "private")) is None
+
+
 def test_load_context_requires_lease_private_and_fresh(tmp_path):
     feed = MemoryFeed("0.10.1", root=tmp_path)
     _context(tmp_path, "aiocqhttp:1")
@@ -358,6 +435,22 @@ class _NoticeMemory:
         self.calls.append(enrollment_notified)
         return PublishOutcome(published=enrollment_notified,
                               notice_needed=not enrollment_notified)
+
+
+class _SlowNoticeMemory(_NoticeMemory):
+    async def publish_event(self, event, *, enrollment_notified=False):
+        self.calls.append(enrollment_notified)
+        await asyncio.sleep(0.02)
+        return PublishOutcome(published=enrollment_notified,
+                              notice_needed=not enrollment_notified)
+
+
+class _BrokenKV:
+    async def get_kv_data(self, key, default=None):
+        raise RuntimeError("kv down")
+
+    async def put_kv_data(self, key, value):
+        raise RuntimeError("kv down")
 
 
 class _Messenger:
@@ -451,6 +544,41 @@ def test_notice_never_sent_in_group_or_daily():
     asyncio.run(_publish_memory(container, _reading(kind="daily"), _incoming(), "0.10.1", messenger))
     assert messenger.sent == []
     assert memory.calls == []
+
+
+def test_concurrent_notice_is_sent_once():
+    memory = _SlowNoticeMemory()
+    kv = _FakeKV()
+    container = SimpleNamespace(
+        settings=SimpleNamespace(memory=SimpleNamespace(feed_enabled=True)),
+        memory=memory,
+        kv=kv,
+    )
+    messenger = _Messenger()
+
+    async def run():
+        await asyncio.gather(
+            _publish_memory(container, _reading(), _incoming(), "0.10.1", messenger),
+            _publish_memory(container, _reading(), _incoming(), "0.10.1", messenger),
+        )
+
+    asyncio.run(run())
+    assert messenger.sent == [MEMORY_ENROLL_NOTICE]
+    assert memory.calls == [False, True]
+
+
+def test_kv_failure_falls_back_to_process_marker():
+    memory = _NoticeMemory()
+    container = SimpleNamespace(
+        settings=SimpleNamespace(memory=SimpleNamespace(feed_enabled=True)),
+        memory=memory,
+        kv=_BrokenKV(),
+    )
+    messenger = _Messenger()
+    asyncio.run(_publish_memory(container, _reading(), _incoming(), "0.10.1", messenger))
+    asyncio.run(_publish_memory(container, _reading(), _incoming(), "0.10.1", messenger))
+    assert messenger.sent == [MEMORY_ENROLL_NOTICE]
+    assert memory.calls == [False, True]
 
 
 def test_event_from_reading_keeps_fixed_fields():

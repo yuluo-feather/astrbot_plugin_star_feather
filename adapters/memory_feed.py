@@ -144,9 +144,12 @@ class MemoryFeed:
     def _load_context_sync(self, user_key: str) -> str | None:
         if not self._lease_valid():
             return None
-        # 关闭 / 清空会先删授权：即使 context 文件因清理失败而残留，也不得继续注入。
-        if self._read_auth(user_key) is None:
+        # 关闭 / 清空可能写墓碑或失效时间：授权缺失、停用、或 context 早于
+        # auth.context_valid_after 时，即使文件因清理失败而残留也不得注入。
+        auth = self._read_auth(user_key)
+        if auth is None:
             return None
+        cutoff = auth.get("context_valid_after")
         path = self.root / "context" / f"{_user_hash(user_key)}.json"
         if not path.exists():
             return None
@@ -163,6 +166,12 @@ class MemoryFeed:
             return None
         if not context.is_usable(_now()):
             return None
+        if isinstance(cutoff, str) and cutoff.strip():
+            try:
+                if parse_ts(context.generated_at) <= parse_ts(cutoff):
+                    return None
+            except (TypeError, ValueError):
+                return None
         self._maybe_sweep()
         return context.text
 
@@ -199,6 +208,9 @@ class MemoryFeed:
         if not path.exists():
             return "missing", None
         payload = self._read_json(path, AUTH_MAX_BYTES)
+        if payload is None and not path.exists():
+            # exists() 与 read 之间被删除：按「没有文件」处理，下一轮可重新提示。
+            return "missing", None
         if not isinstance(payload, dict) or payload.get("schema") != SCHEMA_AUTH:
             return "invalid", None
         hash_value = payload.get("user_key_hash")
@@ -213,6 +225,14 @@ class MemoryFeed:
         for key in ("generated_at", "expires_at", "source"):
             value = payload.get(key)
             if not isinstance(value, str) or not value.strip():
+                return "invalid", None
+        cutoff = payload.get("context_valid_after")
+        if cutoff is not None and not isinstance(cutoff, str):
+            return "invalid", None
+        if isinstance(cutoff, str) and cutoff.strip():
+            try:
+                parse_ts(cutoff)
+            except (TypeError, ValueError):
                 return "invalid", None
         try:
             parse_ts(str(payload["generated_at"]))
