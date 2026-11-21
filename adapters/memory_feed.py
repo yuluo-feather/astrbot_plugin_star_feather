@@ -12,7 +12,7 @@ import json
 import os
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from ..core.log import log
@@ -96,6 +96,14 @@ class MemoryFeed:
             payload["topic_key"] = ""
         path = self.root / "events" / f"{event.event_id}.json"
         self._write_json(path, payload, EVENT_MAX_BYTES)
+        # 写入期间用户可能撤销授权：以落盘后的最新授权为准，必要时撤回事件。
+        fresh = self._read_auth(str(event.user_key))
+        if fresh is None or not fresh.get("auto_history"):
+            path.unlink(missing_ok=True)
+            return False
+        if not fresh.get("store_topic") and payload.get("topic_key"):
+            payload["topic_key"] = ""
+            self._write_json(path, payload, EVENT_MAX_BYTES)
         self._maybe_sweep()
         return True
 
@@ -189,20 +197,43 @@ class MemoryFeed:
                 continue
         for sub in ("auth", "context"):
             for path in (self.root / sub).glob("*.json"):
+                try:
+                    before = path.stat()
+                except OSError:
+                    continue
                 payload = self._read_json(path, AUTH_MAX_BYTES if sub == "auth" else CONTEXT_MAX_BYTES)
                 if payload is None:
                     continue
                 try:
-                    if _now() >= parse_ts(str(payload.get("expires_at") or "")):
-                        path.unlink(missing_ok=True)
+                    expired = _now() >= parse_ts(str(payload.get("expires_at") or ""))
                 except (TypeError, ValueError):
                     continue
+                if not expired:
+                    continue
+                try:
+                    after = path.stat()
+                except OSError:
+                    continue
+                if (before.st_mtime_ns, before.st_size) != (after.st_mtime_ns, after.st_size):
+                    continue  # 读取后被羽忆替换：不删新文件
+                path.unlink(missing_ok=True)
         lease = self.root / "lease.json"
         try:
-            if now - lease.stat().st_mtime > LEASE_STALE_SECONDS:
+            before = lease.stat()
+            payload = json.loads(lease.read_text(encoding="utf-8"))
+            expires = parse_ts(str(payload.get("expires_at") or ""))
+            after = lease.stat()
+            if ((before.st_mtime_ns, before.st_size) == (after.st_mtime_ns, after.st_size)
+                    and _now() >= expires + timedelta(days=1)):
                 lease.unlink(missing_ok=True)
-        except OSError:
+        except FileNotFoundError:
             pass
+        except (OSError, ValueError, json.JSONDecodeError):
+            try:
+                if now - lease.stat().st_mtime > LEASE_STALE_SECONDS:
+                    lease.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     def _warn_once(self, key: str, message: str) -> None:
         if key in self._warned:

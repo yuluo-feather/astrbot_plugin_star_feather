@@ -36,7 +36,7 @@ class ReadingContext:
     uid: str
     umo: str | None
     messenger: Messenger
-    scope: str = "private"
+    scope: str = "group"
 
 
 @dataclass(frozen=True)
@@ -117,7 +117,8 @@ class ReadingService:
                 persona_eff, budget, today=prepared.today)
         else:
             memory_text = None
-            if (ctx.scope == "private"
+            if (prepared.request.kind != KIND_DAILY
+                    and ctx.scope == "private"
                     and self.settings.memory.context_enabled
                     and self.memory_reader is not None):
                 memory_text = await self.memory_reader.load_context(
@@ -170,6 +171,7 @@ class ReadingService:
             image=image,
             fail_note=fail_note,
             epilogue=random.choice(RESULT_EPILOGUE) if epilogue else "",
+            spirit_line_present=bool(spirit),
         )
 
     async def interpret(self, umo: str | None, formation: str, positions: list[str],

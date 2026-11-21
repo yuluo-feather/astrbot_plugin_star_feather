@@ -103,7 +103,7 @@ def event_from_reading(reading, incoming, version: str, topic_key: str = "") -> 
         spread=str(reading.formation),
         cards=picks,
         topic_key=topic_key,
-        spirit_line_present=bool(reading.spirit),
+        spirit_line_present=bool(getattr(reading, "spirit_line_present", False)),
     )
 
 
@@ -139,20 +139,38 @@ def parse_context(payload: object) -> MemoryContext | None:
         revision = payload.get("revision")
         if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
             return None
-        generated_at = str(payload.get("generated_at") or "")
-        expires_at = str(payload.get("expires_at") or "")
-        source = str(payload.get("source") or "")
-        scope = str(payload.get("scope") or "")
+        generated_at = payload.get("generated_at")
+        expires_at = payload.get("expires_at")
+        source = payload.get("source")
+        scope = payload.get("scope")
         text = payload.get("text")
         items_raw = payload.get("items")
-        if not isinstance(text, str) or not isinstance(items_raw, list):
+        if not isinstance(generated_at, str) or not generated_at.strip():
             return None
-        items = tuple(
-            {"kind": str(item.get("kind", "")), "text": str(item.get("text", ""))}
-            for item in items_raw if isinstance(item, dict)
-        )
-        if len(items) != len(items_raw):
+        if not isinstance(expires_at, str) or not expires_at.strip():
             return None
-        return MemoryContext(revision, generated_at, expires_at, source, scope, items, text)
-    except Exception:
+        if not isinstance(source, str) or not source.strip():
+            return None
+        if not isinstance(scope, str) or not scope.strip():
+            return None
+        parse_ts(generated_at)
+        parse_ts(expires_at)
+        if scope != "private" or not isinstance(text, str) or not isinstance(items_raw, list):
+            return None
+        if len(items_raw) > CONTEXT_ITEMS_MAX:
+            return None
+        items = []
+        for item in items_raw:
+            if not isinstance(item, dict):
+                return None
+            kind = item.get("kind")
+            item_text = item.get("text")
+            if not isinstance(kind, str) or not kind.strip():
+                return None
+            if not isinstance(item_text, str) or not item_text.strip():
+                return None
+            items.append({"kind": kind, "text": item_text})
+        return MemoryContext(revision, generated_at, expires_at, source, scope,
+                             tuple(items), text)
+    except (TypeError, ValueError):
         return None

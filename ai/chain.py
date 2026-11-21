@@ -475,6 +475,10 @@ class AiInterpreter:
         if self.max_question_len > 0:
             user_input = clip_question(user_input, self.max_question_len)  # 超长压缩（0=不压缩）
         user_input = strip_injection_fragments(user_input)  # 剥除夹带的越狱句式
+        if memory_context:
+            # 记忆也是用户来源的数据：走同一套归一化与剥除，且限长后再进提示词。
+            memory_context = normalize_injection_input(memory_context)
+            memory_context = strip_injection_fragments(memory_context)[:600]
         if not user_input:
             logger.info("问题剥除注入句式后为空，回退本地牌义")
             return None

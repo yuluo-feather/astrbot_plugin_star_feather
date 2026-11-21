@@ -784,6 +784,39 @@ class TestPresenterFallback:
         assert len(messenger.results) == 2
         assert messenger.texts == []  # 没有整段重发
 
+    def test_auxiliary_success_does_not_mask_result_failure(self):
+        """主结果与纯文字兜底都失败时，免责声明成功也不能算结果已送达。"""
+        from data.plugins.astrbot_plugin_star_feather.adapters.deliver import Deliverer
+        from data.plugins.astrbot_plugin_star_feather.adapters.presenter import (
+            Presenter,
+        )
+
+        class TwoResultDeliverer(Deliverer):
+            async def deliver(self, *args, **kwargs):
+                yield ["RESULT"]
+                yield ["DISCLAIMER"]
+
+        class Messenger:
+            def __init__(self):
+                self.results = []
+
+            async def send_result(self, result):
+                self.results.append(result)
+                return len(self.results) > 1  # 只有免责声明成功
+
+            async def send_text(self, text):
+                return False  # 纯文字兜底也失败
+
+            def chain_result(self, chain):
+                return chain
+
+        presenter = Presenter(TwoResultDeliverer(300, ""))
+        messenger = Messenger()
+        assert asyncio.run(presenter.present(
+            self._reading(epilogue="收尾句"), messenger,
+            DeliveryCapabilities(False, "0"))) is False
+        assert len(messenger.results) == 2
+
 
 class TestExceptionDetail:
     def test_exception_group_is_expanded(self):

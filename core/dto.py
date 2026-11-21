@@ -11,7 +11,7 @@ class IncomingEvent:
     conversation_id: str | None
     message_text: str
     platform_name: str
-    conversation_scope: str = "private"
+    conversation_scope: str = "group"
 
     @property
     def conversation_key(self) -> str:

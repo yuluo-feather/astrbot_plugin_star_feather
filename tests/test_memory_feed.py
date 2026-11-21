@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from data.plugins.astrbot_plugin_star_feather.adapters.memory_feed import MemoryFeed
 from data.plugins.astrbot_plugin_star_feather.ai.prompts import build_reading_prompt
 from data.plugins.astrbot_plugin_star_feather.app.handlers import _publish_memory
+from data.plugins.astrbot_plugin_star_feather.core.dto import IncomingEvent
 from data.plugins.astrbot_plugin_star_feather.core.memory_contracts import (
     SCHEMA_AUTH,
     SCHEMA_CONTEXT,
@@ -20,6 +21,7 @@ from data.plugins.astrbot_plugin_star_feather.core.memory_contracts import (
     event_from_reading,
 )
 from data.plugins.astrbot_plugin_star_feather.core.memory_topic import classify_topic
+from data.plugins.astrbot_plugin_star_feather.services.reading import ReadingContext
 
 
 def _iso(delta_days: float) -> str:
@@ -130,6 +132,29 @@ def test_load_context_requires_lease_private_and_fresh(tmp_path):
     assert asyncio.run(feed.load_context("aiocqhttp:1", "private")) is None
 
 
+def test_context_rejects_missing_required_fields(tmp_path):
+    feed = MemoryFeed("0.10.1", root=tmp_path)
+    _lease(tmp_path)
+    path = tmp_path / "context" / f"{_hash('aiocqhttp:1')}.json"
+    _write(path, {
+        "schema": SCHEMA_CONTEXT,
+        "revision": 1,
+        "generated_at": _iso(0),
+        "expires_at": _iso(1),
+        "scope": "private",
+        "items": [{"kind": "recent_topic", "text": "工作"}],
+        "text": "最近关注工作",
+    })
+    assert asyncio.run(feed.load_context("aiocqhttp:1", "private")) is None
+
+
+def test_missing_scope_defaults_to_non_private():
+    incoming = IncomingEvent("u1", "aiocqhttp", None, "", "")
+    assert incoming.conversation_scope == "group"
+    ctx = ReadingContext("u1", None, SimpleNamespace())
+    assert ctx.scope == "group"
+
+
 def test_classifier_only_returns_fixed_enum():
     assert classify_topic("最近工作压力很大") == "工作"
     assert classify_topic("工作和感情都很乱") == ""
@@ -156,12 +181,13 @@ class _FakeMemory:
         return True
 
 
-def _reading(kind="spread", question="工作压力"):
+def _reading(kind="spread", question="工作压力", spirit_line=False):
     return SimpleNamespace(
         request=SimpleNamespace(kind=kind, question=question),
         formation="羽签",
         picks=({"card": {"id": "swords_03"}, "upright": True},),
         spirit="",
+        spirit_line_present=spirit_line,
     )
 
 
@@ -181,6 +207,7 @@ def test_publish_memory_gates_on_flag_scope_and_daily():
     assert memory.events[0].topic_key == "工作"
 
     asyncio.run(_publish_memory(container, _reading(kind="daily"), _incoming(), "0.10.1"))
+    asyncio.run(_publish_memory(container, _reading(kind="help"), _incoming(), "0.10.1"))
     asyncio.run(_publish_memory(container, _reading(), _incoming("group"), "0.10.1"))
     container.settings.memory.feed_enabled = False
     asyncio.run(_publish_memory(container, _reading(), _incoming(), "0.10.1"))
@@ -193,3 +220,4 @@ def test_event_from_reading_keeps_fixed_fields():
     assert event.topic_key == "工作"
     assert event.cards == ({"id": "swords_03", "upright": True},)
     assert event.spirit_line_present is False
+    assert event_from_reading(_reading(spirit_line=True), _incoming(), "0.10.1", "工作").spirit_line_present is True

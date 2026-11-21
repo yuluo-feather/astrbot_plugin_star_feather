@@ -11,7 +11,7 @@ from ..core.intent import build_request
 from ..core.log import log
 from ..core.memory_contracts import event_from_reading
 from ..core.memory_topic import classify_topic
-from ..core.models import KIND_DAILY, KIND_HELP
+from ..core.models import KIND_HELP, KIND_SINGLE, KIND_SPREAD
 from ..core.ports import ResultMessenger
 from ..core.texts import (
     FAIL_NOTE_TOOL,
@@ -38,9 +38,9 @@ async def _publish_memory(container, reading, incoming, version: str) -> None:
         settings = getattr(getattr(container, "settings", None), "memory", None)
         if not getattr(settings, "feed_enabled", False):
             return
-        if getattr(incoming, "conversation_scope", "private") != "private":
+        if getattr(incoming, "conversation_scope", "group") != "private":
             return
-        if reading.request.kind == KIND_DAILY:
+        if reading.request.kind not in (KIND_SPREAD, KIND_SINGLE):
             return
         memory = getattr(container, "memory", None)
         if memory is None:
@@ -78,7 +78,7 @@ async def command_entry(container, incoming: IncomingEvent,
         prepared = await container.reading.prepare(request, uid)
         reading = await container.reading.run(
             prepared, ReadingContext(uid, incoming.conversation_id, messenger,
-                                     getattr(incoming, "conversation_scope", "private")),
+                                     getattr(incoming, "conversation_scope", "group")),
             question=request.question, fail_note=fail_note,
             empty_fallback=empty_fallback, epilogue=True)
         delivered = await container.presenter.present(reading, messenger, caps)
@@ -139,7 +139,7 @@ async def tool_entry(container, incoming: IncomingEvent,
         prepared = await container.reading.prepare(request, uid)
         reading = await container.reading.run(
             prepared, ReadingContext(uid, incoming.conversation_id, messenger,
-                                     getattr(incoming, "conversation_scope", "private")),
+                                     getattr(incoming, "conversation_scope", "group")),
             question=request.question, fail_note=FAIL_NOTE_TOOL, epilogue=False)
         delivered = await container.presenter.present(reading, messenger, caps)
         if delivered:

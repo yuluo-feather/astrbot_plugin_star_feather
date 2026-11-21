@@ -64,3 +64,4 @@ class Reading:
     image: str | None
     fail_note: str = ""
     epilogue: str = ""
+    spirit_line_present: bool = False
