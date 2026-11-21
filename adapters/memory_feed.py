@@ -115,7 +115,10 @@ class MemoryFeed:
         if payload is None:
             return None
         context = parse_context(payload)
-        if context is None or not context.is_usable(_now()):
+        if context is None:
+            self._warn_once(str(path), f"羽忆 context 字段不合法，已忽略: {path.name}")
+            return None
+        if not context.is_usable(_now()):
             return None
         self._maybe_sweep()
         return context.text
@@ -124,8 +127,15 @@ class MemoryFeed:
         payload = self._read_json(self.root / "lease.json", LEASE_MAX_BYTES)
         if not isinstance(payload, dict) or payload.get("schema") != SCHEMA_LEASE:
             return False
+        required = ("instance_id", "started_at", "refreshed_at", "expires_at", "source")
+        for key in required:
+            value = payload.get(key)
+            if not isinstance(value, str) or not value.strip():
+                return False
         try:
-            return _now() < parse_ts(str(payload.get("expires_at") or ""))
+            parse_ts(str(payload["started_at"]))
+            parse_ts(str(payload["refreshed_at"]))
+            return _now() < parse_ts(str(payload["expires_at"]))
         except (TypeError, ValueError):
             return False
 
@@ -134,14 +144,22 @@ class MemoryFeed:
         payload = self._read_json(path, AUTH_MAX_BYTES)
         if not isinstance(payload, dict) or payload.get("schema") != SCHEMA_AUTH:
             return None
-        if str(payload.get("user_key_hash") or "") != _user_hash(user_key):
+        hash_value = payload.get("user_key_hash")
+        if not isinstance(hash_value, str) or not hash_value.strip():
+            return None
+        if hash_value != _user_hash(user_key):
             return None
         if not isinstance(payload.get("auto_history"), bool):
             return None
         if not isinstance(payload.get("store_topic"), bool):
             return None
+        for key in ("generated_at", "expires_at", "source"):
+            value = payload.get(key)
+            if not isinstance(value, str) or not value.strip():
+                return None
         try:
-            if _now() >= parse_ts(str(payload.get("expires_at") or "")):
+            parse_ts(str(payload["generated_at"]))
+            if _now() >= parse_ts(str(payload["expires_at"])):
                 return None
         except (TypeError, ValueError):
             return None
