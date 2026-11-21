@@ -119,8 +119,9 @@ class StarFeatherPlugin(Star):
 
         发送约定：内容一律 event.send 直发，固定收尾句也由插件直发；结尾 yield
         一个字符串给 Agent Loop，只用于生成你自己的补充回复（不要重复收尾句）。
-        不能 yield MessageEventResult 或 None —— 否则 runner 判定无返回值并 DONE，respond
-        空消息跳过，收口钩子不触发、群聊防并发门闩死锁。
+        不能 yield MessageEventResult 或 None —— 否则 runner 判定无返回值并 DONE。
+        最终回复为空时 respond 会跳过、不触发 after_message_sent；框架会话锁是
+        async with，会正常释放，不存在群聊门闩死锁（2026-11-22 核对框架源码）。
 
         Args:
             formation(string): 牌阵名，只能是这四个之一：羽签（单张问询）、羽时三刻（时间之流）、
