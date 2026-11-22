@@ -1746,6 +1746,7 @@ class TestLegacyCleanupBookkeeping:
         )
 
         df = self._daily()
+        assert _LEGACY_CLEANED_MAX == 4096
 
         async def fill():
             for index in range(_LEGACY_CLEANED_MAX + 5):

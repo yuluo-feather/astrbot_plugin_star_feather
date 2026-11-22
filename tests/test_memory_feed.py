@@ -592,6 +592,7 @@ def test_event_from_reading_keeps_fixed_fields():
 
 
 def test_notice_sent_cache_is_bounded():
+    assert handlers._NOTICE_SENT_MAX == 4096
     for index in range(handlers._NOTICE_SENT_MAX + 5):
         handlers._remember_notice(f"user-{index}")
     assert len(handlers._notice_sent) == handlers._NOTICE_SENT_MAX
@@ -606,6 +607,25 @@ def test_notice_sent_cache_keeps_recent_hits():
     handlers._remember_notice("new-user")
     assert "user-0" in handlers._notice_sent
     assert "user-1" not in handlers._notice_sent
+
+
+def test_notice_cache_hit_in_publish_moves_user_to_the_end():
+    """_publish_memory 的命中分支也要 move；否则活跃用户会被新用户挤出。"""
+    handlers._remember_notice("aiocqhttp:1")  # 放成最旧
+    for index in range(handlers._NOTICE_SENT_MAX - 1):
+        handlers._remember_notice(f"user-{index}")
+    assert len(handlers._notice_sent) == handlers._NOTICE_SENT_MAX
+
+    container = SimpleNamespace(
+        settings=SimpleNamespace(memory=SimpleNamespace(feed_enabled=True)),
+        memory=_NoticeMemory(),
+        kv=_BrokenKV(),
+    )
+    asyncio.run(_publish_memory(container, _reading(), _incoming(), "0.10.1"))
+
+    handlers._remember_notice("new-user")  # 未移动的话这里会把最旧的 aiocqhttp:1 挤掉
+    assert "aiocqhttp:1" in handlers._notice_sent
+    assert len(handlers._notice_sent) == handlers._NOTICE_SENT_MAX
 
 
 def test_notice_lock_is_released_after_use():
