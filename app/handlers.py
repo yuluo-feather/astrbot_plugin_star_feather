@@ -5,6 +5,8 @@
 - 工具入口 Presenter 直发结果后，入口返回一个字符串给 Agent Loop 生成收尾。
 """
 import asyncio
+import weakref
+from collections import OrderedDict
 
 from ..adapters.kv_utils import kv_get, kv_put
 from ..core.dto import DeliveryCapabilities, IncomingEvent
@@ -26,9 +28,18 @@ from ..services.reading import ReadingContext
 
 EMPTY_FALLBACK = "（未提具体问题，请作一般运势解读）"
 MEMORY_NOTICE_KEY_PREFIX = "sf_memory_notice:"
-# 同一用户的提示判定必须串行；KV 故障时用进程内集合兜底，避免反复提示。
-_notice_locks: dict[str, asyncio.Lock] = {}
-_notice_sent: set[str] = set()
+_NOTICE_SENT_MAX = 4096
+# 同一用户的提示判定必须串行；KV 故障时用进程内缓存兜底，避免反复提示。
+# 锁只在使用期间被强引用；提示缓存按 LRU 淘汰，避免随用户数无限增长。
+_notice_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
+_notice_sent: OrderedDict[str, None] = OrderedDict()
+
+
+def _remember_notice(user_key: str) -> None:
+    _notice_sent[user_key] = None
+    _notice_sent.move_to_end(user_key)
+    while len(_notice_sent) > _NOTICE_SENT_MAX:
+        _notice_sent.popitem(last=False)
 
 
 def _exc_detail(exc: BaseException) -> str:
@@ -62,6 +73,8 @@ async def _publish_memory(container, reading, incoming, version: str,
         async with lock:
             kv = getattr(container, "kv", None)
             notified = user_key in _notice_sent
+            if notified:
+                _notice_sent.move_to_end(user_key)
             if kv is not None:
                 value, ok = await kv_get(kv, MEMORY_NOTICE_KEY_PREFIX + user_key,
                                          False, "羽忆首次提示标记")
@@ -76,7 +89,7 @@ async def _publish_memory(container, reading, incoming, version: str,
                 return
             # 提示发送成功才落账：失败时下一场占卜会重新提示，不能永久消耗一次机会。
             if await messenger.send_text(MEMORY_ENROLL_NOTICE):
-                _notice_sent.add(user_key)
+                _remember_notice(user_key)
                 if kv is not None:
                     await kv_put(kv, MEMORY_NOTICE_KEY_PREFIX + user_key,
                                  True, "羽忆首次提示标记")

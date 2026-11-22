@@ -107,10 +107,6 @@ class ReadingService:
         budget = self.interpreter.new_budget()
 
         # ai.spirit_line=false：整段不生成、不发送，连池内签文也不取（省一次 AI 调用与一条前置行）。
-        spirit_call = (self.daily.spirit_cached(ctx.umo, prepared.uid, picks, topic,
-                                                persona_eff, budget,
-                                                today=prepared.today)
-                       if picks and self.settings.ai.spirit_line else None)
         if prepared.is_daily and prepared.uid:
             interp_call = self.daily.interp_cached(
                 ctx.umo, prepared.uid, prepared.formation, positions, picks, clean,
@@ -127,6 +123,12 @@ class ReadingService:
                 ctx.umo, prepared.formation, positions, picks,
                 clean or empty_fallback, persona_eff, budget,
                 memory_context=memory_text)
+
+        # 上下文读取之后再创建牌灵协程：读取期间取消/异常不会留下未 await 的协程。
+        spirit_call = (self.daily.spirit_cached(ctx.umo, prepared.uid, picks, topic,
+                                                persona_eff, budget,
+                                                today=prepared.today)
+                       if picks and self.settings.ai.spirit_line else None)
 
         if spirit_call is None:
             spirit, interpretation = "", await interp_call

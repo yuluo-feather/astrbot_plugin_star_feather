@@ -3,6 +3,7 @@
 这些用例只碰临时目录，不启动 AstrBot；羽忆插件不存在时核心行为必须保持不变。
 """
 import asyncio
+import gc
 import hashlib
 import json
 import logging
@@ -588,3 +589,33 @@ def test_event_from_reading_keeps_fixed_fields():
     assert event.cards == ({"id": "swords_03", "upright": True},)
     assert event.spirit_line_present is False
     assert event_from_reading(_reading(spirit_line=True), _incoming(), "0.10.1", "工作").spirit_line_present is True
+
+
+def test_notice_sent_cache_is_bounded():
+    for index in range(handlers._NOTICE_SENT_MAX + 5):
+        handlers._remember_notice(f"user-{index}")
+    assert len(handlers._notice_sent) == handlers._NOTICE_SENT_MAX
+    assert "user-0" not in handlers._notice_sent
+    assert f"user-{handlers._NOTICE_SENT_MAX + 4}" in handlers._notice_sent
+
+
+def test_notice_sent_cache_keeps_recent_hits():
+    for index in range(handlers._NOTICE_SENT_MAX):
+        handlers._remember_notice(f"user-{index}")
+    handlers._remember_notice("user-0")  # 命中也要移动到队尾
+    handlers._remember_notice("new-user")
+    assert "user-0" in handlers._notice_sent
+    assert "user-1" not in handlers._notice_sent
+
+
+def test_notice_lock_is_released_after_use():
+    async def use():
+        first = handlers._notice_locks.setdefault("user-1", asyncio.Lock())
+        second = handlers._notice_locks.setdefault("user-1", asyncio.Lock())
+        assert first is second, "同一用户并发时必须拿到同一把锁"
+        async with first:
+            pass
+
+    asyncio.run(use())
+    gc.collect()
+    assert "user-1" not in handlers._notice_locks

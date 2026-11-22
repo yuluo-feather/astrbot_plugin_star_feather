@@ -1720,3 +1720,57 @@ class TestDailyUserIndex:
         df = self._df(kv)
         asyncio.run(df.pick_cached("u1", "20260828"))
         assert kv["sf_daily_index"] == {"date": "20260829", "uids": ["u9"]}
+
+
+class _LegacyDeleteKV:
+    """只记录删除调用的 KV 桩；旧键不存在也不报错，与真实 KV 的形状一致。"""
+
+    def __init__(self):
+        self.deleted = []
+
+    async def delete_kv_data(self, key):
+        self.deleted.append(key)
+
+
+class TestLegacyCleanupBookkeeping:
+    """旧版 sf_spirit_* 键的「只删一次」记账必须有界，且活跃用户不被挤出。"""
+
+    @staticmethod
+    def _daily():
+        from data.plugins.astrbot_plugin_star_feather.services.daily import DailyFortune
+        return DailyFortune(_LegacyDeleteKV())
+
+    def test_cleanup_cache_is_bounded(self):
+        from data.plugins.astrbot_plugin_star_feather.services.daily import (
+            _LEGACY_CLEANED_MAX,
+        )
+
+        df = self._daily()
+
+        async def fill():
+            for index in range(_LEGACY_CLEANED_MAX + 5):
+                await df._cleanup_legacy_spirit(f"u{index}")
+
+        asyncio.run(fill())
+        assert len(df._legacy_cleaned) == _LEGACY_CLEANED_MAX
+        assert "u0" not in df._legacy_cleaned
+
+    def test_recent_hits_survive_and_evicted_users_are_deleted_again(self):
+        from data.plugins.astrbot_plugin_star_feather.services.daily import (
+            _LEGACY_CLEANED_MAX,
+        )
+
+        df = self._daily()
+
+        async def run():
+            for index in range(_LEGACY_CLEANED_MAX):
+                await df._cleanup_legacy_spirit(f"u{index}")
+            await df._cleanup_legacy_spirit("u0")       # 命中：移动到队尾
+            await df._cleanup_legacy_spirit("new-user")  # 淘汰最旧的 u1
+            assert "u0" in df._legacy_cleaned
+            assert "u1" not in df._legacy_cleaned
+            before = df.kv_store.deleted.count("sf_spirit_u1")
+            await df._cleanup_legacy_spirit("u1")        # 淘汰后重删：幂等
+            assert df.kv_store.deleted.count("sf_spirit_u1") == before + 1
+
+        asyncio.run(run())

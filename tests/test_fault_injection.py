@@ -838,3 +838,71 @@ class TestCleanupFuseNeverCarriesTheReading:
 
         msgs = _run(call_it())
         assert not [m for m in msgs if "never awaited" in m], msgs
+
+
+# ================= ⑦ 羽忆上下文读取失败：牌灵协程不应在它之前被创建 =================
+class TestReadingContextFailureCleanup:
+    """load_context 抛异常时，牌灵协程不应已经被创建。
+
+    旧顺序是先建 spirit_call 再 await load_context；协程从未 await，取消/异常时
+    只剩 "never awaited" 告警。桩必须是同步函数，在调用瞬间计数——写成 async def
+    再在函数体里打点只能证明「被 await 过」，证明不了「被创建过」。
+    """
+
+    def test_context_failure_does_not_create_spirit_coroutine(self):
+        from data.plugins.astrbot_plugin_star_feather.adapters.clock import Clock
+        from data.plugins.astrbot_plugin_star_feather.core.intent import build_request
+        from data.plugins.astrbot_plugin_star_feather.services.reading import (
+            ReadingContext,
+            ReadingService,
+        )
+
+        created = []
+
+        class Daily:
+            async def pick_cached(self, uid, today=None):
+                return None
+
+            def spirit_cached(self, *args, **kwargs):
+                created.append("spirit")
+
+                async def _coro():
+                    return "牌灵的话"
+
+                return _coro()
+
+            async def interp_cached(self, *args, **kwargs):
+                return "DAILY"
+
+        class Interp:
+            def new_budget(self):
+                return None
+
+            async def interpret(self, *args, **kwargs):
+                return "解读"
+
+        class Reader:
+            async def load_context(self, uid, scope):
+                raise RuntimeError("context load failed")
+
+        class Renderer:
+            async def card(self, *args, **kwargs):
+                return None
+
+            async def daily_card(self, *args, **kwargs):
+                return None
+
+        class Messenger:
+            async def send_text(self, text):
+                return True
+
+        settings = _plain_settings(ai={"spirit_line": True},
+                                   memory={"context_enabled": True})
+        svc = ReadingService(settings=settings, clock=Clock(), daily=Daily(),
+                             interpreter=Interp(), renderer=Renderer(),
+                             memory_reader=Reader())
+        prepared = asyncio.run(svc.prepare(build_request("auto", "问感情"), "u1"))
+        ctx = ReadingContext("u1", "umo", Messenger(), scope="private")
+        with pytest.raises(RuntimeError, match="context load failed"):
+            asyncio.run(svc.run(prepared, ctx, question="问感情"))
+        assert created == []

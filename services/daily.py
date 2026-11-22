@@ -15,6 +15,7 @@ import hashlib
 import random
 import threading
 import weakref
+from collections import OrderedDict
 
 from ..adapters.clock import Clock
 from ..adapters.kv_utils import kv_delete, kv_get, kv_put
@@ -64,6 +65,9 @@ def _shared_kv_lock() -> asyncio.Lock:
 
 # 提示词版本合成一个指纹：读数或牌灵提示词任一改版，当天缓存都失效。
 _PROMPT_V = f"{READING_PROMPT_V}/{SPIRIT_PROMPT_V}"
+
+# 旧版 sf_spirit_* 键的清理记账上限：LRU 淘汰后重删是幂等的，避免集合随用户数无限增长。
+_LEGACY_CLEANED_MAX = 4096
 
 # 今日固定牌运的意图判定与主题分桶已收进 core/intent.py：
 # 本文件只管确定性抽牌与缓存，norm_topic 从那边导入，词表只有一份。
@@ -146,8 +150,9 @@ class DailyFortune:
         self.interpreter = interpreter
         self.ai_enabled = ai_enabled
         self.structure_check = structure_check
-        # 旧版 sf_spirit_* 键只删一次：合并成单键后它们不会再被读，但会永久占着
-        self._legacy_cleaned: set[str] = set()
+        # 旧版 sf_spirit_* 键只删一次：合并成单键后它们不会再被读，但会永久占着。
+        # 有界 LRU：活跃用户保留，淘汰后重删幂等，不随用户数无限增长。
+        self._legacy_cleaned: OrderedDict[str, None] = OrderedDict()
         # 本进程今天已登记进日索引的用户：跨天清空，避免 (日期, 用户) 永久累积
         self._indexed: set[str] = set()
         self._indexed_day: str = ""
@@ -247,10 +252,16 @@ class DailyFortune:
 
         先记账再删会让一次瞬时故障变成「永远不再尝试」；失败时下次调用再试即可。
         """
-        if not uid or uid in self._legacy_cleaned:
+        if not uid:
+            return
+        if uid in self._legacy_cleaned:
+            self._legacy_cleaned.move_to_end(uid)
             return
         if await kv_delete(self.kv_store, f"sf_spirit_{uid}", "旧牌灵缓存"):
-            self._legacy_cleaned.add(uid)
+            self._legacy_cleaned[uid] = None
+            self._legacy_cleaned.move_to_end(uid)
+            while len(self._legacy_cleaned) > _LEGACY_CLEANED_MAX:
+                self._legacy_cleaned.popitem(last=False)
 
     async def pick_cached(self, uid: str, today: str | None = None) -> tuple | None:
         """今日固定抽牌：一个用户一条记录，按日期判失效。

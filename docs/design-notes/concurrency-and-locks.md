@@ -49,6 +49,7 @@ AstrBot 的插件 KV（`PluginKVStoreMixin`）只有 `get_kv_data` / `put_kv_dat
 | `LimitGate` | 实例级 `asyncio.Lock` | 热重载重叠、多进程 | 会话节流与每日计数的「读-判-写」可能各读旧值后重复放行，计数偏差一次 |
 | `DailyFortune` | 按事件循环的模块级锁，保护单键 `DailyRecord` 的读—合并—写 | 热重载重叠、多进程 | 两代实例读到同一份记录、各自写回不同字段；后写者可能覆盖先写者刚写入的 `interps` / `spirit_line` / `spirit_sign` / `spirit_persona` 或上下文指纹，导致部分 AI 解读与牌灵话丢失并重新生成 |
 | `SingleFlight` | 模块级生成去重 | 热重载重叠、多进程 | 同一主题/牌灵被生成两次，白花一次 AI 调用 |
+| `handlers` 首次提示 | 模块级 `_notice_locks`（弱引用表）+ `_notice_sent`（有界 LRU，4096） | 热重载重叠、多进程 | 同一用户可能短时间收到两条登记提示；不写授权、不写事件、不影响牌面 |
 | `Renderer` | 实例级 `asyncio.Semaphore(2)` | —— | 只是渲染资源上限，与 KV 原子性无关；并发上限在跨代时也只是各自算各自的 |
 | `AiInterpreter` | 按事件循环 + Provider 的信号量 | —— | 只是 Provider 并发上限，不是 KV 锁；不应为「锁生命周期统一」迁到存储层 |
 
@@ -56,6 +57,7 @@ AstrBot 的插件 KV（`PluginKVStoreMixin`）只有 `get_kv_data` / `put_kv_dat
 
 - 这不是单实例正常运行下的确定性缺陷，只在热重载重叠或多实例共享同一份 KV 时出现。
 - 每日牌面由 `_daily_pick` 的确定性种子决定，不受上述窗口影响；风险集中在**缓存字段**与**限流计数**。
+- 羽忆首次提示的 `_notice_sent` 是有界 LRU：淘汰后若 KV 恰好读失败，同一用户可能多收一次提示；`_notice_locks` 的弱引用表同样只覆盖单进程、单代模块。提示重复不写授权、不写事件、不影响牌面，按可接受边界处理。
 - 缓存字段被覆盖的后果是可恢复的：下一次读取按未命中处理，重新生成解读或牌灵话，
   代价是一次 AI 调用，不会给出错误牌面。
 
@@ -69,6 +71,7 @@ AstrBot 的插件 KV（`PluginKVStoreMixin`）只有 `get_kv_data` / `put_kv_dat
 
 - 不把 `Renderer` 与 `AiInterpreter` 的信号量迁移到存储层——它们控制的是 CPU/内存与上游 Provider 压力，不是 KV 原子性。
 - 不为热重载窗口引入新锁或代际协调机制。
+- 不为羽忆首次提示的跨代重复加锁 / 代际协调：最坏只是两条提示，不写授权与事件。
 - 不引入通用锁框架；多进程方案另立任务。
 
 ## 出处
