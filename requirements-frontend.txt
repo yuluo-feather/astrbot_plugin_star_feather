@@ -7,4 +7,4 @@
 #
 # 钉的依据：CI「前端 smoke」一格用这一版 + Playwright 自带 chromium 实跑四条 smoke；
 # 本机脚本有 Edge 时用 Edge、缺失时退回 chromium，本机版本不在这里追平。
-playwright==1.65.1
+playwright==1.65.2
